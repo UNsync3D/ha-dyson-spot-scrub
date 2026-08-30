@@ -1,0 +1,16 @@
+# Development / research files
+auth_research.md
+conversation.md
+dump_manifest.py
+test_auth_flow.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Editor
+.vscode/
+.idea/
+*.swp

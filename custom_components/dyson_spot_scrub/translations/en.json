@@ -1,0 +1,30 @@
+{
+  "config": {
+    "step": {
+      "token": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "Enter a Dyson bearer token (captured via a proxy tool such as Proxyman, or copied from another integration), your robot's serial number, and your Dyson account country code.",
+        "data": {
+          "token":   "Bearer token",
+          "serial":  "Robot serial number",
+          "country": "Country code (e.g. AU, GB, US)"
+        }
+      },
+      "select_robot": {
+        "title": "Select Robot",
+        "description": "Multiple robots found. Choose one to add.",
+        "data": {
+          "serial": "Robot"
+        }
+      }
+    },
+    "abort": {
+      "no_robots_found": "No robot vacuums were found in your Dyson account.",
+      "cannot_connect":  "Could not connect to Dyson's cloud API.",
+      "already_configured": "This device is already configured."
+    },
+    "error": {
+      "cannot_connect":  "Could not reach Dyson's servers. Check your internet connection."
+    }
+  }
+}
