@@ -1,6 +1,29 @@
 {
   "config": {
     "step": {
+      "user": {
+        "title": "Dyson Spot+Scrub AI",
+        "menu_options": {
+          "login":  "Log in with Dyson account",
+          "token":  "Paste a bearer token directly"
+        }
+      },
+      "login": {
+        "title": "Dyson Account Login",
+        "description": "Enter your Dyson account credentials. An OTP code will be emailed to you if your account requires it.",
+        "data": {
+          "email":    "Email address",
+          "password": "Password",
+          "country":  "Country code (e.g. AU, GB, US)"
+        }
+      },
+      "otp": {
+        "title": "One-Time Passcode",
+        "description": "A 6-digit code was sent to **{email}**. Enter it below.",
+        "data": {
+          "otp_code": "OTP code"
+        }
+      },
       "token": {
         "title": "Dyson Spot+Scrub AI",
         "description": "Enter a Dyson bearer token (captured via a proxy tool such as Proxyman, or copied from another integration), your robot's serial number, and your Dyson account country code.",
@@ -19,12 +42,15 @@
       }
     },
     "abort": {
-      "no_robots_found": "No robot vacuums were found in your Dyson account.",
-      "cannot_connect":  "Could not connect to Dyson's cloud API.",
+      "no_robots_found":    "No robot vacuums were found in your Dyson account.",
+      "cannot_connect":     "Could not connect to Dyson's cloud API.",
       "already_configured": "This device is already configured."
     },
     "error": {
-      "cannot_connect":  "Could not reach Dyson's servers. Check your internet connection."
+      "cannot_connect":  "Could not reach Dyson's servers. Check your internet connection.",
+      "invalid_auth":    "Invalid email or password. Please check your credentials.",
+      "invalid_otp":     "The OTP code was incorrect or has expired. Please try again.",
+      "serial_not_found": "That serial number was not found in your Dyson account."
     }
   }
 }

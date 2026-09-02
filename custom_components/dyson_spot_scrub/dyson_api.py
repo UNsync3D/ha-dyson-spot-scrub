@@ -109,7 +109,7 @@ async def initiate_v3_auth(email: str, password: str, country: str = "GB") -> st
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.post(
             url,
-            json={"email": email, "password": password, "language": "EN"},
+            json={"email": email, "password": password},
             headers=_HEADERS,
         ) as resp:
             data = await _json(resp)
