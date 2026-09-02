@@ -96,7 +96,10 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Show menu: log in with account or paste a bearer token."""
         return self.async_show_menu(
             step_id="user",
-            menu_options=["login", "token"],
+            menu_options={
+                "login": "Log in with Dyson account (email + OTP)",
+                "token": "Enter a bearer token directly",
+            },
         )
 
     # ── Step 1a: email + password login ───────────────────────────────────────
