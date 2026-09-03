@@ -93,14 +93,23 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Show menu: log in with account or paste a bearer token."""
-        return self.async_show_menu(
-            step_id="user",
-            menu_options={
-                "login": "Log in with Dyson account (email + OTP)",
-                "token": "Enter a bearer token directly",
-            },
-        )
+        """Route directly to token entry.
+
+        NOTE: Email/password login is temporarily disabled — Dyson's auth API
+        is currently rejecting requests, and repeated attempts can temporarily
+        block the user's account. Re-enable the menu below once the API issue
+        is resolved.
+        """
+        return await self.async_step_token()
+
+        # Disabled until Dyson auth API is stable:
+        # return self.async_show_menu(
+        #     step_id="user",
+        #     menu_options={
+        #         "login": "Log in with Dyson account (email + OTP)",
+        #         "token": "Enter a bearer token directly",
+        #     },
+        # )
 
     # ── Step 1a: email + password login ───────────────────────────────────────
 
@@ -216,9 +225,16 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if match:
                     return self._create_entry(match)
                 errors["base"] = "serial_not_found"
-            except DysonApiError as exc:
-                _LOGGER.warning("Manifest fetch failed (%s) — using serial directly", exc)
-                # Token may be valid but manifest unreachable; build minimal entry.
+            except Exception as exc:
+                # Manifest fetch failed (API error, 401, timeout, etc.).
+                # The token + serial the user supplied may still be valid —
+                # Dyson's cloud API is occasionally unreachable or returns 401
+                # for older tokens even when IoT access still works.  Fall back
+                # to a minimal synthetic entry so the user isn't stuck.
+                _LOGGER.warning(
+                    "Manifest fetch failed (%s) — creating minimal entry from serial",
+                    exc,
+                )
                 guessed_prefix = "RB05" if serial.startswith("7VD") else "NROB"
                 self._async_abort_entries_match({CONF_SERIAL: serial})
                 return self.async_create_entry(
@@ -232,9 +248,6 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         CONF_COUNTRY:      country,
                     },
                 )
-            except Exception as exc:
-                _LOGGER.exception("Token validation error: %s", exc)
-                errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="token",
