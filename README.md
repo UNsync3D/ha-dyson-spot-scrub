@@ -1,3 +1,9 @@
+Dyson's login API is currently returning errors for some accounts when using the email/password flow. If you see "Unable to authenticate user" during setup, do not retry repeatedly — repeated attempts will temporarily block your account from the API.
+
+Use the "Paste existing token" path instead. To get your token, follow the curl instructions in Getting a bearer token manually below. The token is long-lived so you only need to do this once.
+
+We are investigating and will restore the email/password flow as soon as the cause is identified.
+
 # Dyson Spot+Scrub AI — Home Assistant Integration
 
 A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum. Controls the robot locally over MQTT — no cloud polling during normal operation, so commands are fast and reliable.
