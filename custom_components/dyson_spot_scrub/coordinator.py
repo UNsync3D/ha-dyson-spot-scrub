@@ -45,6 +45,9 @@ class DysonCoordinator:
         # Currently selected cleaning mode (persisted between restarts via HA storage)
         self.current_mode: str = DEFAULT_MODE
 
+        # Rooms whose switch entity is toggled ON (for sequential clean)
+        self.enabled_rooms: set[str] = set()
+
         # Reconnect state
         self._shutting_down: bool = False
         self._reconnect_task: asyncio.Task | None = None
@@ -198,3 +201,54 @@ class DysonCoordinator:
                 listener.async_write_ha_state()
             except Exception:
                 _LOGGER.exception("[%s] Error notifying listener", self.serial)
+
+    # ── Sequential multi-room cleaning ────────────────────────────────────────
+
+    async def async_clean_rooms_sequential(self, room_names: list[str]) -> None:
+        """Clean a list of rooms one at a time, waiting for docking between each."""
+        if not room_names:
+            return
+        _LOGGER.info("[%s] Sequential clean starting — rooms: %s", self.serial, room_names)
+        for room in room_names:
+            if not self.mqtt or not self.mqtt.connected:
+                _LOGGER.warning("[%s] MQTT not connected — aborting sequential clean", self.serial)
+                return
+            _LOGGER.info("[%s] Sequential clean → '%s'", self.serial, room)
+            from .const import MODE_TO_INT
+            mode_int = MODE_TO_INT.get(self.current_mode, 0)
+            await self.hass.async_add_executor_job(self.mqtt.start_room, room, mode_int)
+            await self._async_wait_for_clean_complete()
+        _LOGGER.info("[%s] Sequential clean finished all rooms", self.serial)
+
+    async def _async_wait_for_clean_complete(self, timeout: float = 3600.0) -> None:
+        """Wait until the robot returns to dock (or times out)."""
+        from .dyson_mqtt import is_docked, is_charging, is_any_cleaning
+
+        loop = asyncio.get_event_loop()
+        done_event: asyncio.Event = asyncio.Event()
+        cleaning_started = False
+
+        def _check() -> None:
+            nonlocal cleaning_started
+            if not self.mqtt:
+                done_event.set()
+                return
+            state = self.mqtt.state
+            if is_any_cleaning(state):
+                cleaning_started = True
+            elif cleaning_started and (is_docked(state) or is_charging(state)):
+                done_event.set()
+
+        # Hook into state changes while waiting
+        class _Watcher:
+            def async_write_ha_state(inner_self) -> None:
+                loop.call_soon_threadsafe(_check)
+
+        watcher = _Watcher()
+        self.async_add_listener(watcher)
+        try:
+            await asyncio.wait_for(done_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            _LOGGER.warning("[%s] Timed out waiting for robot to dock", self.serial)
+        finally:
+            self.async_remove_listener(watcher)

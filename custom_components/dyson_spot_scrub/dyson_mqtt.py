@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import random
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -109,7 +110,14 @@ def has_fault(state: dict) -> bool:
     faults = state.get("activeFaults")
     if not isinstance(faults, list) or not faults:
         return False
-    return any(f.get("status") != "LOG_ONLY" for f in faults)
+    for f in faults:
+        # The field name differs by message type:
+        #   CURRENT-STATE uses "nextActionRequired"
+        #   prop.post / older firmware use "status"
+        severity = f.get("nextActionRequired") or f.get("status")
+        if severity is not None and severity != "LOG_ONLY":
+            return True
+    return False
 
 
 def _now_iso() -> str:
@@ -118,6 +126,30 @@ def _now_iso() -> str:
 
 def _rand_msg_id() -> str:
     return str(random.randint(0, 4294967295))
+
+
+# ── Room name normalisation ───────────────────────────────────────────────────
+
+def _room_display_name(raw_name: Any) -> str:
+    """Normalise a room name from the robot's preference cache.
+
+    The robot stores room names in three formats:
+    - Plain string with wrong case:       "Living room"  → "Living Room"
+    - JSON-encoded object:                '{"type":"dining","name":"Dining"}' → "Dining"
+    - Plain string with trailing digit:   "Kitchen1"     → "Kitchen"
+    """
+    s = str(raw_name) if not isinstance(raw_name, str) else raw_name
+    # Try to parse JSON (handles '{"type":"dining","name":"Dining"}')
+    try:
+        parsed = json.loads(s)
+        if isinstance(parsed, dict):
+            s = parsed.get("name") or parsed.get("type") or s
+    except (json.JSONDecodeError, TypeError):
+        pass
+    # Strip trailing digits ("Kitchen1" → "Kitchen")
+    s = re.sub(r"\d+$", "", s).strip()
+    # Title-case ("Living room" → "Living Room")
+    return s.title()
 
 
 # ── MQTT client ───────────────────────────────────────────────────────────────
@@ -374,6 +406,111 @@ class DysonMqttClient:
         self._publish({"msg": "ABORT", "mode-reason": "RAPP", "time": _now_iso()})
         self._publish_jdm("service.start_recharge", {})
 
+    # ── Room listing ──────────────────────────────────────────────────────────
+
+    @property
+    def room_names(self) -> list[str]:
+        """Normalised display names of every room in the preference cache."""
+        if not (self._cached_preference and self._cached_preference.get("room")):
+            return []
+        return [_room_display_name(r[1]) for r in self._cached_preference["room"]]
+
+    # ── Single-room clean ─────────────────────────────────────────────────────
+
+    def start_room(self, room_name: str, mode: int = 0) -> None:
+        """Start a single-room clean in the given cleaning mode.
+
+        mode: 0=Vacuum only, 1=Vacuum+Mop, 2=Mop only, 3=Vacuum then Mop.
+
+        Sends the same 4-command JDM sequence the Dyson app uses:
+          1. service.set_preference  — 11-element arrays; only the target room
+                                       has index[8]=1 (enabled).
+          2. START                   — cleaningMode "zoneConfigured" with only
+                                       the target room in unorderedZones.
+          3. service.set_cur_map     — confirms the active map.
+          4. service.set_room_clean  — triggers execution.
+
+        room_name is matched case-insensitively against the normalised display
+        names returned by room_names (e.g. "Living Room", "Kitchen", "Dining").
+        """
+        _LOGGER.info("[%s] → START ROOM '%s'", self.serial, room_name)
+        self._cancel_start_retry()
+
+        if not (self._cached_preference and self._cached_preference.get("room")):
+            _LOGGER.warning(
+                "[%s] Room preferences not cached — cannot start room clean for '%s'",
+                self.serial, room_name,
+            )
+            return
+
+        pref   = self._cached_preference
+        map_id = int(self.state.get("persistentMapId", 0))
+        target_key = room_name.strip().lower()
+
+        # Find the target room by normalised display-name (case-insensitive)
+        target_room: list | None = None
+        for room in pref["room"]:
+            if _room_display_name(room[1]).lower() == target_key:
+                target_room = room
+                break
+
+        if target_room is None:
+            available = [_room_display_name(r[1]) for r in pref["room"]]
+            _LOGGER.warning(
+                "[%s] Room '%s' not found. Available rooms: %s",
+                self.serial, room_name, available,
+            )
+            return
+
+        target_id = target_room[0]
+
+        def _pref_entry(room: list, is_target: bool, order: int) -> list:
+            """Build one 11-element preference array from a cached 12-element entry."""
+            return [
+                room[0],                              # [0]  room_id
+                _room_display_name(room[1]),          # [1]  normalised name
+                0,                                    # [2]  cleaning-type → always 0
+                mode,                                 # [3]  cleaning mode (caller-supplied)
+                room[4] if len(room) > 4 else 0,     # [4]  preserve from cache
+                room[5] if len(room) > 5 else 0,     # [5]  preserve from cache
+                0,                                    # [6]
+                0,                                    # [7]
+                1 if is_target else 0,                # [8]  enabled flag
+                0,                                    # [9]
+                order,                                # [10] 1-based clean order
+            ]
+
+        # Target room first (order=1), then all others in cache order
+        pref_entries: list[list] = [_pref_entry(target_room, True, 1)]
+        order = 2
+        for room in pref["room"]:
+            if room[0] == target_id:
+                continue
+            pref_entries.append(_pref_entry(room, False, order))
+            order += 1
+
+        self._publish_jdm("service.set_preference", {
+            "map_id":          map_id,
+            "prefer_type":     1,
+            "room_preference": pref_entries,
+            "uv_switch":       pref.get("uv_switch", []),
+        })
+
+        self._publish({
+            "msg":          "START",
+            "mode-reason":  "RAPP",
+            "cleaningMode": "zoneConfigured",
+            "cleaningProgramme": {
+                "persistentMapId": str(map_id),
+                "unorderedZones":  [str(target_id)],
+            },
+            "time": _now_iso(),
+        })
+
+        self._publish_jdm("service.set_cur_map", {"map_id": map_id})
+        self._publish_jdm("service.set_room_clean",
+                          {"ctrl_value": 1, "clean_type": 0, "room_ids": [target_id]})
+
     # ── paho callbacks ────────────────────────────────────────────────────────
 
     def _on_connect(self, client, userdata, flags, rc) -> None:
@@ -386,22 +523,20 @@ class DysonMqttClient:
         )
         self.connected = True
         self._preferences_fetched = False  # Allow re-fetch on reconnect
-        client.subscribe(self._wildcard_topic, qos=0)
-        # Also subscribe with a wildcard prefix as a safety net.  If the
-        # stored prefix ever diverges from what the robot uses (e.g. after
-        # a firmware update), messages still arrive and _on_message auto-
-        # corrects self._prefix for the current session.
+        # Single wildcard subscription covers every prefix (RB05, NROB, …).
+        # A second subscription on the specific prefix would cause each inbound
+        # message to fire _on_message twice — once per matching subscription.
         client.subscribe(f"+/{self.serial}/#", qos=0)
         self.request_current_state()
-        # Probe for preferences immediately with map_id=0 — catches robots
-        # that don't include persistentMapId in their idle CURRENT-STATE
-        self._publish_raw(self._jdm_command_topic, {
-            "msgId":   _rand_msg_id(),
-            "version": "1.0.1",
-            "method":  "service.get_preference",
-            "params":  {"map_id": 0},
-            "time":    _now_iso(),
-        })
+        # Probe map IDs 0-3 at staggered intervals so rooms populate even
+        # when the robot omits persistentMapId from its idle CURRENT-STATE.
+        # Each probe is skipped if a previous one already succeeded.
+        for _mid in range(4):
+            delay = _mid * 2.5  # 0 s, 2.5 s, 5 s, 7.5 s
+            if delay == 0:
+                self._probe_map_id(0)
+            else:
+                threading.Timer(delay, self._probe_map_id, args=(_mid,)).start()
         if self.on_connected:
             self.on_connected()
 
@@ -454,15 +589,14 @@ class DysonMqttClient:
             # before the user presses Start.
             self.request_current_state()
             self._preferences_fetched = False
-            self._publish_raw(self._jdm_command_topic, {
-                "msgId":   _rand_msg_id(),
-                "version": "1.0.1",
-                "method":  "service.get_preference",
-                "params":  {"map_id": 0},
-                "time":    _now_iso(),
-            })
+            for _mid in range(4):
+                delay = _mid * 2.5
+                if delay == 0:
+                    self._probe_map_id(0)
+                else:
+                    threading.Timer(delay, self._probe_map_id, args=(_mid,)).start()
 
-        _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, str(data)[:300])
+        _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
 
         if topic.endswith("/status/jdm"):
             self._handle_jdm(data)
@@ -478,18 +612,22 @@ class DysonMqttClient:
             self._merge_jdm_props(data["params"])
         elif method == "prop.get" and data.get("data"):
             self._merge_jdm_props(data["data"])
-        elif method == "service.get_preference" and data.get("code") == 0 and data.get("data"):
+        elif method == "service.get_preference" and data.get("data"):
+            # Accept the response regardless of the code field — some firmware
+            # variants omit it or use non-zero codes for partial success.
             pref = data["data"]
             n = len(pref.get("room", []))
             if n == 0:
-                # map_id=0 probe returned nothing — ignore so we don't
-                # blank out a previously valid cache.
+                # Probe returned nothing (wrong map_id or empty map) — skip so
+                # we don't blank out a previously valid cache.
                 _LOGGER.debug("[%s] get_preference: 0 rooms (map probe)", self.serial)
                 return
             first_cache = self._cached_preference is None
             self._cached_preference = pref
             if first_cache:
                 _LOGGER.info("[%s] Room preferences cached (%d room(s))", self.serial, n)
+                # Notify HA entities so the room dropdown populates immediately.
+                self._notify_state_change()
             else:
                 _LOGGER.debug("[%s] Room preferences refreshed (%d room(s))", self.serial, n)
 
@@ -531,6 +669,19 @@ class DysonMqttClient:
             except Exception:
                 _LOGGER.exception("[%s] Error in state callback", self.serial)
 
+    def _probe_map_id(self, map_id: int) -> None:
+        """Send service.get_preference for one map_id — skip if already have rooms."""
+        if self._cached_preference and self._cached_preference.get("room"):
+            return  # Already populated — nothing to do
+        _LOGGER.debug("[%s] Probing map_id=%d for room preferences", self.serial, map_id)
+        self._publish_raw(self._jdm_command_topic, {
+            "msgId":   _rand_msg_id(),
+            "version": "1.0.1",
+            "method":  "service.get_preference",
+            "params":  {"map_id": map_id},
+            "time":    _now_iso(),
+        })
+
     def _fetch_room_preferences(self) -> None:
         map_id = self.state.get("persistentMapId")
         try:
@@ -538,13 +689,7 @@ class DysonMqttClient:
         except (TypeError, ValueError):
             return
         _LOGGER.debug("[%s] Fetching room preferences for map %s", self.serial, map_id_int)
-        self._publish_raw(self._jdm_command_topic, {
-            "msgId":   _rand_msg_id(),
-            "version": "1.0.1",
-            "method":  "service.get_preference",
-            "params":  {"map_id": map_id_int},
-            "time":    _now_iso(),
-        })
+        self._probe_map_id(map_id_int)
 
     # ── Internal publish ──────────────────────────────────────────────────────
 
