@@ -1,9 +1,3 @@
-Dyson's login API is currently returning errors for some accounts when using the email/password flow. If you see "Unable to authenticate user" during setup, do not retry repeatedly — repeated attempts will temporarily block your account from the API.
-
-Use the "Paste existing token" path instead. To get your token, follow the curl instructions in Getting a bearer token manually below. The token is long-lived so you only need to do this once.
-
-We are investigating and will restore the email/password flow as soon as the cause is identified.
-
 # Dyson Spot+Scrub AI — Home Assistant Integration
 
 A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum. Controls the robot locally over MQTT — no cloud polling during normal operation, so commands are fast and reliable.
@@ -112,19 +106,28 @@ Dyson's cloud API may be temporarily unavailable. Wait a few minutes and try aga
 
 ## Getting a bearer token manually
 
-If OTP setup doesn't work for your account, you can capture a token using the included test script. Run it on any machine that has Python 3 and internet access (including your Home Assistant host):
+If the OTP setup flow doesn't work for your account, you can obtain a bearer token using one of the methods below. Once you have it, use the **Paste existing token** path in the HA integration setup.
+
+### Option 1 — test script (recommended)
+
+Run the included script on any machine with Python 3 and internet access (including your Home Assistant host). It walks you through the full OTP flow interactively and prints your token at the end.
+
+> ⚠️ **Important:** Dyson rate-limits authentication attempts. If the script returns `"Unable to authenticate user"`, **stop and wait 24 hours** before trying again — repeated attempts will extend the lockout.
 
 ```bash
-# Install the dependency
+# Install the dependency (once)
 pip3 install aiohttp --break-system-packages
 
-# Run the script
+# Download the script
+curl -O https://raw.githubusercontent.com/UNsync3D/ha-dyson-spot-scrub/main/test_auth_flow.py
+
+# Run it
 python3 test_auth_flow.py
 ```
 
-The script walks you through the full OTP flow interactively and prints your bearer token. Copy that token and use the **Paste existing token** path in the HA integration setup.
+### Option 2 — proxy capture
 
-Alternatively, you can capture the token by routing your phone through a proxy tool (Proxyman, mitmproxy, Charles) while logging in to the Dyson app — the `Authorization: Bearer …` header in any request to `appapi.cp.dyson.com` contains your token.
+Route your phone through a proxy tool (Proxyman, mitmproxy, Charles) while logging in to the Dyson app. The `Authorization: Bearer …` header in any request to `appapi.cp.dyson.com` contains your token.
 
 ---
 
@@ -140,6 +143,7 @@ ln -s $PWD/custom_components/dyson_spot_scrub \
       ~/.homeassistant/custom_components/dyson_spot_scrub
 
 # Test the auth flow standalone (no HA needed)
+# ⚠️ Only attempt once — repeated failures trigger a 24h lockout on your Dyson account
 pip3 install aiohttp --break-system-packages
 python3 test_auth_flow.py
 ```
