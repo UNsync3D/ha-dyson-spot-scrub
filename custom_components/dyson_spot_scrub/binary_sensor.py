@@ -68,6 +68,13 @@ class _DysonBinarySensorBase(BinarySensorEntity):
     async def async_will_remove_from_hass(self) -> None:
         self._coordinator.async_remove_listener(self)
 
+    # ── Availability ─────────────────────────────────────────────────────────
+
+    @property
+    def available(self) -> bool:
+        """True only when the MQTT connection is live."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     @property

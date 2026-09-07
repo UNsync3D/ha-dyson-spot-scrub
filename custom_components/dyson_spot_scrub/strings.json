@@ -3,6 +3,7 @@
     "step": {
       "user": {
         "title": "Dyson Spot+Scrub AI",
+        "description": "**Privacy notice:** This integration connects to Dyson's cloud API to control your robot and access map data. Your account credentials or bearer token are stored in Home Assistant and should be kept out of version control or shared config files — treat them like a password.",
         "menu_options": {
           "login": "Log in with Dyson account (email + OTP)",
           "token": "Enter a bearer token directly"

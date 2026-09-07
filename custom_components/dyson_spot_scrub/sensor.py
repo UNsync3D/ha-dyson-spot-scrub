@@ -66,6 +66,11 @@ class DysonBatterySensor(SensorEntity):
     # ── State ─────────────────────────────────────────────────────────────────
 
     @property
+    def available(self) -> bool:
+        """True only when the MQTT connection is live."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+
+    @property
     def native_value(self) -> int | None:
         if self._coordinator.mqtt:
             return battery_level(self._coordinator.mqtt.state)

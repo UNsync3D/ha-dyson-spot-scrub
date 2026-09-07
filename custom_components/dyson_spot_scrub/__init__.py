@@ -5,7 +5,7 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     DOMAIN,
@@ -35,16 +35,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         verbose=verbose,
     )
 
-    try:
-        await coordinator.async_setup()
-    except Exception as exc:
-        _LOGGER.error("[%s] Failed to set up MQTT connection: %s", serial, exc)
-        raise ConfigEntryNotReady(f"Could not connect to {serial}: {exc}") from exc
+    # async_setup is non-fatal — it logs and retries in the background if the
+    # initial MQTT connection fails.  Entities are always created; they show
+    # as unavailable until MQTT connects.
+    await coordinator.async_setup()
 
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
+    # ── Remove orphaned entities from older versions ───────────────────────────
+    # The "Clean Room" select entity (unique_id: <serial>_room_select) was
+    # removed in v1.2.0 — clean it from the registry so it doesn't show as
+    # "unavailable" on users upgrading from an earlier release.
+    _purge_orphan_entities(hass, entry, serial)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _purge_orphan_entities(hass: HomeAssistant, entry: ConfigEntry, serial: str) -> None:
+    """Remove entity registry entries left behind by older versions."""
+    obsolete_unique_ids = [
+        ("select", f"{serial}_room_select"),   # removed in v1.2.0
+    ]
+    reg = er.async_get(hass)
+    for platform, uid in obsolete_unique_ids:
+        entity_id = reg.async_get_entity_id(platform, DOMAIN, uid)
+        if entity_id:
+            _LOGGER.info("Removing obsolete entity %s", entity_id)
+            reg.async_remove(entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

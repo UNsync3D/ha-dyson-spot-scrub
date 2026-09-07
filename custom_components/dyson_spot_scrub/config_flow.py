@@ -95,14 +95,14 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Route directly to token entry.
 
-        NOTE: Email/password login is temporarily disabled — Dyson's auth API
-        is currently rejecting requests, and repeated attempts can temporarily
-        block the user's account. Re-enable the menu below once the API issue
-        is resolved.
+        NOTE: Email/password login is temporarily disabled — the OTP auth flow
+        has not yet been confirmed working end-to-end. Enabling it prematurely
+        risks rate-limiting users' Dyson accounts. Re-enable the menu below
+        once a successful curl test has been completed.
         """
         return await self.async_step_token()
 
-        # Disabled until Dyson auth API is stable:
+        # Disabled until OTP flow is confirmed working:
         # return self.async_show_menu(
         #     step_id="user",
         #     menu_options={

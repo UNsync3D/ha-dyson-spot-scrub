@@ -8,7 +8,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_SERIAL, CONF_MQTT_PREFIX, DEFAULT_MODE
+from .const import CONF_SERIAL, CONF_MQTT_PREFIX, DEFAULT_MODE, CONF_CACHED_ROOMS
 from .dyson_api import get_iot_credentials
 from .dyson_mqtt import DysonMqttClient
 
@@ -45,6 +45,13 @@ class DysonCoordinator:
         # Currently selected cleaning mode (persisted between restarts via HA storage)
         self.current_mode: str = DEFAULT_MODE
 
+        # Room names from the robot's map preference cache.
+        # Loaded from the config entry on startup so room switch entities can be
+        # created immediately, even before the MQTT connection delivers fresh data.
+        self.cached_room_names: list[str] = list(
+            config_entry.data.get(CONF_CACHED_ROOMS, [])
+        )
+
         # Rooms whose switch entity is toggled ON (for sequential clean)
         self.enabled_rooms: set[str] = set()
 
@@ -56,12 +63,35 @@ class DysonCoordinator:
     # ── Setup / teardown ──────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
-        """Fetch IoT credentials and open the MQTT connection."""
-        _LOGGER.debug("[%s] Fetching IoT credentials", self.serial)
-        iot_creds = await get_iot_credentials(self._token, self.serial)
+        """Fetch IoT credentials and open the MQTT connection.
+
+        On success the robot is immediately reachable and entities update live.
+
+        On failure (network error, transient API blip) the error is logged but
+        NOT re-raised so the config entry still loads and the platform creates
+        all entities.  They show as unavailable until a background reconnect
+        succeeds — exactly the same experience as a WiFi-connected device
+        going offline for a moment.
+        """
         self._shutting_down = False
         self._reconnect_attempt = 0
-        await self._async_connect_with_creds(iot_creds)
+        try:
+            _LOGGER.debug("[%s] Fetching IoT credentials", self.serial)
+            iot_creds = await get_iot_credentials(self._token, self.serial)
+            await self._async_connect_with_creds(iot_creds)
+        except Exception as exc:
+            _LOGGER.warning(
+                "[%s] Initial MQTT connection failed (%s) — "
+                "entities will load in unavailable state; "
+                "reconnect will retry automatically",
+                self.serial, exc,
+            )
+            # Schedule background reconnect so we keep trying without HA's
+            # 60-second ConfigEntryNotReady retry loop.
+            if not self._shutting_down:
+                self._reconnect_task = self.hass.async_create_task(
+                    self._async_reconnect()
+                )
 
     async def _async_connect_with_creds(self, iot_creds: dict) -> None:
         """Build a fresh DysonMqttClient from credentials and connect."""
@@ -155,10 +185,10 @@ class DysonCoordinator:
 
     def _on_state_change(self, state: dict) -> None:
         """paho thread → schedule update on HA event loop."""
-        self.hass.loop.call_soon_threadsafe(self._async_notify_listeners)
+        self.hass.loop.call_soon_threadsafe(self._async_update_rooms_and_notify)
 
     def _on_mqtt_connected(self) -> None:
-        self.hass.loop.call_soon_threadsafe(self._async_notify_listeners)
+        self.hass.loop.call_soon_threadsafe(self._async_update_rooms_and_notify)
 
     def _on_mqtt_disconnected(self) -> None:
         _LOGGER.warning("[%s] MQTT disconnected — will reconnect", self.serial)
@@ -193,6 +223,23 @@ class DysonCoordinator:
                 self._reconnect_task = self.hass.async_create_task(
                     self._async_reconnect()
                 )
+
+    @callback
+    def _async_update_rooms_and_notify(self) -> None:
+        """Check for new room names from MQTT, persist if changed, then notify."""
+        if self.mqtt:
+            new_rooms = self.mqtt.room_names
+            if new_rooms and set(new_rooms) != set(self.cached_room_names):
+                self.cached_room_names = list(new_rooms)
+                # Persist to config entry so they survive HA restarts
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    data={**self._config_entry.data, CONF_CACHED_ROOMS: new_rooms},
+                )
+                _LOGGER.debug(
+                    "[%s] Room names cached: %s", self.serial, new_rooms
+                )
+        self._async_notify_listeners()
 
     @callback
     def _async_notify_listeners(self) -> None:

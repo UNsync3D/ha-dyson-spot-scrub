@@ -1,7 +1,7 @@
 """Constants for the Dyson Spot+Scrub AI integration."""
 
 DOMAIN = "dyson_spot_scrub"
-PLATFORMS = ["vacuum", "binary_sensor", "sensor"]
+PLATFORMS = ["vacuum", "binary_sensor", "sensor", "select", "button", "switch", "camera"]
 
 # Config entry keys
 CONF_COUNTRY    = "country"
@@ -10,6 +10,9 @@ CONF_SERIAL     = "serial"
 CONF_DEVICE_NAME    = "device_name"
 CONF_PRODUCT_TYPE   = "product_type"
 CONF_MQTT_PREFIX    = "mqtt_prefix"
+# Persisted room names — cached so switch entities survive HA restarts even
+# when MQTT hasn't connected yet (e.g. robot is drying or briefly offline).
+CONF_CACHED_ROOMS   = "cached_rooms"
 
 # Cleaning mode names (displayed in HA)
 MODE_VACUUM          = "Vacuum"

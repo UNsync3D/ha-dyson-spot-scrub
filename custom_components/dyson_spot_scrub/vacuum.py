@@ -4,13 +4,16 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import voluptuous as vol
+
 from homeassistant.components.vacuum import (
     StateVacuumEntity,
     VacuumEntityFeature,
     VacuumActivity,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -32,6 +35,14 @@ from .dyson_mqtt import (
     RUNNING_STATES,
 )
 
+SERVICE_CLEAN_ROOM   = "clean_room"
+SERVICE_CLEAN_ROOMS  = "clean_rooms"
+ATTR_ROOM            = "room"
+ATTR_ROOMS           = "rooms"
+
+_CLEAN_ROOM_SCHEMA  = vol.Schema({vol.Required(ATTR_ROOM): cv.string})
+_CLEAN_ROOMS_SCHEMA = vol.Schema({vol.Required(ATTR_ROOMS): vol.All(cv.ensure_list, [cv.string])})
+
 _LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_FEATURES = (
@@ -50,6 +61,37 @@ async def async_setup_entry(
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DysonVacuumEntity(coordinator, entry)])
+
+    # Register the clean_room service once (it covers all robots in the domain).
+    if not hass.services.has_service(DOMAIN, SERVICE_CLEAN_ROOM):
+
+        async def _handle_clean_room(call: ServiceCall) -> None:
+            room = call.data[ATTR_ROOM]
+            for coord in hass.data.get(DOMAIN, {}).values():
+                if isinstance(coord, DysonCoordinator) and coord.mqtt and coord.mqtt.connected:
+                    await hass.async_add_executor_job(coord.mqtt.start_room, room)
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CLEAN_ROOM,
+            _handle_clean_room,
+            schema=_CLEAN_ROOM_SCHEMA,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_CLEAN_ROOMS):
+
+        async def _handle_clean_rooms(call: ServiceCall) -> None:
+            rooms = call.data[ATTR_ROOMS]
+            for coord in hass.data.get(DOMAIN, {}).values():
+                if isinstance(coord, DysonCoordinator) and coord.mqtt and coord.mqtt.connected:
+                    hass.async_create_task(coord.async_clean_rooms_sequential(rooms))
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_CLEAN_ROOMS,
+            _handle_clean_rooms,
+            schema=_CLEAN_ROOMS_SCHEMA,
+        )
 
 
 class DysonVacuumEntity(StateVacuumEntity):
@@ -90,6 +132,11 @@ class DysonVacuumEntity(StateVacuumEntity):
     # ── State properties ──────────────────────────────────────────────────────
 
     @property
+    def available(self) -> bool:
+        """True only when the MQTT connection is live."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+
+    @property
     def activity(self) -> VacuumActivity | None:
         state = self._mqtt_state
         if has_fault(state):
@@ -114,6 +161,16 @@ class DysonVacuumEntity(StateVacuumEntity):
         if self._coordinator.mqtt:
             return self._coordinator.mqtt.state
         return {}
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose room names so automations can reference them."""
+        attrs: dict[str, Any] = {}
+        if self._coordinator.mqtt:
+            rooms = self._coordinator.mqtt.room_names
+            if rooms:
+                attrs["rooms"] = rooms
+        return attrs
 
     # ── Commands ──────────────────────────────────────────────────────────────
 

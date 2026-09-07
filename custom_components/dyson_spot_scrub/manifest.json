@@ -1,9 +1,9 @@
 {
   "domain": "dyson_spot_scrub",
   "name": "Dyson Spot+Scrub AI",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "documentation": "https://github.com/UNsync3D/ha-dyson-spot-scrub",
-  "requirements": ["paho-mqtt>=1.6.1"],
+  "requirements": ["paho-mqtt>=1.6.1", "Pillow>=9.0.0"],
   "dependencies": [],
   "codeowners": ["@UNsync3D"],
   "iot_class": "local_push",
