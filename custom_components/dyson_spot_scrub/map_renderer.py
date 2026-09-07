@@ -229,13 +229,18 @@ def _render(
             for j in range(len(pts2) - 1):
                 draw.line([pts2[j], pts2[j+1]], fill=perim_rgba, width=2)
 
-        # Historical visited path
+        # Historical visited path — skip segment if points jump > 0.8 m
+        # (robot was lifted or teleported; don't draw a diagonal line across the room)
         visited = z.get("visited", [])
         if len(visited) > 1:
-            pts2 = txy_list(visited)
             draw = ImageDraw.Draw(img)
-            for j in range(len(pts2) - 1):
-                draw.line([pts2[j], pts2[j+1]], fill=visited_rgba, width=3)
+            vpts = [_pt(p) for p in visited]
+            for j in range(len(vpts) - 1):
+                x0, y0 = vpts[j]
+                x1, y1 = vpts[j + 1]
+                if math.hypot(x1 - x0, y1 - y0) > 0.8:
+                    continue  # large jump — new segment, skip line
+                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=visited_rgba, width=3)
 
     # ── 7. Furniture ──────────────────────────────────────────────────────────
     for f in _get_furniture(map_data, live_data):
