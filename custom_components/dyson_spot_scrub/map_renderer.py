@@ -45,7 +45,7 @@ PAD   = 70   # border padding in pixels
 # ── Colour palette ─────────────────────────────────────────────────────────────
 
 BG             = (15,  23,  42,  255)   # #0f172a
-GRID           = (255, 255, 255, 13)    # 5 % white
+GRID           = (71,  85,  105, 30)    # faint slate-grey
 DOCK           = (52,  211, 153, 255)   # #34d399 green
 ROBOT          = (250, 204, 21,  255)   # #facc15 yellow
 ROBOT_HALO     = (250, 204, 21,  64)
@@ -212,22 +212,23 @@ def _render(
         status = z.get("cleanStatus", "CLEAN_NOT_REQUESTED")
         overlay = STATUS_OVERLAY.get(status, STATUS_OVERLAY["CLEAN_NOT_REQUESTED"])
 
-        # Perimeter pass segments (type == 0) → zone boundary outline
+        # Perimeter pass segments (type == 0) → zone boundary outline.
+        # Draw each segment as its own individual line (start→end) to avoid
+        # artificial diagonals when segments are non-contiguous.
+        perim_segs = _perimeter_segments(z)
+        draw = ImageDraw.Draw(img)
+        for seg_start, seg_end in perim_segs:
+            sx, sy = _pt(seg_start)
+            ex, ey = _pt(seg_end)
+            # Skip long jumps that would cross the room (robot teleport/lift)
+            if math.hypot(ex - sx, ey - sy) > 1.5:
+                continue
+            draw.line([txy(seg_start), txy(seg_end)], fill=perim_rgba, width=2)
+
+        # Status overlay: collect all contiguous perimeter points for a fill polygon
         perim_pts = _perimeter_points(z)
-        if len(perim_pts) >= 3:
-            # Draw a translucent fill by converting perimeter to a rough polygon
-            _poly_alpha(img, txy_list(perim_pts),
-                        fill=(stroke_rgb[0], stroke_rgb[1], stroke_rgb[2], 25),
-                        stroke=perim_rgba, stroke_width=2)
-            # Status overlay fill on top
-            if overlay[3] > 0:
-                _poly_alpha(img, txy_list(perim_pts), overlay, (0, 0, 0, 0))
-        elif len(perim_pts) >= 2:
-            # Too few points for a polygon — just draw as polyline
-            draw = ImageDraw.Draw(img)
-            pts2 = txy_list(perim_pts)
-            for j in range(len(pts2) - 1):
-                draw.line([pts2[j], pts2[j+1]], fill=perim_rgba, width=2)
+        if overlay[3] > 0 and len(perim_pts) >= 3:
+            _poly_alpha(img, txy_list(perim_pts), overlay, (0, 0, 0, 0))
 
         # Historical visited path — skip segment if points jump > 0.8 m
         # (robot was lifted or teleported; don't draw a diagonal line across the room)
@@ -240,7 +241,7 @@ def _render(
                 x1, y1 = vpts[j + 1]
                 if math.hypot(x1 - x0, y1 - y0) > 0.8:
                     continue  # large jump — new segment, skip line
-                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=visited_rgba, width=3)
+                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=visited_rgba, width=1)
 
     # ── 7. Furniture ──────────────────────────────────────────────────────────
     for f in _get_furniture(map_data, live_data):
@@ -359,6 +360,21 @@ def _perimeter_points(zone: dict) -> list[Any]:
         if not out or _pt(p) != _pt(out[-1]):
             out.append(p)
     return out
+
+
+def _perimeter_segments(zone: dict) -> list[tuple[Any, Any]]:
+    """Return each perimeter-pass segment as a (start, end) pair.
+
+    Unlike _perimeter_points, this does NOT chain segments together,
+    so non-contiguous perimeter runs never produce diagonal connector lines.
+    """
+    return [
+        (seg["start"], seg["end"])
+        for seg in zone.get("presentation", [])
+        if seg.get("type") == 0
+        and seg.get("start") is not None
+        and seg.get("end") is not None
+    ]
 
 
 def _bounds_from_dimensions(map_data: dict) -> tuple:
