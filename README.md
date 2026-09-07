@@ -112,7 +112,7 @@ Download and install [Proxyman](https://proxyman.io) (free tier is sufficient). 
 4. Find the **Authorization** header — its value will look like:
 
    ```
-   Bearer 02107737E7CD56482FC6E974039257F99987AA5D337520D6C36FF24F1813F682-1
+   Bearer XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX-1
    ```
 
 5. Copy everything **after** the word `Bearer ` (including the long hex string and the `-1` suffix)
