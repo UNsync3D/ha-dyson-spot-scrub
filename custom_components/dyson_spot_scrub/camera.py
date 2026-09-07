@@ -166,6 +166,32 @@ class DysonMapCamera(Camera):
             self._map_data  = map_data
             self._metadata  = metadata
             self._cache_ts  = time.monotonic()
+
+            # Diagnostic: log top-level keys and first zone's keys so we can
+            # confirm the API field names match what the renderer expects.
+            _LOGGER.debug(
+                "[%s] map_data top-level keys: %s",
+                self._serial, list(map_data.keys()),
+            )
+            zones = map_data.get("zones") or []
+            if zones:
+                _LOGGER.debug(
+                    "[%s] map_data zones[0] keys: %s",
+                    self._serial, list(zones[0].keys()),
+                )
+                bnd = (zones[0].get("boundary") or zones[0].get("points")
+                       or zones[0].get("polygon") or zones[0].get("outline") or [])
+                _LOGGER.debug(
+                    "[%s] zones[0] boundary sample (first 3 pts): %s",
+                    self._serial, bnd[:3],
+                )
+            else:
+                _LOGGER.debug(
+                    "[%s] map_data has no 'zones' list — top-level sample: %s",
+                    self._serial,
+                    {k: (v[:2] if isinstance(v, list) else v)
+                     for k, v in map_data.items()},
+                )
             _LOGGER.debug("[%s] Persistent map cached successfully", self._serial)
         except DysonApiError as exc:
             _LOGGER.warning(

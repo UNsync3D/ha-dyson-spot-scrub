@@ -121,11 +121,29 @@ def _render(
     if map_data:
         for z in map_data.get("zones", []):
             zones_from_map.append(z)
-            for pt in z.get("boundary", []):
+            # Try the field names Dyson might use for the zone boundary polygon
+            bnd = (
+                z.get("boundary")
+                or z.get("points")
+                or z.get("polygon")
+                or z.get("outline")
+                or z.get("vertices")
+                or []
+            )
+            for pt in bnd:
                 all_pts.append(_pt(pt))
-        # Fallback: top-level boundary field
+
+        # Fallback: top-level boundary / room / points field on map_data itself
         if not all_pts:
-            for pt in map_data.get("boundary", []):
+            top_bnd = (
+                map_data.get("boundary")
+                or map_data.get("room")
+                or map_data.get("points")
+                or map_data.get("polygon")
+                or map_data.get("outline")
+                or []
+            )
+            for pt in top_bnd:
                 all_pts.append(_pt(pt))
 
     if not all_pts:
@@ -196,7 +214,14 @@ def _render(
 
     # ── 5. Zone boundary polygons ─────────────────────────────────────────────
     for z in zones_from_map:
-        bnd = z.get("boundary", [])
+        bnd = (
+            z.get("boundary")
+            or z.get("points")
+            or z.get("polygon")
+            or z.get("outline")
+            or z.get("vertices")
+            or []
+        )
         if len(bnd) < 3:
             continue
         zid = str(z.get("id", ""))
