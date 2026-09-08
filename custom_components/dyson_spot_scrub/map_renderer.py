@@ -352,25 +352,51 @@ def _render(
 
 
 def _perimeter_points(zone: dict) -> list[Any]:
-    """Extract ordered perimeter-pass waypoints from a zone's presentation."""
-    # presentation = [{start:{x,y}, end:{x,y}, type:int}, ...]
-    # type 0 = perimeter pass
-    segs = [s for s in zone.get("presentation", []) if s.get("type") == 0]
-    if not segs:
+    """Return an ordered polygon of perimeter-pass waypoints for a zone.
+
+    The segments in zone["presentation"] (type==0) may arrive in any order.
+    Naively concatenating start/end points produces a self-intersecting
+    polygon — the classic cause of a diagonal wedge drawn across the room.
+
+    This function chains segments greedily (each segment's start is matched
+    to the nearest unvisited endpoint) so the resulting point list forms a
+    proper (or near-proper) closed polygon suitable for Pillow's polygon fill.
+    """
+    raw = [s for s in zone.get("presentation", []) if s.get("type") == 0
+           and s.get("start") is not None and s.get("end") is not None]
+    if not raw:
         return []
-    # Collect unique consecutive points
-    pts: list[Any] = []
-    for seg in segs:
-        s = seg.get("start")
-        e = seg.get("end")
-        if s:
-            pts.append(s)
-        if e:
-            pts.append(e)
+
+    # Convert to (start_xy, end_xy) pairs
+    pairs: list[tuple[tuple, tuple]] = [
+        (_pt(s["start"]), _pt(s["end"])) for s in raw
+    ]
+
+    # Greedy chain: pick the next segment whose start or end is closest
+    # to the current tail point.
+    chain: list[tuple[float, float]] = list(pairs[0])  # [start, end] of first seg
+    remaining = list(pairs[1:])
+
+    while remaining:
+        tail = chain[-1]
+        best_i, best_d, best_flip = 0, float("inf"), False
+        for i, (s, e) in enumerate(remaining):
+            ds = math.hypot(s[0] - tail[0], s[1] - tail[1])
+            de = math.hypot(e[0] - tail[0], e[1] - tail[1])
+            if ds < best_d:
+                best_d, best_i, best_flip = ds, i, False
+            if de < best_d:
+                best_d, best_i, best_flip = de, i, True
+        s, e = remaining.pop(best_i)
+        if best_flip:
+            chain.append(s)   # reversed: e was the close end, s is the far end
+        else:
+            chain.append(e)
+
     # Deduplicate adjacent identical points
     out: list[Any] = []
-    for p in pts:
-        if not out or _pt(p) != _pt(out[-1]):
+    for p in chain:
+        if not out or p != out[-1]:
             out.append(p)
     return out
 
