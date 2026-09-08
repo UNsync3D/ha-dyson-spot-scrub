@@ -8,6 +8,9 @@ using map_renderer.py (Pillow).  Poll rate adapts to robot state:
 The persistent map data (zone boundaries, furniture, etc.) is cached in
 memory and refreshed every STATIC_CACHE_TTL seconds so the API isn't
 hammered on every fast-poll tick.
+
+Zone presentation data (perimeter segments) is persisted to HA storage
+so room outlines survive restarts without needing a new cleaning run.
 """
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE, CONF_AUTH_TOKEN
 from .coordinator import DysonCoordinator
@@ -36,6 +40,9 @@ _IDLE_INTERVAL     = 60.0   # slow poll when docked / idle / offline
 
 # How long to keep the persistent map data cached before re-fetching (seconds)
 _STATIC_CACHE_TTL  = 3600   # 1 hour
+
+# HA storage for zone presentation persistence
+_STORE_VERSION = 1
 
 
 async def async_setup_entry(
@@ -93,14 +100,28 @@ class DysonMapCamera(Camera):
         # Dyson's persistent-map REST API returns zones with empty
         # presentation[] when the robot is docked — the segments are only
         # present in live_data during an active cleaning run.  We cache
-        # the last known non-empty presentation per zone so the room
-        # outlines remain visible when the robot is idle.
+        # the last known non-empty presentation per zone and persist it to
+        # HA storage so room outlines survive restarts.
         self._presentation_cache: dict[str, list] = {}
+        self._store: Store | None = None          # set in async_added_to_hass
+        self._store_key = f"{DOMAIN}.presentations.{serial}"
 
         # Last rendered image (returned on error / while fetching)
         self._last_image:  bytes | None = None
 
     # ── HA lifecycle ──────────────────────────────────────────────────────────
+
+    async def async_added_to_hass(self) -> None:
+        """Called when the entity is added — load persisted presentation cache."""
+        await super().async_added_to_hass()
+        self._store = Store(self.hass, _STORE_VERSION, self._store_key)
+        data = await self._store.async_load()
+        if data and isinstance(data, dict):
+            self._presentation_cache = data
+            _LOGGER.debug(
+                "[%s] Loaded presentation cache from storage: %d zone(s)",
+                self._serial, len(data),
+            )
 
     @property
     def available(self) -> bool:
@@ -145,13 +166,25 @@ class DysonMapCamera(Camera):
         ):
             live_data = await self._async_fetch_live()
 
-        # ── Update presentation cache from any fresh zone data ────────────────
+        # ── Update presentation cache from fresh zone data ────────────────────
+        # Prefer live_data (most up-to-date), fall back to static map.
+        cache_updated = False
         for src in (live_data, self._map_data):
             if src:
                 for z in src.get("zones", []):
                     zid = str(z.get("id", ""))
                     if zid and z.get("presentation"):
-                        self._presentation_cache[zid] = z["presentation"]
+                        if self._presentation_cache.get(zid) != z["presentation"]:
+                            self._presentation_cache[zid] = z["presentation"]
+                            cache_updated = True
+
+        # Persist whenever something new was learned
+        if cache_updated and self._store is not None:
+            await self._store.async_save(self._presentation_cache)
+            _LOGGER.debug(
+                "[%s] Saved presentation cache: %d zone(s)",
+                self._serial, len(self._presentation_cache),
+            )
 
         # ── Inject cached presentations into map_data for the renderer ────────
         patched_map = self._map_data
@@ -197,8 +230,6 @@ class DysonMapCamera(Camera):
             self._metadata  = metadata
             self._cache_ts  = time.monotonic()
 
-            # Diagnostic: log top-level keys and first zone's keys so we can
-            # confirm the API field names match what the renderer expects.
             _LOGGER.debug(
                 "[%s] map_data top-level keys: %s",
                 self._serial, list(map_data.keys()),
@@ -206,21 +237,10 @@ class DysonMapCamera(Camera):
             zones = map_data.get("zones") or []
             if zones:
                 _LOGGER.debug(
-                    "[%s] map_data zones[0] keys: %s",
-                    self._serial, list(zones[0].keys()),
-                )
-                bnd = (zones[0].get("boundary") or zones[0].get("points")
-                       or zones[0].get("polygon") or zones[0].get("outline") or [])
-                _LOGGER.debug(
-                    "[%s] zones[0] boundary sample (first 3 pts): %s",
-                    self._serial, bnd[:3],
-                )
-            else:
-                _LOGGER.debug(
-                    "[%s] map_data has no 'zones' list — top-level sample: %s",
+                    "[%s] map_data zones[0] keys: %s; presentation length: %d",
                     self._serial,
-                    {k: (v[:2] if isinstance(v, list) else v)
-                     for k, v in map_data.items()},
+                    list(zones[0].keys()),
+                    len(zones[0].get("presentation") or []),
                 )
             _LOGGER.debug("[%s] Persistent map cached successfully", self._serial)
         except DysonApiError as exc:
