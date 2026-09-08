@@ -89,6 +89,14 @@ class DysonMapCamera(Camera):
         self._cache_ts:    float = 0.0          # epoch seconds of last fetch
         self._cache_lock:  asyncio.Lock = asyncio.Lock()
 
+        # Zone presentation (perimeter segment) cache.
+        # Dyson's persistent-map REST API returns zones with empty
+        # presentation[] when the robot is docked — the segments are only
+        # present in live_data during an active cleaning run.  We cache
+        # the last known non-empty presentation per zone so the room
+        # outlines remain visible when the robot is idle.
+        self._presentation_cache: dict[str, list] = {}
+
         # Last rendered image (returned on error / while fetching)
         self._last_image:  bytes | None = None
 
@@ -137,11 +145,33 @@ class DysonMapCamera(Camera):
         ):
             live_data = await self._async_fetch_live()
 
+        # ── Update presentation cache from any fresh zone data ────────────────
+        for src in (live_data, self._map_data):
+            if src:
+                for z in src.get("zones", []):
+                    zid = str(z.get("id", ""))
+                    if zid and z.get("presentation"):
+                        self._presentation_cache[zid] = z["presentation"]
+
+        # ── Inject cached presentations into map_data for the renderer ────────
+        patched_map = self._map_data
+        if self._presentation_cache:
+            patched_zones = []
+            for z in self._map_data.get("zones", []):
+                zid = str(z.get("id", ""))
+                if not z.get("presentation") and zid in self._presentation_cache:
+                    z = dict(z)
+                    z["presentation"] = self._presentation_cache[zid]
+                patched_zones.append(z)
+            if patched_zones:
+                patched_map = dict(self._map_data)
+                patched_map["zones"] = patched_zones
+
         # ── Render in executor (CPU-bound) ────────────────────────────────────
         try:
             image_bytes: bytes = await self.hass.async_add_executor_job(
                 render_map,
-                self._map_data,
+                patched_map,
                 self._metadata,
                 live_data,
             )
