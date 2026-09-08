@@ -55,27 +55,10 @@ KEEPOUT_STROKE = (245, 158, 11,  220)   # amber
 FURN_FILL      = (55,  60,  70,  255)   # dark grey
 FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
 
-# Zone colour palette — one per zone, cycling
-# Each entry: (floor_fill_rgba, border_rgba, visited_rgba, label_rgba)
-ZONE_COLOURS = [
-    # Blue-teal
-    ((18,  35,  48,  255), (56,  140, 185, 110), (56,  180, 220, 55),  (80,  185, 225, 230)),
-    # Amber-gold
-    ((46,  36,  14,  255), (170, 125, 55,  110), (200, 155, 60,  55),  (210, 160, 65,  230)),
-    # Green
-    ((18,  40,  24,  255), (60,  145, 85,  110), (65,  175, 95,  55),  (70,  185, 100, 230)),
-    # Purple
-    ((34,  22,  48,  255), (125, 85,  175, 110), (150, 105, 215, 55),  (160, 115, 225, 230)),
-]
-
-# Status highlight overlay (drawn on top of the floor fill)
-STATUS_OVERLAY: dict[str, tuple] = {
-    "CLEAN_PENDING":       (56,  140, 185, 40),
-    "CLEAN_IN_PROGRESS":   (65,  175, 95,  60),
-    "CLEANING":            (65,  175, 95,  60),
-    "CLEAN_COMPLETE":      (65,  175, 95,  30),
-    "CLEAN_NOT_REQUESTED": (0,   0,   0,   0),
-}
+# Zone colours — single style for all zones (Dyson app aesthetic)
+ZONE_BORDER    = (220, 220, 225, 180)   # soft white outline
+ZONE_VISITED   = (160, 160, 168, 60)    # subtle grey visited path
+ZONE_LABEL     = (220, 220, 225, 220)   # white label text
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -207,10 +190,7 @@ def _render(
     # ── 5. Zone outlines and visited paths ───────────────────────────────────
     # Each perimeter segment is drawn individually — never chained into a
     # polygon — so non-contiguous segments never produce diagonal artefacts.
-    for i, z in enumerate(zones):
-        col = ZONE_COLOURS[i % len(ZONE_COLOURS)]
-        _floor_fill_rgba, border_rgba, visited_rgba, label_rgba = col
-
+    for z in zones:
         # Perimeter border — one line per segment, skip large jumps
         draw = ImageDraw.Draw(img)
         for seg_start, seg_end in _perimeter_segments(z):
@@ -218,7 +198,7 @@ def _render(
             ex, ey = _pt(seg_end)
             if math.hypot(ex - sx, ey - sy) > 1.5:
                 continue
-            draw.line([txy(seg_start), txy(seg_end)], fill=border_rgba, width=2)
+            draw.line([txy(seg_start), txy(seg_end)], fill=ZONE_BORDER, width=2)
 
         # Historical visited path — skip large jumps
         visited = z.get("visited", [])
@@ -230,7 +210,7 @@ def _render(
                 x1, y1 = vpts[j + 1]
                 if math.hypot(x1 - x0, y1 - y0) > 0.8:
                     continue
-                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=visited_rgba, width=1)
+                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=ZONE_VISITED, width=1)
 
     # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in _get_furniture(map_data, live_data):
@@ -278,9 +258,8 @@ def _render(
     # ── 10. Zone labels ───────────────────────────────────────────────────────
     font_l, font_s = _load_fonts()
     draw = ImageDraw.Draw(img)
-    for i, z in enumerate(zones):
-        col = ZONE_COLOURS[i % len(ZONE_COLOURS)]
-        label_rgba = col[3]
+    area_label_col = (ZONE_LABEL[0], ZONE_LABEL[1], ZONE_LABEL[2], 130)
+    for z in zones:
         loc = z.get("nameLocation") or {}
         lx_m = loc.get("x", 0.0)
         ly_m = loc.get("y", 0.0)
@@ -290,9 +269,8 @@ def _render(
         draw = ImageDraw.Draw(img)
         name = (z.get("name") or "").upper()
         area = f"{z.get('area', 0):.1f} m²"
-        _draw_centered_text(draw, lx, ly - 12, name, font_l, label_rgba)
-        area_col = (label_rgba[0], label_rgba[1], label_rgba[2], 140)
-        _draw_centered_text(draw, lx, ly + 2, area, font_s, area_col)
+        _draw_centered_text(draw, lx, ly - 12, name, font_l, ZONE_LABEL)
+        _draw_centered_text(draw, lx, ly + 2, area, font_s, area_label_col)
 
     # ── 11. Serialise ─────────────────────────────────────────────────────────
     buf = io.BytesIO()
