@@ -38,48 +38,43 @@ except ImportError:
 
 # ── Canvas constants ───────────────────────────────────────────────────────────
 
-SCALE = 72   # pixels per metre
-PAD   = 70   # border padding in pixels
+SCALE = 80   # pixels per metre
+PAD   = 40   # border padding in pixels
 
 
 # ── Colour palette ─────────────────────────────────────────────────────────────
 
-BG             = (15,  23,  42,  255)   # #0f172a
-GRID           = (71,  85,  105, 30)    # faint slate-grey
-DOCK           = (52,  211, 153, 255)   # #34d399 green
-ROBOT          = (250, 204, 21,  255)   # #facc15 yellow
-ROBOT_HALO     = (250, 204, 21,  64)
+BG             = (6,   6,   8,   255)   # near-black
+DOCK           = (52,  211, 153, 255)   # #34d399 emerald green
+ROBOT          = (245, 158, 11,  255)   # #f59e0b amber
+ROBOT_HALO     = (245, 158, 11,  50)
 PATH_MAIN      = (34,  211, 238, 255)   # #22d3ee cyan
-PATH_GLOW      = (34,  211, 238, 64)
-KEEPOUT_FILL   = (239, 68,  68,  51)
-KEEPOUT_STROKE = (239, 68,  68,  200)
-FURN_U_FILL    = (99,  102, 241, 64)
-FURN_U_STROKE  = (129, 140, 248, 220)
-FURN_A_FILL    = (245, 158, 11,  64)
-FURN_A_STROKE  = (245, 158, 11,  200)
-AXIS_COL       = (71,  85,  105, 200)
-ORIGIN_COL     = (255, 255, 255, 40)
+PATH_GLOW      = (34,  211, 238, 50)
+KEEPOUT_FILL   = (245, 158, 11,  35)    # amber tint
+KEEPOUT_STROKE = (245, 158, 11,  220)   # amber
+FURN_FILL      = (55,  60,  70,  255)   # dark grey
+FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
 
 # Zone colour palette — one per zone, cycling
-# Each entry: (stroke_rgb, visited_rgba, perimeter_rgba, label_rgba)
+# Each entry: (floor_fill_rgba, border_rgba, visited_rgba, label_rgba)
 ZONE_COLOURS = [
-    # Cyan    — Living Room / zone 10
-    ((56,  189, 248), (56,  189, 248, 60),  (56,  189, 248, 160), (56,  189, 248, 200)),
-    # Green   — Dining / zone 11
-    ((74,  222, 128), (74,  222, 128, 60),  (74,  222, 128, 160), (74,  222, 128, 200)),
-    # Amber   — Kitchen / zone 13
-    ((251, 191, 36),  (251, 191, 36,  60),  (251, 191, 36,  160), (251, 191, 36,  200)),
-    # Purple  — Toilet / zone 12
-    ((192, 132, 252), (192, 132, 252, 60),  (192, 132, 252, 160), (192, 132, 252, 200)),
+    # Blue-teal
+    ((18,  35,  48,  255), (56,  140, 185, 110), (56,  180, 220, 55),  (80,  185, 225, 230)),
+    # Amber-gold
+    ((46,  36,  14,  255), (170, 125, 55,  110), (200, 155, 60,  55),  (210, 160, 65,  230)),
+    # Green
+    ((18,  40,  24,  255), (60,  145, 85,  110), (65,  175, 95,  55),  (70,  185, 100, 230)),
+    # Purple
+    ((34,  22,  48,  255), (125, 85,  175, 110), (150, 105, 215, 55),  (160, 115, 225, 230)),
 ]
 
-# Status highlight: override visited/perimeter colour when zone is cleaning
+# Status highlight overlay (drawn on top of the floor fill)
 STATUS_OVERLAY: dict[str, tuple] = {
-    "CLEAN_PENDING":       (56,  189, 248, 120),   # bright cyan glow
-    "CLEAN_IN_PROGRESS":   (74,  222, 128, 180),   # bright green
-    "CLEANING":            (74,  222, 128, 180),
-    "CLEAN_COMPLETE":      (134, 239, 172, 100),   # pale green
-    "CLEAN_NOT_REQUESTED": (0,   0,   0,   0),     # no overlay
+    "CLEAN_PENDING":       (56,  140, 185, 40),
+    "CLEAN_IN_PROGRESS":   (65,  175, 95,  60),
+    "CLEANING":            (65,  175, 95,  60),
+    "CLEAN_COMPLETE":      (65,  175, 95,  30),
+    "CLEAN_NOT_REQUESTED": (0,   0,   0,   0),
 }
 
 
@@ -201,50 +196,31 @@ def _render(
     # ── 3. Create base image ──────────────────────────────────────────────────
     img = Image.new("RGBA", (W, H), BG)
 
-    # ── 4. Grid (every 1 m) ───────────────────────────────────────────────────
+    # ── 4. Keep-out / restriction zones ───────────────────────────────────────
     draw = ImageDraw.Draw(img)
-    for gx in range(int(math.floor(min_x)), int(math.ceil(max_x)) + 1):
-        px = int(tx(gx))
-        draw.line([(px, 0), (px, H)], fill=GRID)
-    for gy in range(int(math.floor(min_y)), int(math.ceil(max_y)) + 1):
-        py = int(ty(gy))
-        draw.line([(0, py), (W, py)], fill=GRID)
-
-    # ── 5. Keep-out / restriction zones ───────────────────────────────────────
     for r in _get_restrictions(map_data, live_data):
         bnd = r.get("points") or r.get("boundary") or []
         if len(bnd) >= 3:
             _poly_alpha(img, txy_list(bnd), KEEPOUT_FILL, KEEPOUT_STROKE,
                         stroke_width=1, dashed=True)
 
-    # ── 6. Zone perimeter outlines and visited paths ──────────────────────────
+    # ── 5. Zone outlines and visited paths ───────────────────────────────────
+    # Each perimeter segment is drawn individually — never chained into a
+    # polygon — so non-contiguous segments never produce diagonal artefacts.
     for i, z in enumerate(zones):
         col = ZONE_COLOURS[i % len(ZONE_COLOURS)]
-        stroke_rgb, visited_rgba, perim_rgba, label_rgba = col
+        _floor_fill_rgba, border_rgba, visited_rgba, label_rgba = col
 
-        status = z.get("cleanStatus", "CLEAN_NOT_REQUESTED")
-        overlay = STATUS_OVERLAY.get(status, STATUS_OVERLAY["CLEAN_NOT_REQUESTED"])
-
-        # Perimeter pass segments (type == 0) → zone boundary outline.
-        # Draw each segment as its own individual line (start→end) to avoid
-        # artificial diagonals when segments are non-contiguous.
-        perim_segs = _perimeter_segments(z)
+        # Perimeter border — one line per segment, skip large jumps
         draw = ImageDraw.Draw(img)
-        for seg_start, seg_end in perim_segs:
+        for seg_start, seg_end in _perimeter_segments(z):
             sx, sy = _pt(seg_start)
             ex, ey = _pt(seg_end)
-            # Skip long jumps that would cross the room (robot teleport/lift)
             if math.hypot(ex - sx, ey - sy) > 1.5:
                 continue
-            draw.line([txy(seg_start), txy(seg_end)], fill=perim_rgba, width=2)
+            draw.line([txy(seg_start), txy(seg_end)], fill=border_rgba, width=2)
 
-        # Status overlay: collect all contiguous perimeter points for a fill polygon
-        perim_pts = _perimeter_points(z)
-        if overlay[3] > 0 and len(perim_pts) >= 3:
-            _poly_alpha(img, txy_list(perim_pts), overlay, (0, 0, 0, 0))
-
-        # Historical visited path — skip segment if points jump > 0.8 m
-        # (robot was lifted or teleported; don't draw a diagonal line across the room)
+        # Historical visited path — skip large jumps
         visited = z.get("visited", [])
         if len(visited) > 1:
             draw = ImageDraw.Draw(img)
@@ -253,23 +229,16 @@ def _render(
                 x0, y0 = vpts[j]
                 x1, y1 = vpts[j + 1]
                 if math.hypot(x1 - x0, y1 - y0) > 0.8:
-                    continue  # large jump — new segment, skip line
+                    continue
                 draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=visited_rgba, width=1)
 
-    # ── 7. Furniture ──────────────────────────────────────────────────────────
+    # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in _get_furniture(map_data, live_data):
         bnd = f.get("points") or f.get("boundary") or []
         if len(bnd) >= 3:
-            pts2 = txy_list(bnd)
-            if f.get("userDefined", False):
-                _poly_alpha(img, pts2, FURN_U_FILL, FURN_U_STROKE)
-            else:
-                _poly_alpha(img, pts2, FURN_A_FILL, FURN_A_STROKE)
+            _poly_alpha(img, txy_list(bnd), FURN_FILL, FURN_STROKE)
 
-    # ── 8. Historical visited paths already drawn above in step 6 ─────────────
-    # (no separate step needed)
-
-    # ── 9. Live clean path ────────────────────────────────────────────────────
+    # ── 7. Live clean path ────────────────────────────────────────────────────
     draw = ImageDraw.Draw(img)
     if live_data:
         cp = live_data.get("cleanPath", [])
@@ -283,17 +252,16 @@ def _render(
                 x, y = pts2[j]
                 draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=PATH_MAIN)
 
-    # ── 10. Dock ──────────────────────────────────────────────────────────────
+    # ── 8. Dock ───────────────────────────────────────────────────────────────
     dock = _get_dock(map_data, live_data)
     if dock:
         dx, dy = int(tx(dock["x"])), int(ty(dock["y"]))
         draw = ImageDraw.Draw(img)
         draw.ellipse([dx - 9, dy - 9, dx + 9, dy + 9], fill=DOCK)
-        # Small "D" label
         font_s, _ = _load_fonts()
         _draw_centered_text(draw, dx, dy, "D", font_s, BG)
 
-    # ── 11. Robot position + heading ──────────────────────────────────────────
+    # ── 9. Robot position + heading ───────────────────────────────────────────
     if live_data:
         robot = live_data.get("robotLocation")
         if robot:
@@ -302,18 +270,14 @@ def _render(
             _ellipse_alpha(img, rx, ry, 20, ROBOT_HALO)
             draw = ImageDraw.Draw(img)
             draw.ellipse([rx - 9, ry - 9, rx + 9, ry + 9], fill=ROBOT)
-            # Heading arrow (Dyson angle: CCW from East, Y-flipped on screen)
+            # Heading arrow
             ax = rx + int(16 * math.cos(angle))
             ay = ry - int(16 * math.sin(angle))
             draw.line([(rx, ry), (ax, ay)], fill=BG, width=2)
 
-    # ── 12. Origin marker ─────────────────────────────────────────────────────
-    draw = ImageDraw.Draw(img)
-    ox, oy = int(tx(0)), int(ty(0))
-    draw.ellipse([ox - 4, oy - 4, ox + 4, oy + 4], fill=None, outline=ORIGIN_COL)
-
-    # ── 13. Zone labels ───────────────────────────────────────────────────────
+    # ── 10. Zone labels ───────────────────────────────────────────────────────
     font_l, font_s = _load_fonts()
+    draw = ImageDraw.Draw(img)
     for i, z in enumerate(zones):
         col = ZONE_COLOURS[i % len(ZONE_COLOURS)]
         label_rgba = col[3]
@@ -330,19 +294,7 @@ def _render(
         area_col = (label_rgba[0], label_rgba[1], label_rgba[2], 140)
         _draw_centered_text(draw, lx, ly + 2, area, font_s, area_col)
 
-    # ── 14. Axis labels ───────────────────────────────────────────────────────
-    draw = ImageDraw.Draw(img)
-    for gx in range(int(math.floor(min_x + margin)), int(math.ceil(max_x - margin)) + 1):
-        px = int(tx(gx))
-        _draw_centered_text(draw, px, H - 10, f"{gx}m", font_s, AXIS_COL)
-    for gy in range(int(math.floor(min_y + margin)), int(math.ceil(max_y - margin)) + 1):
-        py = int(ty(gy))
-        _draw_centered_text(draw, 12, py, f"{gy}", font_s, AXIS_COL)
-
-    # ── 15. Legend strip ──────────────────────────────────────────────────────
-    _draw_legend(img, zones, font_s)
-
-    # ── 16. Serialise ─────────────────────────────────────────────────────────
+    # ── 11. Serialise ─────────────────────────────────────────────────────────
     buf = io.BytesIO()
     img.convert("RGB").save(buf, format="PNG", optimize=False)
     return buf.getvalue()
@@ -352,29 +304,22 @@ def _render(
 
 
 def _perimeter_points(zone: dict) -> list[Any]:
-    """Return an ordered polygon of perimeter-pass waypoints for a zone.
+    """Extract an ordered, non-self-intersecting perimeter polygon.
 
-    The segments in zone["presentation"] (type==0) may arrive in any order.
-    Naively concatenating start/end points produces a self-intersecting
-    polygon — the classic cause of a diagonal wedge drawn across the room.
-
-    This function chains segments greedily (each segment's start is matched
-    to the nearest unvisited endpoint) so the resulting point list forms a
-    proper (or near-proper) closed polygon suitable for Pillow's polygon fill.
+    Uses greedy nearest-neighbour chaining to sort the perimeter-pass
+    (type=0) segments into a proper polygon without diagonal artefacts.
     """
-    raw = [s for s in zone.get("presentation", []) if s.get("type") == 0
-           and s.get("start") is not None and s.get("end") is not None]
+    raw = [
+        s for s in zone.get("presentation", [])
+        if s.get("type") == 0
+        and s.get("start") is not None
+        and s.get("end") is not None
+    ]
     if not raw:
         return []
 
-    # Convert to (start_xy, end_xy) pairs
-    pairs: list[tuple[tuple, tuple]] = [
-        (_pt(s["start"]), _pt(s["end"])) for s in raw
-    ]
-
-    # Greedy chain: pick the next segment whose start or end is closest
-    # to the current tail point.
-    chain: list[tuple[float, float]] = list(pairs[0])  # [start, end] of first seg
+    pairs = [(_pt(s["start"]), _pt(s["end"])) for s in raw]
+    chain = list(pairs[0])
     remaining = list(pairs[1:])
 
     while remaining:
@@ -389,7 +334,7 @@ def _perimeter_points(zone: dict) -> list[Any]:
                 best_d, best_i, best_flip = de, i, True
         s, e = remaining.pop(best_i)
         if best_flip:
-            chain.append(s)   # reversed: e was the close end, s is the far end
+            chain.append(s)
         else:
             chain.append(e)
 
@@ -522,13 +467,14 @@ def _poly_alpha(
     ImageDraw.Draw(overlay).polygon(pts, fill=fill)
     img.alpha_composite(overlay)
 
-    if dashed:
-        _dashed_polygon(img, pts, stroke, stroke_width)
-    else:
-        draw = ImageDraw.Draw(img)
-        closed = pts + [pts[0]]
-        for i in range(len(closed) - 1):
-            draw.line([closed[i], closed[i + 1]], fill=stroke, width=stroke_width)
+    if stroke[3] if len(stroke) == 4 else True:
+        if dashed:
+            _dashed_polygon(img, pts, stroke, stroke_width)
+        else:
+            draw = ImageDraw.Draw(img)
+            closed = pts + [pts[0]]
+            for i in range(len(closed) - 1):
+                draw.line([closed[i], closed[i + 1]], fill=stroke, width=stroke_width)
 
 
 def _dashed_polygon(img, pts, colour, width=1, dash=6, gap=4):
@@ -561,22 +507,6 @@ def _ellipse_alpha(img, cx, cy, r, colour):
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     ImageDraw.Draw(overlay).ellipse([cx - r, cy - r, cx + r, cy + r], fill=colour)
     img.alpha_composite(overlay)
-
-
-def _draw_legend(img: "Image.Image", zones: list[dict], font: Any) -> None:
-    """Small colour legend at the bottom-left corner."""
-    if not zones or not font:
-        return
-    draw = ImageDraw.Draw(img)
-    x0, y0 = 8, img.height - 8 - len(zones) * 14
-    for i, z in enumerate(zones):
-        col = ZONE_COLOURS[i % len(ZONE_COLOURS)]
-        stroke_rgb = col[0]
-        colour = (stroke_rgb[0], stroke_rgb[1], stroke_rgb[2], 200)
-        name = z.get("name", f"Zone {z.get('id', i)}")
-        y = y0 + i * 14
-        draw.rectangle([x0, y + 2, x0 + 8, y + 10], fill=colour)
-        _draw_centered_text(draw, x0 + 34, y + 6, name, font, colour)
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -622,7 +552,7 @@ def _draw_centered_text(draw, x, y, text, font, colour):
 
 def _error_image(msg: str) -> bytes:
     try:
-        img = Image.new("RGB", (500, 80), (15, 23, 42))
+        img = Image.new("RGB", (500, 80), (6, 6, 8))
         draw = ImageDraw.Draw(img)
         font = None
         try:
