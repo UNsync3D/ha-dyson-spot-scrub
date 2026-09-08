@@ -187,14 +187,26 @@ class DysonMapCamera(Camera):
             )
 
         # ── Inject cached presentations into map_data for the renderer ────────
+        static_zone_ids = [str(z.get("id", "")) for z in self._map_data.get("zones", [])]
+        _LOGGER.debug(
+            "[%s] Inject check — cache keys: %s | static zone ids: %s",
+            self._serial,
+            sorted(self._presentation_cache.keys()),
+            static_zone_ids,
+        )
         patched_map = self._map_data
         if self._presentation_cache:
             patched_zones = []
             for z in self._map_data.get("zones", []):
                 zid = str(z.get("id", ""))
-                if not z.get("presentation") and zid in self._presentation_cache:
+                has_presentation = bool(z.get("presentation"))
+                in_cache = zid in self._presentation_cache
+                if not has_presentation and in_cache:
                     z = dict(z)
                     z["presentation"] = self._presentation_cache[zid]
+                    _LOGGER.debug("[%s] Injected presentation for zone %s", self._serial, zid)
+                elif not has_presentation and not in_cache:
+                    _LOGGER.debug("[%s] Zone %s has no presentation and not in cache", self._serial, zid)
                 patched_zones.append(z)
             if patched_zones:
                 patched_map = dict(self._map_data)
