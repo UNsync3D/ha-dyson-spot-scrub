@@ -125,12 +125,25 @@ def _render(
     # Build live zone lookup: zone_id → live zone dict
     live_by_id: dict[str, dict] = {str(z.get("id", "")): z for z in live_zones}
 
-    # Merge: for each map zone, overlay live data if present
+    # Merge: for each map zone, overlay live data if present.
+    # Live zones carry up-to-date cleanStatus and visited paths, but their
+    # presentation (perimeter) and nameLocation fields often arrive empty in
+    # the first MQTT burst and only fill in later — or never, for zones not
+    # yet visited this session.  To prevent the boundary outlines from
+    # disappearing every time the map refreshes, we preserve the static map's
+    # presentation/nameLocation unless the live data has non-empty values.
     zones: list[dict] = []
     for z in map_zones:
         zid = str(z.get("id", ""))
         if zid in live_by_id:
-            merged = {**z, **live_by_id[zid]}  # live fields win
+            live_z = live_by_id[zid]
+            merged = {**z, **live_z}
+            # Keep static perimeter segments unless live has its own
+            if not live_z.get("presentation") and z.get("presentation"):
+                merged["presentation"] = z["presentation"]
+            # Keep static name location unless live has its own
+            if not live_z.get("nameLocation") and z.get("nameLocation"):
+                merged["nameLocation"] = z["nameLocation"]
             zones.append(merged)
         else:
             zones.append(z)
