@@ -14,3 +14,5 @@ __pycache__/
 .vscode/
 .idea/
 *.swp
+dump_manifest.py
+test_auth_flow.py
