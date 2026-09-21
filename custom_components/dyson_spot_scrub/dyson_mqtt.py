@@ -167,13 +167,17 @@ class DysonMqttClient:
         self,
         serial: str,
         mqtt_prefix: str,
-        iot_creds: dict[str, str],
+        robot_host: str,
+        mqtt_username: str,
+        mqtt_password: str,
         verbose: bool = False,
     ) -> None:
-        self.serial     = serial
-        self._prefix    = mqtt_prefix
-        self._iot_creds = iot_creds
-        self._verbose   = verbose
+        self.serial          = serial
+        self._prefix         = mqtt_prefix
+        self._robot_host     = robot_host
+        self._mqtt_username  = mqtt_username
+        self._mqtt_password  = mqtt_password
+        self._verbose        = verbose
 
         self._client:    mqtt.Client | None = None
         self._lock       = threading.Lock()
@@ -226,50 +230,41 @@ class DysonMqttClient:
         self._state_callbacks = [c for c in self._state_callbacks if c is not cb]
 
     def connect(self) -> None:
-        """Connect (blocking until first connect or error). Call from executor."""
-        creds = self._iot_creds
+        """Connect to the robot's local MQTT broker (blocking). Call from executor.
 
-        # paho-mqtt 2.x requires an explicit callback API version.
-        # VERSION1 keeps the old 4-argument on_connect / 3-argument on_disconnect
-        # signatures so the rest of the code is unchanged.
-        # reconnect_on_failure=False: we manage all reconnects in the coordinator.
-        # paho's built-in retry reuses a stale WebSocket URL+token and — because
-        # it shares the same ClientId — causes the broker to kick our new client
-        # off (rc=7), creating a rapid-fire disconnect cascade.
+        Uses plain TCP on port 1883 with username/password authentication.
+        No TLS, no cloud — the robot's onboard broker handles everything locally.
+
+        reconnect_on_failure=False: the coordinator manages all reconnects.
+        paho's built-in retry would reuse the same ClientId and cause the broker
+        to kick us off (rc=7), creating a rapid-fire disconnect cascade.
+        """
         try:
             client = mqtt.Client(
                 callback_api_version=mqtt.CallbackAPIVersion.VERSION1,
-                client_id=creds["client_id"],
-                transport="websockets",
+                client_id=f"ha-dyson-{self.serial}",
+                transport="tcp",
                 protocol=mqtt.MQTTv311,
                 reconnect_on_failure=False,
             )
         except AttributeError:
             # paho-mqtt 1.x — no CallbackAPIVersion or reconnect_on_failure
             client = mqtt.Client(
-                client_id=creds["client_id"],
-                transport="websockets",
+                client_id=f"ha-dyson-{self.serial}",
+                transport="tcp",
                 protocol=mqtt.MQTTv311,
             )
 
-        # Include custom-authorizer credentials in the WebSocket upgrade path.
-        # paho uses this string as the full HTTP URI (including query params).
-        ws_path = (
-            "/mqtt"
-            f"?x-amz-customauthorizer-name={quote(creds['authorizer_name'])}"
-            f"&token={quote(creds['token_value'])}"
-            f"&x-amz-customauthorizer-signature={quote(creds['token_signature'])}"
-        )
-        client.ws_set_options(path=ws_path)
-        client.tls_set_context()  # use system CAs; Dyson's endpoint is valid AWS IoT
-        client.tls_insecure_set(True)
-
+        client.username_pw_set(self._mqtt_username, self._mqtt_password)
         client.on_connect    = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message    = self._on_message
 
-        _LOGGER.debug("[%s] Connecting to %s:443 (WSS)", self.serial, creds["endpoint"])
-        client.connect(creds["endpoint"], port=443, keepalive=30)
+        _LOGGER.debug(
+            "[%s] Connecting to local MQTT broker at %s:1883",
+            self.serial, self._robot_host,
+        )
+        client.connect(self._robot_host, port=1883, keepalive=30)
 
         with self._lock:
             self._client = client
@@ -518,8 +513,8 @@ class DysonMqttClient:
             _LOGGER.error("[%s] MQTT connect failed, rc=%s", self.serial, rc)
             return
         _LOGGER.info(
-            "[%s] MQTT connected — endpoint=%s prefix=%s",
-            self.serial, self._iot_creds.get("endpoint"), self._prefix,
+            "[%s] MQTT connected — broker=%s prefix=%s",
+            self.serial, self._robot_host, self._prefix,
         )
         self.connected = True
         self._preferences_fetched = False  # Allow re-fetch on reconnect

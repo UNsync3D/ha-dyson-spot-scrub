@@ -18,6 +18,10 @@ from .const import (
     CONF_PRODUCT_TYPE,
     CONF_MQTT_PREFIX,
     CONF_COUNTRY,
+    CONF_ROBOT_HOST,
+    CONF_LOCAL_MQTT_USERNAME,
+    CONF_LOCAL_MQTT_PASSWORD,
+    CONF_CACHED_ROOMS,
     ROBOT_PRODUCT_PREFIXES,
 )
 from .dyson_api import (
@@ -25,6 +29,7 @@ from .dyson_api import (
     initiate_v3_auth,
     verify_v3_auth,
     get_devices,
+    get_local_credentials,
     DysonAuthError,
     DysonApiError,
 )
@@ -87,6 +92,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._password:     str = ""
         self._challenge_id: str = ""
         self._robots:       list[dict] = []
+        # Populated when a device is selected; used in async_step_robot_host
+        self._selected_device: dict = {}
 
     # ── Entry point — choose auth method ──────────────────────────────────────
 
@@ -223,31 +230,24 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     None,
                 )
                 if match:
-                    return self._create_entry(match)
+                    self._selected_device = match
+                    return await self.async_step_robot_host()
                 errors["base"] = "serial_not_found"
             except Exception as exc:
-                # Manifest fetch failed (API error, 401, timeout, etc.).
-                # The token + serial the user supplied may still be valid —
-                # Dyson's cloud API is occasionally unreachable or returns 401
-                # for older tokens even when IoT access still works.  Fall back
-                # to a minimal synthetic entry so the user isn't stuck.
+                # Manifest fetch failed — create a minimal synthetic device dict
+                # so the robot_host step can still proceed.
                 _LOGGER.warning(
-                    "Manifest fetch failed (%s) — creating minimal entry from serial",
+                    "Manifest fetch failed (%s) — continuing with synthetic entry",
                     exc,
                 )
                 guessed_prefix = "RB05" if serial.startswith("7VD") else "NROB"
-                self._async_abort_entries_match({CONF_SERIAL: serial})
-                return self.async_create_entry(
-                    title=f"Dyson Robot ({serial})",
-                    data={
-                        CONF_AUTH_TOKEN:   token,
-                        CONF_SERIAL:       serial,
-                        CONF_DEVICE_NAME:  f"Dyson Robot ({serial})",
-                        CONF_PRODUCT_TYPE: "RB0S",
-                        CONF_MQTT_PREFIX:  guessed_prefix,
-                        CONF_COUNTRY:      country,
-                    },
-                )
+                self._selected_device = {
+                    "Serial":      serial,
+                    "Name":        f"Dyson Robot ({serial})",
+                    "ProductType": "RB0S",
+                    "mqttRootTopicLevel": guessed_prefix,
+                }
+                return await self.async_step_robot_host()
 
         return self.async_show_form(
             step_id="token",
@@ -270,7 +270,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if not self._robots:
             return self.async_abort(reason="no_robots_found")
         if len(self._robots) == 1:
-            return self._create_entry(self._robots[0])
+            self._selected_device = self._robots[0]
+            return await self.async_step_robot_host()
         return await self.async_step_select_robot()
 
     async def async_step_select_robot(
@@ -285,7 +286,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 None,
             )
             if device:
-                return self._create_entry(device)
+                self._selected_device = device
+                return await self.async_step_robot_host()
 
         options = {
             (d.get("Serial") or d.get("serial")): _device_name(d)
@@ -294,7 +296,56 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({vol.Required("serial"): vol.In(options)})
         return self.async_show_form(step_id="select_robot", data_schema=schema)
 
-    def _create_entry(self, device: dict) -> FlowResult:
+    # ── Step: enter robot's local IP and fetch local credentials ─────────────
+
+    async def async_step_robot_host(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask for the robot's local IP address, then decrypt LocalCredentials."""
+        errors: dict[str, str] = {}
+        serial = (
+            self._selected_device.get("Serial")
+            or self._selected_device.get("serial", "")
+        )
+
+        if user_input is not None:
+            robot_host = user_input["robot_host"].strip()
+            try:
+                mqtt_username, mqtt_password = await get_local_credentials(
+                    self._token, serial
+                )
+            except (DysonApiError, DysonAuthError) as exc:
+                _LOGGER.warning(
+                    "[%s] Could not fetch/decrypt LocalCredentials: %s", serial, exc
+                )
+                errors["base"] = "cannot_connect"
+            except Exception as exc:
+                _LOGGER.exception(
+                    "[%s] Unexpected error fetching LocalCredentials: %s", serial, exc
+                )
+                errors["base"] = "cannot_connect"
+            else:
+                return self._create_entry(
+                    self._selected_device,
+                    robot_host=robot_host,
+                    mqtt_username=mqtt_username,
+                    mqtt_password=mqtt_password,
+                )
+
+        return self.async_show_form(
+            step_id="robot_host",
+            data_schema=vol.Schema({vol.Required("robot_host"): str}),
+            description_placeholders={"serial": serial},
+            errors=errors,
+        )
+
+    def _create_entry(
+        self,
+        device: dict,
+        robot_host: str = "",
+        mqtt_username: str = "",
+        mqtt_password: str = "",
+    ) -> FlowResult:
         serial  = device.get("Serial") or device.get("serial", "")
         name    = _device_name(device)
         pt      = device.get("ProductType") or device.get("productType", "RB0S")
@@ -311,11 +362,15 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_create_entry(
             title=name,
             data={
-                CONF_AUTH_TOKEN:   self._token,
-                CONF_SERIAL:       serial,
-                CONF_DEVICE_NAME:  name,
-                CONF_PRODUCT_TYPE: pt,
-                CONF_MQTT_PREFIX:  prefix,
-                CONF_COUNTRY:      self._country,
+                CONF_AUTH_TOKEN:          self._token,
+                CONF_SERIAL:              serial,
+                CONF_DEVICE_NAME:         name,
+                CONF_PRODUCT_TYPE:        pt,
+                CONF_MQTT_PREFIX:         prefix,
+                CONF_COUNTRY:             self._country,
+                CONF_ROBOT_HOST:          robot_host,
+                CONF_LOCAL_MQTT_USERNAME: mqtt_username,
+                CONF_LOCAL_MQTT_PASSWORD: mqtt_password,
+                CONF_CACHED_ROOMS:        [],
             },
         )

@@ -449,3 +449,83 @@ async def get_current_map(token: str, serial: str) -> tuple[str, dict[str, Any]]
     map_id = str(current["id"])
     map_data = await get_map(token, serial, map_id)
     return map_id, map_data
+
+
+# ── Local MQTT credential decryption ─────────────────────────────────────────
+#
+# LocalCredentials in the manifest are AES-256-CBC encrypted with:
+#   key = bytes(range(1, 33))   # 0x01 … 0x20  (publicly known, hardcoded)
+#   iv  = bytes(16)             # 16 zero bytes
+#
+# Newer firmware: decrypted JSON → {"serial": "...", "apPasswordHash": "..."}
+# Older firmware: decrypted plaintext is the raw MQTT password.
+
+_LC_KEY = bytes(range(1, 33))
+_LC_IV  = bytes(16)
+
+
+def decrypt_local_credentials(encrypted_b64: str) -> tuple[str, str]:
+    """Decrypt a base64-encoded LocalCredentials blob.
+
+    Returns (mqtt_username, mqtt_password).  If the JSON contains no serial,
+    the caller should use the device serial as the username instead.
+    """
+    import base64 as _b64
+
+    try:
+        from cryptography.hazmat.backends import default_backend
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    except ImportError as exc:
+        raise DysonApiError(
+            "The 'cryptography' package is required for local credential decryption. "
+            "Add it to manifest.json requirements or install it manually."
+        ) from exc
+
+    try:
+        data = _b64.b64decode(encrypted_b64)
+    except Exception as exc:
+        raise DysonApiError(f"LocalCredentials is not valid base64: {exc}") from exc
+
+    cipher = Cipher(algorithms.AES(_LC_KEY), modes.CBC(_LC_IV), backend=default_backend())
+    decryptor = cipher.decryptor()
+    decrypted = decryptor.update(data) + decryptor.finalize()
+
+    # Strip PKCS#7 padding
+    pad_len = decrypted[-1]
+    plaintext = decrypted[:-pad_len].decode("utf-8", errors="replace")
+
+    try:
+        obj = json.loads(plaintext)
+        if isinstance(obj, dict):
+            return obj.get("serial", ""), obj.get("apPasswordHash", "")
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Older firmware — plaintext is the raw password
+    return "", plaintext
+
+
+async def get_local_credentials(token: str, serial: str) -> tuple[str, str]:
+    """Return (mqtt_username, mqtt_password) by decrypting LocalCredentials.
+
+    Fetches the manifest, finds the matching device (case-insensitive serial
+    match), decrypts its LocalCredentials blob.  Falls back to using the
+    device serial as username when the blob contains no serial field.
+    """
+    devices = await get_devices(token)
+    device = next(
+        (d for d in devices
+         if (d.get("Serial") or d.get("serial", "")).upper() == serial.upper()),
+        None,
+    )
+    if device is None:
+        raise DysonApiError(f"Device {serial} not found in manifest")
+
+    local_creds_b64 = device.get("LocalCredentials") or device.get("localCredentials")
+    if not local_creds_b64:
+        raise DysonApiError(f"No LocalCredentials found for device {serial}")
+
+    username, password = decrypt_local_credentials(local_creds_b64)
+    if not username:
+        username = serial
+    return username, password

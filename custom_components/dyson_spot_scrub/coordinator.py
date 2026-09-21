@@ -8,8 +8,15 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_SERIAL, CONF_MQTT_PREFIX, DEFAULT_MODE, CONF_CACHED_ROOMS
-from .dyson_api import get_iot_credentials
+from .const import (
+    CONF_SERIAL,
+    CONF_MQTT_PREFIX,
+    CONF_ROBOT_HOST,
+    CONF_LOCAL_MQTT_USERNAME,
+    CONF_LOCAL_MQTT_PASSWORD,
+    DEFAULT_MODE,
+    CONF_CACHED_ROOMS,
+)
 from .dyson_mqtt import DysonMqttClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -31,11 +38,16 @@ class DysonCoordinator:
         verbose: bool = False,
     ) -> None:
         self.hass          = hass
-        self._token        = token
+        self._token        = token   # retained for future API calls (map, OTA, etc.)
         self.serial        = serial
         self._prefix       = mqtt_prefix
         self._config_entry = config_entry
         self._verbose      = verbose
+
+        # Local MQTT credentials — stored in config entry during setup wizard
+        self._robot_host    = config_entry.data.get(CONF_ROBOT_HOST, "")
+        self._mqtt_username = config_entry.data.get(CONF_LOCAL_MQTT_USERNAME, "")
+        self._mqtt_password = config_entry.data.get(CONF_LOCAL_MQTT_PASSWORD, "")
 
         self.mqtt: DysonMqttClient | None = None
 
@@ -63,22 +75,27 @@ class DysonCoordinator:
     # ── Setup / teardown ──────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
-        """Fetch IoT credentials and open the MQTT connection.
+        """Open the local MQTT connection.
 
-        On success the robot is immediately reachable and entities update live.
+        Connects directly to the robot's onboard broker — no cloud calls needed.
 
-        On failure (network error, transient API blip) the error is logged but
-        NOT re-raised so the config entry still loads and the platform creates
-        all entities.  They show as unavailable until a background reconnect
-        succeeds — exactly the same experience as a WiFi-connected device
-        going offline for a moment.
+        On failure (robot offline, wrong IP) the error is logged but NOT re-raised
+        so the config entry still loads and entities are created.  They show as
+        unavailable until a background reconnect succeeds.
         """
         self._shutting_down = False
         self._reconnect_attempt = 0
+
+        if not self._robot_host:
+            _LOGGER.error(
+                "[%s] No robot_host configured — reconfigure this integration "
+                "to enter the robot's local IP address",
+                self.serial,
+            )
+            return
+
         try:
-            _LOGGER.debug("[%s] Fetching IoT credentials", self.serial)
-            iot_creds = await get_iot_credentials(self._token, self.serial)
-            await self._async_connect_with_creds(iot_creds)
+            await self._async_connect_local()
         except Exception as exc:
             _LOGGER.warning(
                 "[%s] Initial MQTT connection failed (%s) — "
@@ -86,23 +103,23 @@ class DysonCoordinator:
                 "reconnect will retry automatically",
                 self.serial, exc,
             )
-            # Schedule background reconnect so we keep trying without HA's
-            # 60-second ConfigEntryNotReady retry loop.
             if not self._shutting_down:
                 self._reconnect_task = self.hass.async_create_task(
                     self._async_reconnect()
                 )
 
-    async def _async_connect_with_creds(self, iot_creds: dict) -> None:
-        """Build a fresh DysonMqttClient from credentials and connect."""
+    async def _async_connect_local(self) -> None:
+        """Build a fresh DysonMqttClient and connect to the local broker."""
         new_client = DysonMqttClient(
             serial=self.serial,
             mqtt_prefix=self._prefix,
-            iot_creds=iot_creds,
+            robot_host=self._robot_host,
+            mqtt_username=self._mqtt_username,
+            mqtt_password=self._mqtt_password,
             verbose=self._verbose,
         )
-        new_client.on_connected     = self._on_mqtt_connected
-        new_client.on_disconnected  = self._on_mqtt_disconnected
+        new_client.on_connected      = self._on_mqtt_connected
+        new_client.on_disconnected   = self._on_mqtt_disconnected
         new_client.on_prefix_changed = self._on_mqtt_prefix_changed
         new_client.register_callback(self._on_state_change)
 
@@ -123,14 +140,17 @@ class DysonCoordinator:
     # ── Reconnect logic ───────────────────────────────────────────────────────
 
     async def _async_reconnect(self) -> None:
-        """Fetch fresh IoT credentials and reconnect, with backoff."""
+        """Reconnect to the local MQTT broker, with backoff.
+
+        No cloud calls needed — credentials are stored locally in the config entry.
+        """
         delay = _RECONNECT_DELAYS[
             min(self._reconnect_attempt, len(_RECONNECT_DELAYS) - 1)
         ]
         self._reconnect_attempt += 1
         _LOGGER.info(
-            "[%s] Reconnect attempt %d — waiting %d s",
-            self.serial, self._reconnect_attempt, delay,
+            "[%s] Reconnect attempt %d — waiting %d s before retrying %s:1883",
+            self.serial, self._reconnect_attempt, delay, self._robot_host,
         )
         await asyncio.sleep(delay)
 
@@ -147,22 +167,9 @@ class DysonCoordinator:
                 pass
 
         try:
-            _LOGGER.info("[%s] Fetching fresh IoT credentials for reconnect", self.serial)
-            iot_creds = await get_iot_credentials(self._token, self.serial)
-        except Exception:
-            _LOGGER.exception(
-                "[%s] Failed to fetch IoT credentials — scheduling retry", self.serial
-            )
-            if not self._shutting_down:
-                self._reconnect_task = self.hass.async_create_task(
-                    self._async_reconnect()
-                )
-            return
-
-        try:
-            await self._async_connect_with_creds(iot_creds)
+            await self._async_connect_local()
             self._reconnect_attempt = 0  # Reset backoff on success
-            _LOGGER.info("[%s] Reconnected successfully", self.serial)
+            _LOGGER.info("[%s] Reconnected to local broker successfully", self.serial)
         except Exception:
             _LOGGER.exception(
                 "[%s] Reconnect connect() failed — scheduling retry", self.serial

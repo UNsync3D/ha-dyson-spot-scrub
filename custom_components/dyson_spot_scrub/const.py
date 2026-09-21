@@ -10,6 +10,12 @@ CONF_SERIAL     = "serial"
 CONF_DEVICE_NAME    = "device_name"
 CONF_PRODUCT_TYPE   = "product_type"
 CONF_MQTT_PREFIX    = "mqtt_prefix"
+
+# Local MQTT connection (replaces cloud IoT credentials)
+CONF_ROBOT_HOST          = "robot_host"
+CONF_LOCAL_MQTT_USERNAME = "local_mqtt_username"
+CONF_LOCAL_MQTT_PASSWORD = "local_mqtt_password"
+
 # Persisted room names — cached so switch entities survive HA restarts even
 # when MQTT hasn't connected yet (e.g. robot is drying or briefly offline).
 CONF_CACHED_ROOMS   = "cached_rooms"

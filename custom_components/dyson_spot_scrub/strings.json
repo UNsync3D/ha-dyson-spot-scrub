@@ -40,6 +40,13 @@
         "data": {
           "serial": "Robot"
         }
+      },
+      "robot_host": {
+        "title": "Robot Local IP Address",
+        "description": "Enter the local IP address of your Dyson robot ({serial}). You can find this in your router's device list or the Dyson app's device info screen. The robot must be on the same network as Home Assistant.",
+        "data": {
+          "robot_host": "Robot IP address"
+        }
       }
     },
     "abort": {
