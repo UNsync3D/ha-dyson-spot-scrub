@@ -136,7 +136,11 @@ def _room_display_name(raw_name: Any) -> str:
     The robot stores room names in three formats:
     - Plain string with wrong case:       "Living room"  → "Living Room"
     - JSON-encoded object:                '{"type":"dining","name":"Dining"}' → "Dining"
-    - Plain string with trailing digit:   "Kitchen1"     → "Kitchen"
+    - Plain string with trailing digit:   "Kitchen1"     → "Kitchen 1"
+
+    Trailing digits are preserved with a space separator — they are the robot's
+    internal disambiguation for rooms the user named identically (e.g. two rooms
+    both called "Kitchen"). Stripping them would produce duplicate entity IDs.
     """
     s = str(raw_name) if not isinstance(raw_name, str) else raw_name
     # Try to parse JSON (handles '{"type":"dining","name":"Dining"}')
@@ -146,8 +150,9 @@ def _room_display_name(raw_name: Any) -> str:
             s = parsed.get("name") or parsed.get("type") or s
     except (json.JSONDecodeError, TypeError):
         pass
-    # Strip trailing digits ("Kitchen1" → "Kitchen")
-    s = re.sub(r"\d+$", "", s).strip()
+    # Separate a trailing digit with a space ("Kitchen1" → "Kitchen 1")
+    # so duplicate room names remain unique without being stripped entirely.
+    s = re.sub(r"([A-Za-z])(\d+)$", r"\1 \2", s).strip()
     # Title-case ("Living room" → "Living Room")
     return s.title()
 
@@ -460,19 +465,35 @@ class DysonMqttClient:
         target_id = target_room[0]
 
         def _pref_entry(room: list, is_target: bool, order: int) -> list:
-            """Build one 11-element preference array from a cached 12-element entry."""
+            """Build a 12-element preference array matching the robot's own format.
+
+            Index mapping confirmed from live data (Sep 2026):
+              [0]  room_id
+              [1]  display name
+              [2]  unknown — always 0; preserved from cache
+              [3]  unknown — always 0; preserved from cache
+              [4]  clean type: 0=Vacuum+Wash, 2=Vacuum only (others TBC)
+              [5]  hydration level (0=none/low, 2=high; TBC)
+              [6]  unknown — always 0
+              [7]  unknown — always 0
+              [8]  enabled in clean sequence (1=yes, 0=no)
+              [9]  unknown — always 0
+              [10] 1-based position in clean order
+              [11] unknown — always 0; newer firmware field
+            """
             return [
-                room[0],                              # [0]  room_id
-                _room_display_name(room[1]),          # [1]  normalised name
-                0,                                    # [2]  cleaning-type → always 0
-                mode,                                 # [3]  cleaning mode (caller-supplied)
-                room[4] if len(room) > 4 else 0,     # [4]  preserve from cache
-                room[5] if len(room) > 5 else 0,     # [5]  preserve from cache
-                0,                                    # [6]
-                0,                                    # [7]
-                1 if is_target else 0,                # [8]  enabled flag
-                0,                                    # [9]
-                order,                                # [10] 1-based clean order
+                room[0],                               # [0]  room_id
+                _room_display_name(room[1]),           # [1]  normalised name
+                room[2] if len(room) > 2 else 0,      # [2]  preserve (always 0)
+                room[3] if len(room) > 3 else 0,      # [3]  preserve (always 0)
+                mode,                                  # [4]  clean type (caller-supplied)
+                room[5] if len(room) > 5 else 0,      # [5]  hydration — preserve from cache
+                0,                                     # [6]
+                0,                                     # [7]
+                1 if is_target else 0,                 # [8]  enabled flag
+                0,                                     # [9]
+                order,                                 # [10] 1-based clean order
+                room[11] if len(room) > 11 else 0,    # [11] newer firmware field
             ]
 
         # Target room first (order=1), then all others in cache order
