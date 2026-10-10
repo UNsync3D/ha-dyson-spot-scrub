@@ -288,6 +288,14 @@ class DysonRoomSelectEntity(SelectEntity):
             return None
         return self._options_map.get(room[self._array_index])
 
+    @property
+    def extra_state_attributes(self) -> dict[str, str] | None:
+        """Expose the stable map room ID so cards survive display-name changes."""
+        room = self._find_room_prefs()
+        if room is None or not room:
+            return None
+        return {"room_id": str(room[0])}
+
     # ── User interaction ──────────────────────────────────────────────────────
 
     async def async_select_option(self, option: str) -> None:

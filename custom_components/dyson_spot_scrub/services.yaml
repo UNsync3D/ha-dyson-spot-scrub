@@ -32,3 +32,49 @@ clean_rooms:
       example: '["Living Room", "Kitchen"]'
       selector:
         object:
+
+save_room_settings:
+  name: Save Room Settings
+  description: Apply multiple per-room settings in one update without starting a cleaning run.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      description: The vacuum whose room settings should be updated.
+      required: true
+      selector:
+        entity:
+          domain: vacuum
+    room_settings:
+      name: Room settings
+      description: >
+        Object keyed by stable room ID. Each room can include cleaning_mode,
+        cleaning_strategy, water_level, and mop_repetitions using the same option
+        labels shown by the select entities. Example: {"12":{"cleaning_mode":"Vacuum then Mop","mop_repetitions":"Two Passes"}}.
+      required: true
+      selector:
+        object:
+
+start_rooms_with_settings:
+  name: Start Rooms With Settings
+  description: Apply a room-settings draft and send the selected room IDs to the robot in the supplied order. The robot may choose its own execution order.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      description: The vacuum to start.
+      required: true
+      selector:
+        entity:
+          domain: vacuum
+    room_ids:
+      name: Ordered room IDs
+      description: Stable room IDs in the requested cleaning order.
+      required: true
+      example: '["12", "10"]'
+      selector:
+        object:
+    room_settings:
+      name: Room settings
+      description: Optional object keyed by stable room ID with select option labels to apply before starting.
+      required: false
+      selector:
+        object:

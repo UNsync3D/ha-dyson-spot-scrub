@@ -36,6 +36,15 @@ _LOGGER = logging.getLogger(__name__)
 
 _PREFERENCE_TIMEOUT = 10.0
 
+_ROOM_SETTING_OPTIONS = {
+    "cleaning_mode": (3, {
+        "Vacuum": 0, "Vacuum and Mop": 1, "Mop": 2, "Vacuum then Mop": 3,
+    }),
+    "cleaning_strategy": (4, {"Auto": 0, "Boost": 1, "Quiet": 2, "Quick": 3}),
+    "water_level": (5, {"Very Low": 99, "Low": 0, "Medium": 1, "High": 2}),
+    "mop_repetitions": (6, {"One Pass": 0, "Two Passes": 1}),
+}
+
 # ── State classification ──────────────────────────────────────────────────────
 
 RUNNING_STATES = {
@@ -405,7 +414,36 @@ class DysonMqttClient:
             "room_preference": rooms,
             "uv_switch":       uv_switch,
         })
+        if self._cached_preference is not None:
+            self._cached_preference["room"] = deepcopy(rooms)
         return True
+
+    def save_room_settings(self, room_settings: dict[str, dict[str, str]]) -> bool:
+        """Apply a room-ID keyed draft and publish preferences once, without cleaning."""
+        if not isinstance(room_settings, dict) or not room_settings:
+            _LOGGER.warning("[%s] No room settings were supplied", self.serial)
+            return False
+        rooms = deepcopy(self.room_preferences)
+        if not rooms:
+            _LOGGER.warning("[%s] Cannot save room settings: preferences unavailable", self.serial)
+            return False
+        by_id = {str(room[0]): room for room in rooms if isinstance(room, list) and room}
+        for room_id, settings in room_settings.items():
+            room = by_id.get(str(room_id))
+            if room is None or len(room) < 7 or not isinstance(settings, dict) or not settings:
+                _LOGGER.warning("[%s] Invalid room settings for room ID %r", self.serial, room_id)
+                return False
+            for key, option in settings.items():
+                field = _ROOM_SETTING_OPTIONS.get(key)
+                if field is None or not isinstance(option, str):
+                    _LOGGER.warning("[%s] Invalid room setting %r=%r", self.serial, key, option)
+                    return False
+                index, option_values = field
+                if option not in option_values:
+                    _LOGGER.warning("[%s] Unsupported value for %s: %r", self.serial, key, option)
+                    return False
+                room[index] = option_values[option]
+        return self.set_room_preferences(rooms)
 
     # ── Single-room clean ─────────────────────────────────────────────────────
 
@@ -413,15 +451,41 @@ class DysonMqttClient:
         """Start one room, matching its normalised display name."""
         return self._start_cleaning(mode, room_name)
 
-    def _start_cleaning(self, mode: int, room_name: str | None = None) -> bool:
+    def start_rooms_with_settings(
+        self,
+        room_ids: list[str | int],
+        room_settings: dict[str, dict[str, str]] | None = None,
+    ) -> bool:
+        """Apply a card draft and pass the selected room IDs to the robot in order."""
+        if not room_ids:
+            _LOGGER.warning("[%s] Cannot start: no room IDs supplied", self.serial)
+            return False
+        return self._start_cleaning(
+            None, room_ids=room_ids, room_settings=room_settings or {}
+        )
+
+    def _start_cleaning(
+        self,
+        mode: int | None,
+        room_name: str | None = None,
+        *,
+        room_ids: list[str | int] | None = None,
+        room_settings: dict[str, dict[str, str]] | None = None,
+    ) -> bool:
         """Read current preferences before editing mode and room selection.
 
         Called from an executor, never the MQTT callback or HA event-loop thread.
         Keep the existing four-command start sequence; only its room payload is
         corrected here. A failed refresh must not fall back to stale preferences.
         """
-        if mode not in (0, 1, 2, 3):
+        if mode is not None and mode not in (0, 1, 2, 3):
             _LOGGER.warning("[%s] Cannot start: invalid cleaning mode %r", self.serial, mode)
+            return False
+        if room_ids is not None and len({str(room_id) for room_id in room_ids}) != len(room_ids):
+            _LOGGER.warning("[%s] Cannot start: duplicate room IDs", self.serial)
+            return False
+        if room_settings is not None and not isinstance(room_settings, dict):
+            _LOGGER.warning("[%s] Cannot start: room settings must be an object", self.serial)
             return False
         if not self._start_lock.acquire(blocking=False):
             _LOGGER.warning("[%s] Cannot start: another start is pending", self.serial)
@@ -472,7 +536,14 @@ class DysonMqttClient:
                 ):
                     _LOGGER.warning("[%s] Cannot start: incomplete room preferences", self.serial)
                     return False
-                if room_name is None:
+                if room_ids is not None:
+                    by_id = {str(room[0]): room for room in rooms}
+                    requested = [str(room_id) for room_id in room_ids]
+                    if any(room_id not in by_id for room_id in requested):
+                        _LOGGER.warning("[%s] Cannot start: a requested room ID is missing", self.serial)
+                        return False
+                    selected = [by_id[room_id] for room_id in requested]
+                elif room_name is None:
                     selected = rooms
                 else:
                     selected = [room for room in rooms if
@@ -483,8 +554,8 @@ class DysonMqttClient:
                             self.serial, room_name,
                         )
                         return False
-                room_ids = [room[0] for room in selected]
-                if len({room[0] for room in rooms}) != len(rooms):
+                selected_room_ids = [room[0] for room in selected]
+                if len({str(room[0]) for room in rooms}) != len(rooms):
                     _LOGGER.warning("[%s] Cannot start: duplicate room IDs", self.serial)
                     return False
 
@@ -492,16 +563,38 @@ class DysonMqttClient:
                 # [6] mop passes, [8] selected. Preserve names, order, unknown
                 # fields and any trailing fields returned by get_preference.
                 updated_rooms = deepcopy(rooms)
+                settings_by_id = room_settings or {}
                 for room in updated_rooms:
-                    enabled = room[0] in room_ids
+                    enabled = str(room[0]) in {str(room_id) for room_id in selected_room_ids}
                     room[8] = int(enabled)
-                    if enabled:
+                    if enabled and mode is not None:
                         room[3] = mode
+                    settings = settings_by_id.get(str(room[0]), {})
+                    if not isinstance(settings, dict):
+                        _LOGGER.warning("[%s] Invalid room settings for room ID %r", self.serial, room[0])
+                        return False
+                    for key, option in settings.items():
+                        field = _ROOM_SETTING_OPTIONS.get(key)
+                        if field is None or not isinstance(option, str):
+                            _LOGGER.warning("[%s] Invalid room setting %r=%r", self.serial, key, option)
+                            return False
+                        index, option_values = field
+                        if option not in option_values:
+                            _LOGGER.warning("[%s] Unsupported value for %s: %r", self.serial, key, option)
+                            return False
+                        room[index] = option_values[option]
+                if set(settings_by_id) - {str(room[0]) for room in updated_rooms}:
+                    _LOGGER.warning("[%s] Room settings refer to a missing room ID", self.serial)
+                    return False
+
+                ordered_room_ids = selected_room_ids
 
                 _LOGGER.info(
-                    "[%s] Starting cleaning mode %s in rooms %s with refreshed preferences",
-                    self.serial, mode, room_ids,
+                    "[%s] Starting cleaning in rooms %s with refreshed preferences",
+                    self.serial, ordered_room_ids,
                 )
+                if room_ids is not None and self._cached_preference is not None:
+                    self._cached_preference["room"] = deepcopy(updated_rooms)
                 self._publish_jdm("service.set_preference", {
                     "map_id": map_id,
                     "prefer_type": 1,
@@ -515,13 +608,13 @@ class DysonMqttClient:
                     "cleaningMode": "zoneConfigured",
                     "cleaningProgramme": {
                         "persistentMapId": str(map_id),
-                        "unorderedZones": [str(room_id) for room_id in room_ids],
+                        "unorderedZones": [str(room_id) for room_id in ordered_room_ids],
                     },
                     "time": _now_iso(),
                 })
                 self._publish_jdm("service.set_cur_map", {"map_id": map_id})
                 self._publish_jdm("service.set_room_clean", {
-                    "ctrl_value": 1, "clean_type": 0, "room_ids": room_ids,
+                    "ctrl_value": 1, "clean_type": 0, "room_ids": ordered_room_ids,
                 })
                 return True
         finally:

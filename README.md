@@ -39,6 +39,34 @@ Selected via the **Vacuum Mode** entity, or from any automation:
 | Mop | Wet mopping only |
 | Vacuum then Mop | Full vacuum pass, then full mop pass |
 
+### Batched room settings for Lovelace cards
+
+Per-room select entities continue to send each changed option to the robot immediately. A custom card can keep edits locally and call `dyson_spot_scrub.save_room_settings` once when the user saves. The payload uses stable room IDs and the same option labels shown by the select entities:
+
+```yaml
+action: dyson_spot_scrub.save_room_settings
+data:
+  entity_id: vacuum.dyson_spot_scrub
+  room_settings:
+    "12":
+      cleaning_mode: Vacuum then Mop
+      cleaning_strategy: Auto
+      water_level: Medium
+      mop_repetitions: Two Passes
+```
+
+To start with a local draft, call `dyson_spot_scrub.start_rooms_with_settings`. It applies the supplied room settings and sends the selected room IDs to the robot in the supplied order. The current Dyson protocol calls the field `unorderedZones`, so the robot may choose its own execution order until ordered cleaning is supported by the integration. Existing entities and actions keep their current behavior.
+
+```yaml
+action: dyson_spot_scrub.start_rooms_with_settings
+data:
+  entity_id: vacuum.dyson_spot_scrub
+  room_ids: ["12", "10"]
+  room_settings:
+    "12":
+      cleaning_mode: Vacuum then Mop
+```
+
 ---
 
 ## Requirements

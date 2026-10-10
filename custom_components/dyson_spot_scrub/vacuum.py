@@ -13,7 +13,9 @@ from homeassistant.components.vacuum import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -37,11 +39,26 @@ from .dyson_mqtt import (
 
 SERVICE_CLEAN_ROOM   = "clean_room"
 SERVICE_CLEAN_ROOMS  = "clean_rooms"
+SERVICE_SAVE_ROOM_SETTINGS = "save_room_settings"
+SERVICE_START_ROOMS_WITH_SETTINGS = "start_rooms_with_settings"
 ATTR_ROOM            = "room"
 ATTR_ROOMS           = "rooms"
+ATTR_ENTITY_ID       = "entity_id"
+ATTR_ROOM_IDS        = "room_ids"
+ATTR_ROOM_SETTINGS   = "room_settings"
 
 _CLEAN_ROOM_SCHEMA  = vol.Schema({vol.Required(ATTR_ROOM): cv.string})
 _CLEAN_ROOMS_SCHEMA = vol.Schema({vol.Required(ATTR_ROOMS): vol.All(cv.ensure_list, [cv.string])})
+_CARD_ENTITY_SCHEMA = vol.All(cv.ensure_list, [cv.entity_id])
+_SAVE_ROOM_SETTINGS_SCHEMA = vol.Schema({
+    vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+    vol.Required(ATTR_ROOM_SETTINGS): dict,
+})
+_START_ROOMS_WITH_SETTINGS_SCHEMA = vol.Schema({
+    vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+    vol.Required(ATTR_ROOM_IDS): vol.All(cv.ensure_list, [cv.string]),
+    vol.Optional(ATTR_ROOM_SETTINGS, default={}): dict,
+})
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +108,65 @@ async def async_setup_entry(
             SERVICE_CLEAN_ROOMS,
             _handle_clean_rooms,
             schema=_CLEAN_ROOMS_SCHEMA,
+        )
+
+    def _get_target_coordinator(call: ServiceCall) -> DysonCoordinator:
+        """Resolve a card action to exactly one configured vacuum."""
+        entity_ids = call.data[ATTR_ENTITY_ID]
+        if len(entity_ids) != 1:
+            raise HomeAssistantError("Select exactly one Dyson vacuum entity")
+        registry_entry = er.async_get(hass).async_get(entity_ids[0])
+        if (
+            registry_entry is None
+            or registry_entry.platform != DOMAIN
+            or not registry_entry.config_entry_id
+            or not registry_entry.entity_id.startswith("vacuum.")
+        ):
+            raise HomeAssistantError("The selected entity is not a Dyson vacuum")
+        coordinator = hass.data.get(DOMAIN, {}).get(registry_entry.config_entry_id)
+        if not isinstance(coordinator, DysonCoordinator) or not coordinator.mqtt:
+            raise HomeAssistantError("The selected Dyson vacuum is unavailable")
+        if not coordinator.mqtt.connected:
+            raise HomeAssistantError("The selected Dyson vacuum is disconnected")
+        return coordinator
+
+    if not hass.services.has_service(DOMAIN, SERVICE_SAVE_ROOM_SETTINGS):
+
+        async def _handle_save_room_settings(call: ServiceCall) -> None:
+            coordinator = _get_target_coordinator(call)
+            saved = await hass.async_add_executor_job(
+                coordinator.mqtt.save_room_settings,
+                call.data[ATTR_ROOM_SETTINGS],
+            )
+            if not saved:
+                raise HomeAssistantError("Could not save the room settings")
+            coordinator._async_update_rooms_and_notify()
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_SAVE_ROOM_SETTINGS,
+            _handle_save_room_settings,
+            schema=_SAVE_ROOM_SETTINGS_SCHEMA,
+        )
+
+    if not hass.services.has_service(DOMAIN, SERVICE_START_ROOMS_WITH_SETTINGS):
+
+        async def _handle_start_rooms_with_settings(call: ServiceCall) -> None:
+            coordinator = _get_target_coordinator(call)
+            started = await hass.async_add_executor_job(
+                coordinator.mqtt.start_rooms_with_settings,
+                call.data[ATTR_ROOM_IDS],
+                call.data[ATTR_ROOM_SETTINGS],
+            )
+            if not started:
+                raise HomeAssistantError("Could not start cleaning with the supplied room settings")
+            coordinator._async_update_rooms_and_notify()
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_START_ROOMS_WITH_SETTINGS,
+            _handle_start_rooms_with_settings,
+            schema=_START_ROOMS_WITH_SETTINGS_SCHEMA,
         )
 
 

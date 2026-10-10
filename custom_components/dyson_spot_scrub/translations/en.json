@@ -53,5 +53,24 @@
       "invalid_otp":     "The OTP code was incorrect or has expired. Please try again.",
       "serial_not_found": "That serial number was not found in your Dyson account."
     }
+  },
+  "services": {
+    "save_room_settings": {
+      "name": "Save Room Settings",
+      "description": "Apply multiple per-room settings in one update without starting a cleaning run.",
+      "fields": {
+        "entity_id": {"name": "Dyson vacuum", "description": "The vacuum whose room settings should be updated."},
+        "room_settings": {"name": "Room settings", "description": "Object keyed by stable room ID with select option labels."}
+      }
+    },
+    "start_rooms_with_settings": {
+      "name": "Start Rooms With Settings",
+      "description": "Apply a room-settings draft and send selected room IDs to the robot in the supplied order. The robot may choose its own execution order.",
+      "fields": {
+        "entity_id": {"name": "Dyson vacuum", "description": "The vacuum to start."},
+        "room_ids": {"name": "Ordered room IDs", "description": "Stable room IDs in the requested cleaning order."},
+        "room_settings": {"name": "Room settings", "description": "Optional select option labels to apply before starting, keyed by stable room ID."}
+      }
+    }
   }
 }
