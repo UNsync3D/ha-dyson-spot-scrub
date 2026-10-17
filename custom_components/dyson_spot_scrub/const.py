@@ -50,7 +50,8 @@ OPTIMISTIC_OFF_TIMEOUT = 15
 
 # ── Fault code mapping (hardware-verified, FutuRazor Oct 2026) ─────────────────────
 #
-# Codes appear in activeFaults[*].faultId in CURRENT-STATE messages on the
+# Codes appear in activeFaults[*].faultCode on current firmware. Older captures
+# and firmware may use activeFaults[*].faultId instead.
 # main /status topic.  Ghost-data codes (2108/2109) that leaked from app
 # polling cycles on /status/jdm are intentionally excluded.
 #

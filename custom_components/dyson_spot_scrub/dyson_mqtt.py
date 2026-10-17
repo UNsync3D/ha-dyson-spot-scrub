@@ -143,6 +143,19 @@ def has_freeze_fault(state: dict) -> bool:
     )
 
 
+def _fault_code(fault: dict) -> int | None:
+    """Return a fault code from current or legacy Dyson payloads."""
+    if not isinstance(fault, dict):
+        return None
+    raw_code = fault.get("faultCode")
+    if raw_code is None:
+        raw_code = fault.get("faultId")
+    try:
+        return int(raw_code) if raw_code is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def has_fault(state: dict) -> bool:
     """True when there is an actionable (non-informational) fault.
 
@@ -156,20 +169,22 @@ def has_fault(state: dict) -> bool:
     if not isinstance(faults, list) or not faults:
         return False
     for f in faults:
-        # The field name differs by message type:
+        if not isinstance(f, dict):
+            continue
+        # The severity field name differs by message type:
         #   CURRENT-STATE uses "nextActionRequired"
         #   prop.post / older firmware use "status"
         severity = f.get("nextActionRequired") or f.get("status")
         if severity is not None and severity != "LOG_ONLY":
-            fid = f.get("faultId")
-            if fid is not None and int(fid) in FAULT_CODE_INFORMATIONAL:
+            fid = _fault_code(f)
+            if fid is not None and fid in FAULT_CODE_INFORMATIONAL:
                 continue  # informational — skip
             return True
     return False
 
 
 def active_fault_code(state: dict) -> int | None:
-    """Return the first actionable fault code (faultId) from activeFaults, or None.
+    """Return the first actionable fault code from activeFaults, or None.
 
     Skips LOG_ONLY faults and informational codes (2103, 2105).
     Look the result up in FAULT_CODE_MESSAGES for a user-readable string.
@@ -179,11 +194,13 @@ def active_fault_code(state: dict) -> int | None:
     if not isinstance(faults, list):
         return None
     for f in faults:
+        if not isinstance(f, dict):
+            continue
         severity = f.get("nextActionRequired") or f.get("status")
         if severity is not None and severity != "LOG_ONLY":
-            fid = f.get("faultId")
-            if fid is not None and int(fid) not in FAULT_CODE_INFORMATIONAL:
-                return int(fid)
+            fid = _fault_code(f)
+            if fid is not None and fid not in FAULT_CODE_INFORMATIONAL:
+                return fid
     return None
 
 
@@ -192,10 +209,7 @@ def dock_needs_maintenance(state: dict) -> bool:
     faults = state.get("activeFaults")
     if not isinstance(faults, list):
         return False
-    return any(
-        f.get("faultId") is not None and int(f.get("faultId", -1)) == 2103
-        for f in faults
-    )
+    return any(_fault_code(f) == 2103 for f in faults)
 
 
 def _now_iso() -> str:
@@ -852,10 +866,10 @@ class DysonMqttClient:
                 self._preferences_fetched = True
                 self._fetch_room_preferences()
 
-        elif "faultId" in data:
+        elif "faultCode" in data or "faultId" in data:
             _LOGGER.warning(
                 "[%s] Fault %s — status: %s", self.serial,
-                data.get("faultId"), data.get("status")
+                _fault_code(data), data.get("status")
             )
 
     def _merge_jdm_props(self, props: dict) -> None:
