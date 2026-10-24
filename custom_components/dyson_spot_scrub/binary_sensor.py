@@ -9,12 +9,12 @@ from homeassistant.components.binary_sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE
+from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import is_docked, is_charging, has_fault
+from .entity_helpers import device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -47,18 +47,8 @@ class _DysonBinarySensorBase(BinarySensorEntity):
         key: str,
     ) -> None:
         self._coordinator = coordinator
-        serial            = entry.data[CONF_SERIAL]
-        device_name       = entry.data[CONF_DEVICE_NAME]
-        product_type      = entry.data.get(CONF_PRODUCT_TYPE, "RB0S")
-
-        self._attr_unique_id   = f"{serial}_{key}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial)},
-            name=device_name,
-            manufacturer="Dyson",
-            model=product_type,
-            serial_number=serial,
-        )
+        self._attr_unique_id   = f"{entry.data[CONF_SERIAL]}_{key}"
+        self._attr_device_info = device_info(entry)
 
     # ── HA lifecycle ──────────────────────────────────────────────────────────
 
@@ -98,8 +88,8 @@ class DysonDockSensor(_DysonBinarySensorBase):
 
     @property
     def is_on(self) -> bool | None:
-        state = self._mqtt_state
-        return is_docked(state) or is_charging(state)
+        # is_charging() already implies is_docked(), so one check suffices.
+        return is_docked(self._mqtt_state)
 
 
 class DysonChargingSensor(_DysonBinarySensorBase):

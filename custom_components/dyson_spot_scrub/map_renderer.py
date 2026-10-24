@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import io
 import math
+from functools import lru_cache
 from typing import Any
 
 from .const import MAP_PATH_ACTIONS
@@ -44,12 +45,10 @@ except ImportError:
 SCALE = 80   # pixels per metre
 PAD   = 40   # border padding in pixels
 
-# Upper bound for either canvas side, applied BEFORE any image is allocated.
-# Map coordinates come from Dyson's API; without a cap a single bogus point
-# (e.g. x = 1e6 m) would make Pillow allocate a multi-gigabyte image and could
-# take Home Assistant down. Larger maps are scaled down to fit instead
-# (4096 px ≈ 50 m at the default scale). Every later allocation is either the
-# canvas size (glow layer, grid overlay) or a shape's clamped bounding box.
+# Upper bound for either canvas side. Map coordinates come from Dyson's API;
+# without a cap a single bogus point (e.g. x = 1e6 m) would make Pillow
+# allocate a multi-gigabyte image and could take Home Assistant down. Larger
+# maps are scaled down to fit instead (4096 px ≈ 50 m at the default scale).
 MAX_CANVAS = 4096
 
 
@@ -621,7 +620,9 @@ def _pt(pt: Any) -> tuple[float, float]:
     return float(pt[0]), float(pt[1])
 
 
+@lru_cache(maxsize=1)
 def _load_fonts() -> tuple[Any, Any]:
+    """Return (large, small) fonts; cached because it's called several times per frame."""
     try:
         return ImageFont.load_default(size=11), ImageFont.load_default(size=9)
     except TypeError:

@@ -84,8 +84,7 @@ class MqttHardeningTests(unittest.TestCase):
         changed = []
         client.on_prefix_changed = changed.append
         with patch.object(client, "request_current_state"), \
-             patch.object(client, "_probe_map_id"), \
-             patch.object(self.mqtt.threading, "Timer"):
+             patch.object(client, "_schedule_map_probes"):
             for bad in ["#", "+", "a b", "x" * 40]:
                 msg = SimpleNamespace(topic=f"{bad}/SER-1/status", payload=b"{}")
                 client._on_message(None, None, msg)
@@ -93,6 +92,33 @@ class MqttHardeningTests(unittest.TestCase):
             self.assertEqual(client._prefix, "RB05")
             client._on_message(None, None, SimpleNamespace(topic="NROB/SER-1/status", payload=b"{}"))
         self.assertEqual(changed, ["NROB"])
+
+    def test_dock_actions_share_one_guarded_path(self):
+        client = self.client()
+        client.connected = True
+        sent = []
+        with patch.object(client, "_publish_raw", lambda topic, p: sent.append((topic, p)) or True):
+            client.state = {"dockState": "IDLE"}
+            self.assertTrue(client.empty_bin())
+            self.assertTrue(client.wash_mop())
+            client.state = {"dockState": "DRYING_MOP"}
+            self.assertFalse(client.empty_bin())
+            self.assertFalse(client.wash_mop())
+        legacy = [p["action"] for t, p in sent if t.endswith("/command")]
+        jdm = [p["params"]["station_act"] for t, p in sent if t.endswith("/command/jdm")]
+        self.assertEqual(legacy, ["COLLECT_DUST", "WASH_MOP"])
+        self.assertEqual(jdm, [3, 1])
+
+    def test_fault_helpers_agree(self):
+        state = {"activeFaults": [
+            {"faultCode": 2105, "status": "WARN"},          # informational
+            {"faultCode": 513, "status": "LOG_ONLY"},       # log only
+            {"status": "STOP"},                             # actionable, no code
+            {"faultCode": 567, "nextActionRequired": "STOP"},
+        ]}
+        self.assertTrue(self.mqtt.has_fault(state))
+        self.assertEqual(self.mqtt.active_fault_code(state), 567)
+        self.assertFalse(self.mqtt.has_fault({"activeFaults": [{"faultCode": 2103, "status": "X"}]}))
 
 
 class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
@@ -118,6 +144,13 @@ class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
         url = session.get.call_args.args[0]
         self.assertEqual(
             url, "https://appapi.cp.dyson.com/v2/app/..%2F..%2Fv1%2Fx/persistent-maps/1%2F2")
+
+    async def test_shared_session_is_used_without_new_session(self):
+        shared = self.respond(200, {"cleanPath": []})
+        self.http.ClientSession.reset_mock()
+        await self.api.get_live_map("t", "S", session=shared)
+        self.http.ClientSession.assert_not_called()
+        shared.get.assert_called_once()
 
     async def test_error_bodies_are_truncated_and_carry_status(self):
         self.respond(401, {"secret": "x" * 5000})

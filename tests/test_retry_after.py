@@ -29,13 +29,19 @@ class RetryAfterTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.dict(sys.modules, {
             "retry_test_integration": package,
             "retry_test_integration.dyson_mqtt": module(
-                "retry_test_integration.dyson_mqtt", DysonMqttClient=object),
+                "retry_test_integration.dyson_mqtt", DysonMqttClient=object,
+                is_any_cleaning=None, start_block_reason=None),
             "aiohttp": self.http,
             "homeassistant": module("homeassistant"),
             "homeassistant.config_entries": module(
                 "homeassistant.config_entries", ConfigEntry=object),
             "homeassistant.core": module(
                 "homeassistant.core", HomeAssistant=object, callback=lambda f: f),
+            # None → dyson_api falls back to a per-call session (mocked above).
+            "homeassistant.helpers": module("homeassistant.helpers"),
+            "homeassistant.helpers.aiohttp_client": module(
+                "homeassistant.helpers.aiohttp_client",
+                async_get_clientsession=lambda hass: None),
         }))
         self.api = importlib.import_module("retry_test_integration.dyson_api")
         self.coordinator_module = importlib.import_module(

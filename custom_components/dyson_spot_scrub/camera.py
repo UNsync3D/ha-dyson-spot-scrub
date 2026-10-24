@@ -27,14 +27,14 @@ from typing import Any
 from homeassistant.components.camera import Camera
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.storage import Store
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE, CONF_AUTH_TOKEN
+from .const import DOMAIN, CONF_SERIAL, CONF_AUTH_TOKEN
 from .coordinator import DysonCoordinator
 from .dyson_api import get_current_map, get_map_metadata, DysonApiError
 from .dyson_mqtt import RUNNING_STATES, is_any_cleaning
+from .entity_helpers import device_info
 from .map_renderer import render_map
 from .map_options import map_options
 from .map_path import PathHistory
@@ -105,13 +105,7 @@ class DysonMapCamera(Camera):
         self._serial      = serial
 
         self._attr_unique_id   = f"{serial}_floor_map"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial)},
-            name=entry.data[CONF_DEVICE_NAME],
-            manufacturer="Dyson",
-            model=entry.data.get(CONF_PRODUCT_TYPE, "RB0S"),
-            serial_number=serial,
-        )
+        self._attr_device_info = device_info(entry)
 
         # Persistent map cache
         self._map_data:    dict[str, Any] | None = None
@@ -468,8 +462,9 @@ class DysonMapCamera(Camera):
         generation = self._cleaning_generation
         try:
             _LOGGER.debug("[%s] Refreshing persistent map data", self._serial)
-            _, map_data = await get_current_map(self._token, self._serial)
-            metadata    = await get_map_metadata(self._token, self._serial)
+            session = self._coordinator.http_session
+            _, map_data = await get_current_map(self._token, self._serial, session=session)
+            metadata    = await get_map_metadata(self._token, self._serial, session=session)
             self._observe_cleaning_state()
             if generation != self._cleaning_generation:
                 return

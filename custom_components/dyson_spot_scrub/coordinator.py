@@ -8,13 +8,13 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .const import (
-    CONF_SERIAL,
     CONF_MQTT_PREFIX,
-    CONF_AUTH_TOKEN,
     DEFAULT_MODE,
     CONF_CACHED_ROOMS,
+    MODE_TO_INT,
 )
 from .dyson_api import (
     DysonApiError,
@@ -22,7 +22,7 @@ from .dyson_api import (
     get_iot_credentials,
     get_live_map,
 )
-from .dyson_mqtt import DysonMqttClient
+from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +59,10 @@ class DysonCoordinator:
         self._verbose      = verbose
 
         self.mqtt: DysonMqttClient | None = None
+
+        # HA's shared aiohttp session — reused for every REST call so the
+        # 5-second live-map poll doesn't open a new TLS connection each time.
+        self.http_session = async_get_clientsession(hass)
 
         # Entities register here; coordinator calls them on every state change
         self._listeners: list[Any] = []
@@ -127,7 +131,7 @@ class DysonCoordinator:
     async def _async_connect_cloud(self) -> None:
         """Fetch fresh IoT credentials and connect to the cloud MQTT broker."""
         _LOGGER.debug("[%s] Fetching IoT credentials from Dyson API", self.serial)
-        iot = await get_iot_credentials(self._token, self.serial)
+        iot = await get_iot_credentials(self._token, self.serial, session=self.http_session)
 
         new_client = DysonMqttClient(
             serial=self.serial,
@@ -270,7 +274,7 @@ class DysonCoordinator:
 
             try:
                 generation = self._live_map_generation
-                data = await get_live_map(self._token, self.serial)
+                data = await get_live_map(self._token, self.serial, session=self.http_session)
                 if generation != self._live_map_generation:
                     return None
                 self._live_map_cache = data
@@ -404,9 +408,19 @@ class DysonCoordinator:
         if self.mqtt and self.mqtt.connected:
             await self.hass.async_add_executor_job(self.mqtt.return_to_base)
 
+    @property
+    def room_names(self) -> list[str]:
+        """Live room names from MQTT, falling back to the names persisted at last run.
+
+        The fallback lets per-room entities be created at startup before MQTT
+        connects (e.g. while the robot is drying or briefly offline).
+        """
+        if self.mqtt and self.mqtt.room_names:
+            return self.mqtt.room_names
+        return self.cached_room_names
+
     async def async_clean_rooms_sequential(self, room_names: list[str]) -> None:
         """Clean a list of rooms one at a time, waiting for docking between each."""
-        from .dyson_mqtt import start_block_reason
         if not room_names:
             return
         reason = start_block_reason(self.mqtt.state if self.mqtt else {}, bool(self.mqtt and self.mqtt.connected))
@@ -422,7 +436,6 @@ class DysonCoordinator:
                     _LOGGER.warning("[%s] MQTT not connected — aborting sequential clean", self.serial)
                     return
                 _LOGGER.info("[%s] Sequential clean → '%s'", self.serial, room)
-                from .const import MODE_TO_INT
                 mode_int = MODE_TO_INT.get(self.current_mode, 0)
                 started = await self.hass.async_add_executor_job(
                     self.mqtt.start_room, room, mode_int,
@@ -450,15 +463,14 @@ class DysonCoordinator:
         can precede the end of station work. Drying after a completed job may
         be interrupted by the next room; mid-job charging remains blocked.
         """
-        from .dyson_mqtt import is_any_cleaning, start_block_reason
-
-        loop = asyncio.get_event_loop()
         done_event: asyncio.Event = asyncio.Event()
         cleaning_started = False
 
         def _check() -> None:
             nonlocal cleaning_started
             if not self.mqtt:
+                # Client torn down (shutdown/reconnect). Returning "complete"
+                # lets the loop's own connected-check abort the sequence.
                 done_event.set()
                 return
             state = self.state  # snapshot — already on HA event loop
@@ -469,8 +481,10 @@ class DysonCoordinator:
                 done_event.set()
 
         class _Watcher:
+            # Listeners are always notified on the HA event loop, so _check
+            # can run directly — no call_soon_threadsafe hop needed.
             def async_write_ha_state(inner_self) -> None:
-                loop.call_soon_threadsafe(_check)
+                _check()
 
         watcher = _Watcher()
         self.async_add_listener(watcher)
