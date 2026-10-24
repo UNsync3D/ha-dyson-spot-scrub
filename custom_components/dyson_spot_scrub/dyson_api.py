@@ -568,6 +568,11 @@ async def get_current_map(token: str, serial: str) -> tuple[str, dict[str, Any]]
 #
 # Newer firmware: decrypted JSON → {"serial": "...", "apPasswordHash": "..."}
 # Older firmware: decrypted plaintext is the raw MQTT password.
+#
+# NOTE: The integration currently connects via the cloud broker only; these
+# helpers are unused and kept for a possible local-MQTT mode. The key is
+# Dyson's well-known static key, so this is obfuscation, not secrecy — treat
+# the decrypted password as a secret anyway and never log it.
 
 _LC_KEY = bytes(range(1, 33))
 _LC_IV  = bytes(16)
@@ -591,16 +596,22 @@ def decrypt_local_credentials(encrypted_b64: str) -> tuple[str, str]:
         ) from exc
 
     try:
-        data = _b64.b64decode(encrypted_b64)
+        data = _b64.b64decode(encrypted_b64, validate=True)
     except Exception as exc:
         raise DysonApiError(f"LocalCredentials is not valid base64: {exc}") from exc
+
+    if not data or len(data) % 16:
+        raise DysonApiError("LocalCredentials has an invalid length")
 
     cipher = Cipher(algorithms.AES(_LC_KEY), modes.CBC(_LC_IV), backend=default_backend())
     decryptor = cipher.decryptor()
     decrypted = decryptor.update(data) + decryptor.finalize()
 
-    # Strip PKCS#7 padding
+    # Strip PKCS#7 padding — validate it rather than trusting the last byte,
+    # otherwise a corrupt blob silently yields a truncated/garbage password.
     pad_len = decrypted[-1]
+    if not 1 <= pad_len <= 16 or decrypted[-pad_len:] != bytes([pad_len]) * pad_len:
+        raise DysonApiError("LocalCredentials has invalid padding")
     plaintext = decrypted[:-pad_len].decode("utf-8", errors="replace")
 
     try:

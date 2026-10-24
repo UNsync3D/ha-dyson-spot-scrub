@@ -4,6 +4,7 @@ Run: python -m unittest discover -s tests -v
 HA, paho and HTTP are stubbed; the integration's own modules run for real.
 """
 import asyncio
+import base64
 import importlib
 import io
 from pathlib import Path
@@ -141,6 +142,23 @@ class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
         # Redaction runs before truncation, so a secret can't straddle the cut.
         long = self.api._snippet("x" * 190 + " token=SECRET-VALUE-THAT-IS-LONG")
         self.assertNotIn("SECRET", long)
+
+    def test_local_credentials_padding_is_validated(self):
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+        def encrypt(plain):
+            enc = Cipher(algorithms.AES(self.api._LC_KEY), modes.CBC(self.api._LC_IV)).encryptor()
+            return base64.b64encode(enc.update(plain) + enc.finalize()).decode()
+
+        good = encrypt(b"password" + bytes([8]) * 8)
+        self.assertEqual(self.api.decrypt_local_credentials(good), ("", "password"))
+        for bad in [encrypt(b"password" + bytes([0]) * 8),      # pad 0
+                    encrypt(b"password1234567" + bytes([40])),  # pad > 16
+                    encrypt(b"password" + bytes([1]) * 7 + bytes([8]))]:  # inconsistent
+            with self.assertRaises(self.api.DysonApiError):
+                self.api.decrypt_local_credentials(bad)
+        with self.assertRaises(self.api.DysonApiError):
+            self.api.decrypt_local_credentials(base64.b64encode(b"short").decode())
 
 
 class RendererHardeningTests(unittest.TestCase):
