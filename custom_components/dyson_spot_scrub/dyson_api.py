@@ -30,11 +30,12 @@ from __future__ import annotations
 import json
 import logging
 import math
+import re
 import ssl
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import aiohttp
 
@@ -52,6 +53,25 @@ _HEADERS = {
     "X-Dyson-LinkApp-Version": "6.4.26340",
 }
 
+# Response bodies are echoed into exception messages (and therefore HA logs).
+# Sensitive values are redacted first; the result is then length-capped so a
+# misbehaving endpoint can't flood the log.
+_MAX_BODY_IN_ERROR = 200
+
+# Any JSON key containing one of these (case-insensitive) has its value
+# replaced before logging: bearer/IoT tokens, signatures, passwords, OTP
+# challenge IDs, Basic-auth account secrets and local MQTT credentials.
+_SENSITIVE_KEY_PARTS = (
+    "token", "password", "secret", "signature", "credential", "authorization",
+    "challenge", "otp", "account", "apikey", "api_key", "session", "cookie",
+)
+_REDACTED = "***"
+# Same rule for bodies that aren't valid JSON: key=value / "key": "value".
+_SENSITIVE_TEXT = re.compile(
+    r'(?i)("?[\w-]*(?:' + "|".join(map(re.escape, _SENSITIVE_KEY_PARTS)) +
+    r')[\w-]*"?\s*[:=]\s*)("[^"]*"|[^\s,&;}]+)'
+)
+
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
 
@@ -60,14 +80,23 @@ class DysonAuthError(Exception):
 
 
 class DysonApiError(Exception):
-    """Raised when a Dyson API call fails."""
+    """Raised when a Dyson API call fails.
+
+    ``status`` carries the HTTP status code (None for non-HTTP failures) so
+    callers can tell an expired token (401/403) from a transient outage
+    without parsing the message text.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class DysonRateLimitError(DysonApiError):
     """Raised for HTTP 429, with a retry delay independent of the message."""
 
     def __init__(self, message: str, retry_after: float) -> None:
-        super().__init__(message)
+        super().__init__(message, status=429)
         self.retry_after = retry_after
 
 
@@ -90,6 +119,50 @@ def _parse_retry_after(value: str | None) -> float:
     return 30.0
 
 
+def _is_sensitive_key(key: Any) -> bool:
+    lowered = str(key).lower()
+    return any(part in lowered for part in _SENSITIVE_KEY_PARTS)
+
+
+def _redact(data: Any) -> Any:
+    """Return a copy of a JSON value with sensitive fields replaced by ***."""
+    if isinstance(data, dict):
+        return {k: _REDACTED if _is_sensitive_key(k) else _redact(v)
+                for k, v in data.items()}
+    if isinstance(data, list):
+        return [_redact(v) for v in data]
+    if isinstance(data, str):
+        return _SENSITIVE_TEXT.sub(lambda m: m.group(1) + _REDACTED, data)
+    return data
+
+
+def _snippet(data: Any) -> str:
+    """Return a redacted, length-capped repr of a response body for errors.
+
+    Redaction happens before truncation so a secret can't survive by
+    straddling the cut-off point.
+    """
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except ValueError:
+            pass
+    text = repr(_redact(data))
+    if len(text) > _MAX_BODY_IN_ERROR:
+        return text[:_MAX_BODY_IN_ERROR] + "…"
+    return text
+
+
+def _seg(value: Any) -> str:
+    """URL-encode one path segment.
+
+    Serials and map IDs come from user input / API data. Encoding them stops
+    a value such as "../../v1/..." from redirecting the request to a
+    different endpoint on the same host.
+    """
+    return quote(str(value), safe="")
+
+
 def _connector() -> aiohttp.TCPConnector:
     return aiohttp.TCPConnector(ssl=True)
 
@@ -101,7 +174,7 @@ async def _json(resp: aiohttp.ClientResponse) -> Any:
     except (json.JSONDecodeError, aiohttp.ContentTypeError) as exc:
         body = await resp.text()
         raise DysonAuthError(
-            f"Non-JSON response (HTTP {resp.status}): {body!r}"
+            f"Non-JSON response (HTTP {resp.status}): {_snippet(body)}"
         ) from exc
 
 
@@ -110,9 +183,10 @@ async def _json(resp: aiohttp.ClientResponse) -> Any:
 
 async def authenticate_v1(email: str, password: str, country: str = "GB") -> str:
     """Try legacy v1 auth (no OTP). Returns a Basic token string or raises."""
-    url = f"https://{API_HOST}/v1/userregistration/authenticate?country={country}"
+    url = f"https://{API_HOST}/v1/userregistration/authenticate"
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.post(url, json={"Email": email, "Password": password},
+                                params={"country": country},
                                 headers=_HEADERS) as resp:
             data = await _json(resp)
             if resp.status == 200 and data.get("Account") and data.get("Password"):
@@ -122,7 +196,7 @@ async def authenticate_v1(email: str, password: str, country: str = "GB") -> str
                 ).decode()
                 return token
             raise DysonAuthError(
-                f"v1 auth failed (HTTP {resp.status}): {data}"
+                f"v1 auth failed (HTTP {resp.status}): {_snippet(data)}"
             )
 
 
@@ -132,14 +206,11 @@ async def initiate_v3_auth(email: str, country: str = "GB") -> str:
     NOTE: password is NOT sent at this step — only email goes in the body.
     Password is sent in verify_v3_auth. Sending password here causes 401s.
     """
-    culture = f"en-{country}"
-    url = (
-        f"https://{API_HOST}/v3/userregistration/email/auth"
-        f"?country={country}&culture={culture}"
-    )
+    url = f"https://{API_HOST}/v3/userregistration/email/auth"
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.post(
             url,
+            params={"country": country, "culture": f"en-{country}"},
             json={"email": email},
             headers=_HEADERS,
         ) as resp:
@@ -147,7 +218,7 @@ async def initiate_v3_auth(email: str, country: str = "GB") -> str:
             if resp.status == 200 and data.get("challengeId"):
                 return data["challengeId"]
             raise DysonAuthError(
-                f"v3 auth initiation failed (HTTP {resp.status}): {data}"
+                f"v3 auth initiation failed (HTTP {resp.status}): {_snippet(data)}"
             )
 
 
@@ -156,10 +227,11 @@ async def verify_v3_auth(
     country: str = "GB",
 ) -> str:
     """Verify OTP. Returns bearer token string."""
-    url = f"https://{API_HOST}/v3/userregistration/email/verify?country={country}"
+    url = f"https://{API_HOST}/v3/userregistration/email/verify"
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.post(
             url,
+            params={"country": country},
             json={
                 "email": email,
                 "password": password,
@@ -178,8 +250,10 @@ async def verify_v3_auth(
                     return base64.b64encode(
                         f"{data['account']}:{data['password']}".encode()
                     ).decode()
+                # Deliberately no body here: a 200 reply may contain account secrets.
+                raise DysonAuthError("v3 OTP verification failed: no token in response")
             raise DysonAuthError(
-                f"v3 OTP verification failed (HTTP {resp.status}): {data}"
+                f"v3 OTP verification failed (HTTP {resp.status}): {_snippet(data)}"
             )
 
 
@@ -196,7 +270,8 @@ async def get_devices(token: str) -> list[dict[str, Any]]:
             if resp.status == 200 and isinstance(data, list):
                 return data
             raise DysonApiError(
-                f"Manifest fetch failed (HTTP {resp.status}): {data}"
+                f"Manifest fetch failed (HTTP {resp.status}): {_snippet(data)}",
+                status=resp.status,
             )
 
 
@@ -211,7 +286,8 @@ async def get_iot_credentials(token: str, serial: str) -> dict[str, str]:
             data = await _json(resp)
             if resp.status != 200:
                 raise DysonApiError(
-                    f"IoT credentials fetch failed (HTTP {resp.status}): {data}"
+                    f"IoT credentials fetch failed (HTTP {resp.status}): {_snippet(data)}",
+                    status=resp.status,
                 )
             iot = data.get("IoTCredentials") or data
             return {
@@ -267,7 +343,7 @@ async def get_live_map(token: str, serial: str) -> dict[str, Any]:
     Raises DysonApiError if the robot is not currently cleaning (the endpoint
     may return 404 or an error body when no session is active).
     """
-    url = f"https://{API_HOST}/v1/app/{serial}/live-maps/cleaning"
+    url = f"https://{API_HOST}/v1/app/{_seg(serial)}/live-maps/cleaning"
     headers = {**_HEADERS, "Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.get(url, headers=headers) as resp:
@@ -281,7 +357,8 @@ async def get_live_map(token: str, serial: str) -> dict[str, Any]:
             if resp.status == 200 and isinstance(data, dict):
                 return data
             raise DysonApiError(
-                f"Live map fetch failed (HTTP {resp.status}): {data}"
+                f"Live map fetch failed (HTTP {resp.status}): {_snippet(data)}",
+                status=resp.status,
             )
 
 
@@ -304,7 +381,7 @@ async def get_map_metadata(token: str, serial: str) -> list[dict[str, Any]]:
         "imageUrl": ""
       }]
     """
-    url = f"https://{API_HOST}/v2/app/{serial}/persistent-map-metadata"
+    url = f"https://{API_HOST}/v2/app/{_seg(serial)}/persistent-map-metadata"
     headers = {**_HEADERS, "Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.get(url, headers=headers) as resp:
@@ -312,7 +389,8 @@ async def get_map_metadata(token: str, serial: str) -> list[dict[str, Any]]:
             if resp.status == 200 and isinstance(data, list):
                 return data
             raise DysonApiError(
-                f"Map metadata fetch failed (HTTP {resp.status}): {data}"
+                f"Map metadata fetch failed (HTTP {resp.status}): {_snippet(data)}",
+                status=resp.status,
             )
 
 
@@ -335,7 +413,7 @@ async def get_map(token: str, serial: str, map_id: str) -> dict[str, Any]:
     rendering to SVG/canvas (positive Y is behind the robot, i.e. up on screen
     only after the flip).
     """
-    url = f"https://{API_HOST}/v2/app/{serial}/persistent-maps/{map_id}"
+    url = f"https://{API_HOST}/v2/app/{_seg(serial)}/persistent-maps/{_seg(map_id)}"
     headers = {**_HEADERS, "Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.get(url, headers=headers) as resp:
@@ -343,7 +421,8 @@ async def get_map(token: str, serial: str, map_id: str) -> dict[str, Any]:
             if resp.status == 200 and isinstance(data, dict):
                 return data
             raise DysonApiError(
-                f"Map fetch failed (HTTP {resp.status}): {data}"
+                f"Map fetch failed (HTTP {resp.status}): {_snippet(data)}",
+                status=resp.status,
             )
 
 
@@ -389,8 +468,8 @@ async def update_map_zone_selection(
     Note: URL uses persistent-map-metadata (not persistent-maps).
     """
     url = (
-        f"https://{API_HOST}/v2/app/{serial}"
-        f"/persistent-map-metadata/{map_id}"
+        f"https://{API_HOST}/v2/app/{_seg(serial)}"
+        f"/persistent-map-metadata/{_seg(map_id)}"
     )
     headers = {**_HEADERS, "Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(connector=_connector()) as session:
@@ -398,7 +477,8 @@ async def update_map_zone_selection(
             if resp.status != 200:
                 body = await resp.text()
                 raise DysonApiError(
-                    f"Zone selection update failed (HTTP {resp.status}): {body}"
+                    f"Zone selection update failed (HTTP {resp.status}): {_snippet(body)}",
+                    status=resp.status,
                 )
 
 
@@ -415,7 +495,7 @@ async def get_ota_status(token: str, serial: str) -> str:
     Useful for a binary_sensor.dyson_update_available entity (fires when
     otaStatus == "Available") or a diagnostic sensor showing current status.
     """
-    url = f"https://{API_HOST}/v1/assets/devices/{serial}/ota"
+    url = f"https://{API_HOST}/v1/assets/devices/{_seg(serial)}/ota"
     headers = {**_HEADERS, "Authorization": f"Bearer {token}"}
     async with aiohttp.ClientSession(connector=_connector()) as session:
         async with session.get(url, headers=headers) as resp:
@@ -423,7 +503,8 @@ async def get_ota_status(token: str, serial: str) -> str:
             if resp.status == 200 and "otaStatus" in data:
                 return data["otaStatus"]
             raise DysonApiError(
-                f"OTA status fetch failed (HTTP {resp.status}): {data}"
+                f"OTA status fetch failed (HTTP {resp.status}): {_snippet(data)}",
+                status=resp.status,
             )
 
 
@@ -445,8 +526,8 @@ async def get_clean_estimation(
       # → {"duration": 22, "charges": 0}
     """
     url = (
-        f"https://{API_HOST}/v2/app/{serial}"
-        f"/persistent-maps/{map_id}/clean-estimation"
+        f"https://{API_HOST}/v2/app/{_seg(serial)}"
+        f"/persistent-maps/{_seg(map_id)}/clean-estimation"
     )
     headers = {**_HEADERS, "Authorization": f"Bearer {token}"}
     payload = {"zones": zones}
@@ -456,7 +537,8 @@ async def get_clean_estimation(
             if resp.status == 200 and "duration" in data:
                 return data
             raise DysonApiError(
-                f"Clean estimation failed (HTTP {resp.status}): {data}"
+                f"Clean estimation failed (HTTP {resp.status}): {_snippet(data)}",
+                status=resp.status,
             )
 
 
