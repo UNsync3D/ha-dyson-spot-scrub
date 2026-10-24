@@ -22,9 +22,9 @@ class ConsumableTests(unittest.TestCase):
             "consumable_test_integration.dyson_mqtt": mod("mqtt", battery_level=lambda state: state.get("battery")),
             "homeassistant": mod("homeassistant"),
             "homeassistant.components": mod("components"),
-            "homeassistant.components.sensor": mod("sensor", SensorEntity=object, SensorDeviceClass=SimpleNamespace(BATTERY="battery", ENUM="enum"), SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
+            "homeassistant.components.sensor": mod("sensor", SensorEntity=object, SensorDeviceClass=SimpleNamespace(BATTERY="battery", ENUM="enum", DURATION="duration"), SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
             "homeassistant.config_entries": mod("config_entries", ConfigEntry=object),
-            "homeassistant.const": mod("const", PERCENTAGE="%"),
+            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s")),
             "homeassistant.core": mod("core", HomeAssistant=object, callback=lambda f: f),
             "homeassistant.helpers": mod("helpers"),
             "homeassistant.helpers.entity": mod("entity", DeviceInfo=dict),
@@ -40,10 +40,12 @@ class ConsumableTests(unittest.TestCase):
         asyncio.run(self.sensor.async_setup_entry(hass, self.entry, self.entities.extend))
         self.usage = self.entities[1:6]
         self.solution = self.entities[6]
+        self.drying = self.entities[7]
 
     def test_registration_and_discovery_contract(self):
-        self.assertEqual(len(self.entities), 7)
-        self.assertEqual(len({e._attr_unique_id for e in self.entities}), 7)
+        self.assertEqual(len(self.entities), 8)
+        self.assertEqual(len({e._attr_unique_id for e in self.entities}), 8)
+        self.assertEqual(self.drying._attr_unique_id, "TEST_drying_remaining")
         self.assertEqual(self.entities[0]._attr_unique_id, "TEST_battery")
         for sensor in self.usage:
             self.assertEqual(sensor._attr_native_unit_of_measurement, "%")
@@ -51,7 +53,7 @@ class ConsumableTests(unittest.TestCase):
             self.assertEqual(sensor._attr_state_class, "measurement")
             self.assertEqual(sensor._attr_extra_state_attributes["value_kind"], "usage_percent")
             self.assertEqual(sensor._attr_device_info["identifiers"], {("dyson_spot_scrub", "TEST")})
-        self.assertNotIn("ioniserCartridge", [e._attr_extra_state_attributes["consumable_type"] for e in self.entities[1:]])
+        self.assertNotIn("ioniserCartridge", [e._attr_extra_state_attributes["consumable_type"] for e in self.entities[1:7]])
 
     def test_sample_and_zero_are_consumption_not_remaining(self):
         kinds = [row[0] for row in self.sensor.CONSUMABLES]
@@ -80,6 +82,18 @@ class ConsumableTests(unittest.TestCase):
         for sensor in self.entities[1:]:
             self.assertFalse(sensor.available)
             self.assertIsNone(sensor.native_value)
+
+    def test_drying_countdown_only_while_drying(self):
+        self.coord.state = {"dockState": "DRYING_MOP", "drying_remaining_seconds": 11280,
+                            "drying_total_seconds": 14400, "drying_updated_at": "t"}
+        self.assertTrue(self.drying.available)
+        self.assertEqual(self.drying.native_value, 11280)
+        self.assertEqual(self.drying.extra_state_attributes, {"total_seconds": 14400, "updated_at": "t"})
+        self.coord.state = {**self.coord.state, "dockState": "IDLE"}
+        self.assertFalse(self.drying.available)
+        for value in [None, -1, float("nan"), "5"]:
+            self.coord.state = {"dockState": "DRYING_MOP", "drying_remaining_seconds": value}
+            self.assertIsNone(self.drying.native_value)
 
     def test_push_listener_lifecycle(self):
         for sensor in self.entities[1:]:
