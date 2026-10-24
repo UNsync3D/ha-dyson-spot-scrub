@@ -45,13 +45,16 @@
     "abort": {
       "no_robots_found":    "No robot vacuums were found in your Dyson account.",
       "cannot_connect":     "Could not connect to Dyson's cloud API.",
-      "already_configured": "This device is already configured."
+      "already_configured": "This device is already configured.",
+      "invalid_serial":     "The device reported an invalid serial number."
     },
     "error": {
       "cannot_connect":   "Could not reach Dyson's servers. Check your internet connection.",
       "invalid_auth":     "Invalid email or password. Please check your credentials.",
       "invalid_otp":      "The OTP code was incorrect or has expired. Please try again.",
-      "serial_not_found": "That serial number was not found in your Dyson account."
+      "serial_not_found": "That serial number was not found in your Dyson account.",
+      "invalid_serial":   "The serial number contains invalid characters. Use letters, digits and hyphens only.",
+      "invalid_country":  "Enter a two-letter country code, e.g. GB or AU."
     }
   },
   "services": {

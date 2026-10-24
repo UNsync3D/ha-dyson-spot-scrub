@@ -58,6 +58,14 @@ CONF_ROBOT_HOST          = "robot_host"
 CONF_LOCAL_MQTT_USERNAME = "local_mqtt_username"
 CONF_LOCAL_MQTT_PASSWORD = "local_mqtt_password"
 
+# Input validation. The serial and MQTT prefix are interpolated into MQTT
+# topics ("{prefix}/{serial}/command"), REST URLs and the HA storage key, so
+# anything outside this conservative character set is rejected. In particular
+# MQTT wildcards (+ #), "/" and ".." must never reach those places.
+SERIAL_PATTERN      = r"[A-Z0-9][A-Z0-9-]{2,31}"
+MQTT_PREFIX_PATTERN = r"[A-Za-z0-9_-]{1,32}"
+COUNTRY_PATTERN     = r"[A-Z]{2}"
+
 # Persisted room names — cached so switch entities survive HA restarts even
 # when MQTT hasn't connected yet (e.g. robot is drying or briefly offline).
 CONF_CACHED_ROOMS   = "cached_rooms"

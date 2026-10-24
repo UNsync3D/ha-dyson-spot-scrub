@@ -3,10 +3,11 @@
 Run: python -m unittest discover -s tests -v
 HA, paho and HTTP are stubbed; the integration's own modules run for real.
 """
+import asyncio
 import importlib
 from pathlib import Path
 import sys
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -73,6 +74,83 @@ class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
         # Redaction runs before truncation, so a secret can't straddle the cut.
         long = self.api._snippet("x" * 190 + " token=SECRET-VALUE-THAT-IS-LONG")
         self.assertNotIn("SECRET", long)
+
+
+class ApiError(Exception):
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+class ConfigFlowValidationTests(unittest.TestCase):
+    def setUp(self):
+        class Flow:
+            def __init_subclass__(cls, **kwargs):
+                pass
+
+            def async_show_form(self, **kwargs):
+                return {"type": "form", **kwargs}
+
+            def async_create_entry(self, **kwargs):
+                return {"type": "create_entry", **kwargs}
+
+            def async_abort(self, **kwargs):
+                return {"type": "abort", **kwargs}
+
+            def _async_abort_entries_match(self, match):
+                pass
+        selectors = SimpleNamespace(BooleanSelector=object, ColorRGBSelector=object,
+                                    NumberSelector=object, NumberSelectorConfig=dict,
+                                    NumberSelectorMode=SimpleNamespace(SLIDER="slider"))
+        entries = module("homeassistant.config_entries", ConfigFlow=Flow, OptionsFlow=Flow)
+        self.enterContext(patch.dict(sys.modules, {
+            "sec_flow": package("sec_flow"),
+            "homeassistant": module("homeassistant", config_entries=entries),
+            "homeassistant.config_entries": entries,
+            "homeassistant.core": module("homeassistant.core", callback=lambda f: f),
+            "homeassistant.data_entry_flow": module("homeassistant.data_entry_flow",
+                                                    FlowResult=dict, section=None),
+            "homeassistant.helpers": module("homeassistant.helpers", selector=selectors),
+            "sec_flow.dyson_api": module("sec_flow.dyson_api",
+                authenticate_v1=None, initiate_v3_auth=None, verify_v3_auth=None,
+                get_devices=self.get_devices, DysonAuthError=Exception, DysonApiError=ApiError),
+        }))
+        self.flow = importlib.import_module("sec_flow.config_flow")
+        self.devices_error = None
+
+    async def get_devices(self, token):
+        if self.devices_error:
+            raise self.devices_error
+        return [{"Serial": "SER-1", "ProductType": "804", "Name": "Robot"}]
+
+    def step(self, serial="SER-1", country="GB"):
+        flow = self.flow.DysonConfigFlow()
+        flow.hass = SimpleNamespace(config=SimpleNamespace(country="GB"))
+        return asyncio.run(flow.async_step_token(
+            {"token": "tok", "serial": serial, "country": country}))
+
+    def test_token_step(self):
+        self.assertEqual(self.step()["type"], "create_entry")
+        self.assertEqual(self.step(serial="SER/#")["errors"], {"base": "invalid_serial"})
+        self.assertEqual(self.step(country="GBR")["errors"], {"base": "invalid_country"})
+        self.devices_error = ApiError("rejected", status=401)
+        self.assertEqual(self.step()["errors"], {"base": "invalid_auth"},
+                         "a rejected token must not be saved")
+        self.devices_error = ApiError("outage", status=503)
+        self.assertEqual(self.step()["type"], "create_entry", "outage keeps the fallback")
+        self.devices_error = OSError("dns")
+        self.assertEqual(self.step()["type"], "create_entry")
+
+    def test_serial_validation(self):
+        for good in ["7VD-UK-ABC1234A", "NK6EU12345", "ABC"]:
+            self.assertTrue(self.flow._valid_serial(good), good)
+        for bad in ["", "AB", "SER/../x", "SER#", "SER+", "ser lower", "A" * 40, "../etc"]:
+            self.assertFalse(self.flow._valid_serial(bad), bad)
+
+    def test_country_validation(self):
+        self.assertTrue(self.flow._valid_country("GB"))
+        for bad in ["", "G", "GBR", "g1", "G&"]:
+            self.assertFalse(self.flow._valid_country(bad), bad)
 
 
 if __name__ == "__main__":
