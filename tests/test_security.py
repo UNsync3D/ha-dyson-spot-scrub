@@ -5,6 +5,7 @@ HA, paho and HTTP are stubbed; the integration's own modules run for real.
 """
 import asyncio
 import importlib
+import io
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
@@ -140,6 +141,19 @@ class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
         # Redaction runs before truncation, so a secret can't straddle the cut.
         long = self.api._snippet("x" * 190 + " token=SECRET-VALUE-THAT-IS-LONG")
         self.assertNotIn("SECRET", long)
+
+
+class RendererHardeningTests(unittest.TestCase):
+    def test_canvas_is_capped_for_bogus_coordinates(self):
+        from PIL import Image
+        sys.modules.setdefault("sec_render", package("sec_render"))
+        renderer = importlib.import_module("sec_render.map_renderer")
+        tri = lambda x, y: [{"x": x, "y": y}, {"x": x + 1, "y": y}, {"x": x, "y": y + 1}]
+        data = {"zones": [], "dockLocation": {"x": 0, "y": 0},
+                "furniture": [{"points": tri(0, 0)}, {"points": tri(1e6, 1e6)}]}
+        options = {"map_show_grid": True}
+        image = Image.open(io.BytesIO(renderer.render_map(data, [], None, options, raise_errors=True)))
+        self.assertLessEqual(max(image.size), renderer.MAX_CANVAS)
 
 
 class ApiError(Exception):

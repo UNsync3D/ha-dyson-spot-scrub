@@ -44,6 +44,14 @@ except ImportError:
 SCALE = 80   # pixels per metre
 PAD   = 40   # border padding in pixels
 
+# Upper bound for either canvas side, applied BEFORE any image is allocated.
+# Map coordinates come from Dyson's API; without a cap a single bogus point
+# (e.g. x = 1e6 m) would make Pillow allocate a multi-gigabyte image and could
+# take Home Assistant down. Larger maps are scaled down to fit instead
+# (4096 px ≈ 50 m at the default scale). Every later allocation is either the
+# canvas size (glow layer, grid overlay) or a shape's clamped bounding box.
+MAX_CANVAS = 4096
+
 
 # ── Colour palette ─────────────────────────────────────────────────────────────
 
@@ -166,17 +174,22 @@ def _render(
     min_y -= margin
     max_y += margin
 
-    W = int((max_x - min_x) * SCALE + PAD * 2) + 2
-    H = int((max_y - min_y) * SCALE + PAD * 2) + 2
+    span = max(max_x - min_x, max_y - min_y)
+    if not math.isfinite(span):
+        return _error_image("Map coordinates are invalid")
+    scale = min(SCALE, (MAX_CANVAS - PAD * 2 - 2) / span)
+
+    W = int((max_x - min_x) * scale + PAD * 2) + 2
+    H = int((max_y - min_y) * scale + PAD * 2) + 2
 
     # ── Coordinate helpers ────────────────────────────────────────────────────
     def tx(x: float) -> float:
-        return (x - min_x) * SCALE + PAD
+        return (x - min_x) * scale + PAD
 
     def ty(y: float) -> float:
         # Dyson Y-axis is inverted (positive = north on the real floor but
         # down in raw coords) — negate to flip for screen.
-        return (max_y - y) * SCALE + PAD
+        return (max_y - y) * scale + PAD
 
     def txy(pt: Any) -> tuple[int, int]:
         x, y = _pt(pt)
@@ -330,12 +343,15 @@ def _draw_grid(img, tx, ty, min_x, max_x, min_y, max_y):
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     _, font = _load_fonts()
-    for x in range(math.ceil(min_x), math.floor(max_x) + 1):
+    # One line per metre, thinned out on very large (or corrupt) maps so the
+    # loop stays bounded at roughly 100 lines per axis.
+    step = max(1, math.ceil(max(max_x - min_x, max_y - min_y) / 100))
+    for x in range(math.ceil(min_x), math.floor(max_x) + 1, step):
         px = int(tx(x))
         draw.line([(px, int(ty(max_y))), (px, int(ty(min_y)))],
                   fill=(148, 163, 184, 45), width=1)
         _draw_centered_text(draw, px, img.height - 16, f"{x} m", font, ZONE_LABEL)
-    for y in range(math.ceil(min_y), math.floor(max_y) + 1):
+    for y in range(math.ceil(min_y), math.floor(max_y) + 1, step):
         py = int(ty(y))
         draw.line([(int(tx(min_x)), py), (int(tx(max_x)), py)],
                   fill=(148, 163, 184, 45), width=1)
@@ -516,6 +532,21 @@ def _get_dock(map_data: dict, live_data: dict | None) -> dict | None:
 # ── Drawing helpers ────────────────────────────────────────────────────────────
 
 
+def _overlay_box(img, xs, ys, pad=1):
+    """Clamp a shape's bounding box to the image; None if fully off-canvas.
+
+    Translucent shapes are drawn on an overlay and alpha-composited. Sizing
+    the overlay to the shape's bounding box instead of the whole canvas gives
+    the same pixels at a fraction of the memory and compositing cost — this
+    runs once per furniture item / keep-out zone on every frame.
+    """
+    x0, y0 = max(0, min(xs) - pad), max(0, min(ys) - pad)
+    x1, y1 = min(img.width, max(xs) + pad + 1), min(img.height, max(ys) + pad + 1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return x0, y0, x1, y1
+
+
 def _poly_alpha(
     img: "Image.Image",
     pts: list[tuple[int, int]],
@@ -526,9 +557,12 @@ def _poly_alpha(
 ) -> None:
     if len(pts) < 3:
         return
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(overlay).polygon(pts, fill=fill)
-    img.alpha_composite(overlay)
+    box = _overlay_box(img, [p[0] for p in pts], [p[1] for p in pts])
+    if box is not None:
+        x0, y0, x1, y1 = box
+        overlay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+        ImageDraw.Draw(overlay).polygon([(x - x0, y - y0) for x, y in pts], fill=fill)
+        img.alpha_composite(overlay, dest=(x0, y0))
 
     if stroke[3] if len(stroke) == 4 else True:
         if dashed:
@@ -567,9 +601,14 @@ def _dashed_seg(img, p1, p2, colour, width=1, dash=6, gap=4):
 
 
 def _ellipse_alpha(img, cx, cy, r, colour):
-    overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
-    ImageDraw.Draw(overlay).ellipse([cx - r, cy - r, cx + r, cy + r], fill=colour)
-    img.alpha_composite(overlay)
+    box = _overlay_box(img, [cx - r, cx + r], [cy - r, cy + r])
+    if box is None:
+        return
+    x0, y0, x1, y1 = box
+    overlay = Image.new("RGBA", (x1 - x0, y1 - y0), (0, 0, 0, 0))
+    ImageDraw.Draw(overlay).ellipse(
+        [cx - r - x0, cy - r - y0, cx + r - x0, cy + r - y0], fill=colour)
+    img.alpha_composite(overlay, dest=(x0, y0))
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
