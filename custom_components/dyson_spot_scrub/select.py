@@ -21,21 +21,21 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
     CONF_SERIAL,
-    CONF_DEVICE_NAME,
-    CONF_PRODUCT_TYPE,
     CLEANING_MODES,
     DEFAULT_MODE,
+    MODE_TO_INT,
 )
 from .coordinator import DysonCoordinator
+from .entity_helpers import device_info, room_slug
 from .station_entity import StationEntity
 from .station_settings import SELECTS
-from .dyson_mqtt import _room_display_name
+from .dyson_mqtt import _room_display_name, is_any_cleaning
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,12 +111,7 @@ async def async_setup_entry(
     @callback
     def _check_for_new_rooms() -> None:
         """Create per-room select entities for any rooms not yet registered."""
-        if coordinator.mqtt and coordinator.mqtt.room_names:
-            rooms = coordinator.mqtt.room_names
-        else:
-            rooms = coordinator.cached_room_names
-
-        new_rooms = [r for r in rooms if r not in known_rooms]
+        new_rooms = [r for r in coordinator.room_names if r not in known_rooms]
         if not new_rooms:
             return
         known_rooms.update(new_rooms)
@@ -151,18 +146,6 @@ async def async_setup_entry(
     _check_for_new_rooms()
 
 
-# ── Shared DeviceInfo helper ──────────────────────────────────────────────────
-
-def _device_info(entry: ConfigEntry) -> DeviceInfo:
-    return DeviceInfo(
-        identifiers={(DOMAIN, entry.data[CONF_SERIAL])},
-        name=entry.data[CONF_DEVICE_NAME],
-        manufacturer="Dyson",
-        model=entry.data.get(CONF_PRODUCT_TYPE, "RB0S"),
-        serial_number=entry.data[CONF_SERIAL],
-    )
-
-
 # ── Global cleaning-mode select ───────────────────────────────────────────────
 
 class DysonCleaningModeSelectEntity(SelectEntity):
@@ -177,7 +160,7 @@ class DysonCleaningModeSelectEntity(SelectEntity):
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_cleaning_mode"
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = device_info(entry)
         self._attr_current_option = coordinator.current_mode or DEFAULT_MODE
 
     async def async_added_to_hass(self) -> None:
@@ -196,9 +179,6 @@ class DysonCleaningModeSelectEntity(SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Update the coordinator's mode; if cleaning now, switch the robot immediately."""
-        from .const import MODE_TO_INT
-        from .dyson_mqtt import is_any_cleaning
-
         if option not in CLEANING_MODES:
             _LOGGER.warning("Unknown cleaning mode: %s", option)
             return
@@ -206,6 +186,9 @@ class DysonCleaningModeSelectEntity(SelectEntity):
         self._coordinator.current_mode = option
         self._coordinator._async_notify_listeners()
 
+        # Mirrors DysonVacuumEntity.async_set_fan_speed. start_mode() refuses
+        # to start while a job is active, so this branch is currently a no-op
+        # (logs "start blocked"); the new mode applies to the next clean.
         if self._coordinator.mqtt and is_any_cleaning(self._coordinator.state):
             mode_int = MODE_TO_INT[option]
             await self.hass.async_add_executor_job(
@@ -250,13 +233,13 @@ class DysonRoomSelectEntity(SelectEntity):
         self._options_map  = options_map
         self._inverse_map  = inverse_map
 
-        serial = entry.data[CONF_SERIAL]
-        slug   = room_name.lower().replace(" ", "_")
-        self._attr_unique_id = f"{serial}_room_{slug}_{select_type}"
+        self._attr_unique_id = (
+            f"{entry.data[CONF_SERIAL]}_room_{room_slug(room_name)}_{select_type}"
+        )
         self._attr_name      = f"Room {room_name} {label}"
         self._attr_icon      = icon
         self._attr_options   = list(options_map.values())
-        self._attr_device_info = _device_info(entry)
+        self._attr_device_info = device_info(entry)
 
     # ── HA lifecycle ──────────────────────────────────────────────────────────
 
@@ -320,14 +303,22 @@ class DysonRoomSelectEntity(SelectEntity):
             return
 
         # Mutate the live cache entry so current_option reflects the change immediately
+        previous = room[self._array_index]
         room[self._array_index] = raw
 
         # Publish the full updated preferences array to the robot
+        saved = False
         if self._coordinator.mqtt:
-            await self.hass.async_add_executor_job(
+            saved = await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.set_room_preferences,
                 list(self._coordinator.mqtt.room_preferences),
             )
+        if not saved:
+            # Roll back the optimistic edit so the UI doesn't show a value the
+            # robot never received.
+            room[self._array_index] = previous
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Could not save {self._select_type} for {self._room_name}")
 
         self.async_write_ha_state()
 
@@ -351,6 +342,5 @@ class DysonStationSelect(StationEntity, SelectEntity):
 
     async def async_select_option(self, option):
         if option not in self._attr_options:
-            from homeassistant.exceptions import HomeAssistantError
             raise HomeAssistantError("Unsupported station setting")
         await self._async_set_setting(option)

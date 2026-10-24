@@ -7,12 +7,12 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE, MODE_TO_INT
+from .const import DOMAIN, CONF_SERIAL, DOCK_BUSY_STATES, MODE_TO_INT
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import start_block_reason
+from .entity_helpers import device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,17 +36,12 @@ class DysonStartButton(ButtonEntity):
     _attr_has_entity_name = True
     _attr_name = "Vacuum Start"
     _attr_icon = "mdi:play-circle"
+    _attr_should_poll = False
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_start_button"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.data[CONF_SERIAL])},
-            name=entry.data[CONF_DEVICE_NAME],
-            manufacturer="Dyson",
-            model=entry.data.get(CONF_PRODUCT_TYPE, "RB0S"),
-            serial_number=entry.data[CONF_SERIAL],
-        )
+        self._attr_device_info = device_info(entry)
 
     async def async_added_to_hass(self) -> None:
         self._coordinator.async_add_listener(self)
@@ -89,7 +84,6 @@ class DysonStartButton(ButtonEntity):
             return
 
         # No rooms toggled — full clean in current mode
-        from .const import MODE_TO_INT
         mode_int = MODE_TO_INT.get(self._coordinator.current_mode, 0)
         _LOGGER.info("Start button pressed — full clean in mode '%s'", self._coordinator.current_mode)
         await self.hass.async_add_executor_job(
@@ -105,17 +99,7 @@ class DysonDockActionButton(ButtonEntity):
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        serial       = entry.data[CONF_SERIAL]
-        device_name  = entry.data[CONF_DEVICE_NAME]
-        product_type = entry.data.get(CONF_PRODUCT_TYPE, "RB0S")
-
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial)},
-            name=device_name,
-            manufacturer="Dyson",
-            model=product_type,
-            serial_number=serial,
-        )
+        self._attr_device_info = device_info(entry)
 
     @property
     def available(self) -> bool:
@@ -123,8 +107,8 @@ class DysonDockActionButton(ButtonEntity):
         mqtt = self._coordinator.mqtt
         if not (mqtt and mqtt.connected):
             return False
-        dock = self._coordinator.state.get("dockState")
-        return dock not in {"COLLECTING_DUST", "WASHING_MOP", "DRYING_MOP"}
+        # Greyed out while the dock is mid-cycle (e.g. a 3-5 h DRYING_MOP).
+        return self._coordinator.state.get("dockState") not in DOCK_BUSY_STATES
 
     async def async_added_to_hass(self) -> None:
         self._coordinator.async_add_listener(self)

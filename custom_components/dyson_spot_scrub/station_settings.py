@@ -1,18 +1,24 @@
 """Station preferences observed in MyDyson MQTT captures (October 2026)."""
 
-# key: (English label, reported field, JDM property)
+# key: (English label, reported CURRENT-STATE field, JDM property)
+# NOTE: "extended_roller_preparation" maps to the JDM property
+# "store_demo_mode". That name looks unrelated but is what the MyDyson app
+# sent in the October 2026 capture — verify against a fresh capture before
+# changing it.
 SWITCHES = {
     "hot_water_mopping": ("Hot water mopping", "hotWaterMop", "hot_water_mop"),
     "cleaning_solution": ("Cleaning solution", "detergent", "detergent"),
     "extended_roller_preparation": ("Extended roller preparation", "washMopBeforeClean", "store_demo_mode"),
     "hot_water_self_cleaning": ("Hot water self-cleaning", "hotWaterSwitch", "hot_water_switch"),
 }
+# Label → minutes between self-cleans (None = after each room, i.e. ROOM mode).
 FREQUENCIES = {"After each room": None, "Every 15 minutes": 15,
                "Every 30 minutes": 30, "Only as needed": 60}
 SELECTS = {
     "self_cleaning_frequency": ("Self-cleaning frequency", list(FREQUENCIES)),
     "roller_drying_duration": ("Roller drying duration", ["3 hours", "4 hours", "5 hours"]),
 }
+# CURRENT-STATE fields cleared on reconnect so a stale value is never shown.
 STATE_FIELDS = [item[1] for item in SWITCHES.values()] + [
     "backWashType", "backWashTime", "airDryFrequency"]
 

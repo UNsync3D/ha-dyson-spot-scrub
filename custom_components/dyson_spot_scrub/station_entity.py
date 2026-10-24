@@ -1,8 +1,8 @@
 """Shared lifecycle and explicit-write handling for station controls."""
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE
+from .const import CONF_SERIAL
+from .entity_helpers import device_info
 from .station_settings import current_setting
 
 
@@ -15,14 +15,9 @@ class StationEntity:
     def __init__(self, coordinator, entry, key, name):
         self._coordinator = coordinator
         self._setting_key = key
-        serial = entry.data[CONF_SERIAL]
-        self._attr_unique_id = f"{serial}_station_{key}"
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_station_{key}"
         self._attr_name = name
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial)}, name=entry.data[CONF_DEVICE_NAME],
-            manufacturer="Dyson", model=entry.data.get(CONF_PRODUCT_TYPE, "RB0S"),
-            serial_number=serial,
-        )
+        self._attr_device_info = device_info(entry)
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()

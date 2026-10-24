@@ -16,20 +16,18 @@ from homeassistant.core import HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
     DOMAIN,
     CONF_SERIAL,
-    CONF_DEVICE_NAME,
-    CONF_PRODUCT_TYPE,
     CLEANING_MODES,
     MODE_TO_INT,
     DEFAULT_MODE,
+    FAULT_CODE_MESSAGES,
 )
 from .coordinator import DysonCoordinator
-from .const import FAULT_CODE_MESSAGES
+from .entity_helpers import device_info
 from .dyson_mqtt import (
     is_any_cleaning,
     is_docked,
@@ -94,7 +92,10 @@ async def async_setup_entry(
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities([DysonVacuumEntity(coordinator, entry)])
 
-    # Register the clean_room service once (it covers all robots in the domain).
+    # Domain services are registered once, by the first entry to load, and
+    # resolve their target robot at call time. clean_room / clean_rooms have no
+    # entity target and act on EVERY connected Dyson robot; the card services
+    # below require exactly one vacuum entity_id.
     if not hass.services.has_service(DOMAIN, SERVICE_CLEAN_ROOM):
 
         async def _handle_clean_room(call: ServiceCall) -> None:
@@ -219,18 +220,9 @@ class DysonVacuumEntity(StateVacuumEntity):
         self._coordinator   = coordinator
         self._entry         = entry
         self._serial        = entry.data[CONF_SERIAL]
-        self._device_name   = entry.data[CONF_DEVICE_NAME]
-        self._product_type  = entry.data.get(CONF_PRODUCT_TYPE, "RB0S")
-
         self._attr_unique_id = f"{self._serial}_vacuum"
 
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._serial)},
-            name=self._device_name,
-            manufacturer="Dyson",
-            model=self._product_type,
-            serial_number=self._serial,
-        )
+        self._attr_device_info = device_info(entry)
 
     # ── HA lifecycle ──────────────────────────────────────────────────────────
 
@@ -359,7 +351,10 @@ class DysonVacuumEntity(StateVacuumEntity):
         self._coordinator.current_mode = fan_speed
         self._coordinator._async_notify_listeners()
 
-        # If the robot is currently cleaning, switch to the new mode immediately
+        # If the robot is currently cleaning, switch to the new mode immediately.
+        # NOTE: start_block_reason() reports "cleaning_job_active" for every
+        # running state, so _require_start_ready above rejects this path today;
+        # mid-clean mode switching needs a dedicated command once captured.
         if is_any_cleaning(self._mqtt_state):
             mode_int = MODE_TO_INT[fan_speed]
             await self.hass.async_add_executor_job(

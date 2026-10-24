@@ -38,6 +38,10 @@ class RoomSettingsTests(unittest.TestCase):
                 "homeassistant.config_entries", ConfigEntry=object),
             "homeassistant.core": module(
                 "homeassistant.core", HomeAssistant=object, callback=lambda f: f),
+            "homeassistant.helpers": module("homeassistant.helpers"),
+            "homeassistant.helpers.aiohttp_client": module(
+                "homeassistant.helpers.aiohttp_client",
+                async_get_clientsession=lambda hass: None),
             "room_test_integration.dyson_api": module(
                 "room_test_integration.dyson_api", DysonApiError=Exception,
                 DysonRateLimitError=Exception,
