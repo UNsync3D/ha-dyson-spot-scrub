@@ -21,6 +21,7 @@ import logging
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
@@ -320,14 +321,22 @@ class DysonRoomSelectEntity(SelectEntity):
             return
 
         # Mutate the live cache entry so current_option reflects the change immediately
+        previous = room[self._array_index]
         room[self._array_index] = raw
 
         # Publish the full updated preferences array to the robot
+        saved = False
         if self._coordinator.mqtt:
-            await self.hass.async_add_executor_job(
+            saved = await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.set_room_preferences,
                 list(self._coordinator.mqtt.room_preferences),
             )
+        if not saved:
+            # Roll back the optimistic edit so the UI doesn't show a value the
+            # robot never received.
+            room[self._array_index] = previous
+            self.async_write_ha_state()
+            raise HomeAssistantError(f"Could not save {self._select_type} for {self._room_name}")
 
         self.async_write_ha_state()
 
@@ -351,6 +360,5 @@ class DysonStationSelect(StationEntity, SelectEntity):
 
     async def async_select_option(self, option):
         if option not in self._attr_options:
-            from homeassistant.exceptions import HomeAssistantError
             raise HomeAssistantError("Unsupported station setting")
         await self._async_set_setting(option)

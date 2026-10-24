@@ -36,6 +36,7 @@ class DysonStartButton(ButtonEntity):
     _attr_has_entity_name = True
     _attr_name = "Vacuum Start"
     _attr_icon = "mdi:play-circle"
+    _attr_should_poll = False  # push-updated via the coordinator listener
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
