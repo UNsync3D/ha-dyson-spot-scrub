@@ -27,6 +27,72 @@ def package(name):
     return pkg
 
 
+class FakePahoClient:
+    """Records what DysonMqttClient.connect() configures; never opens a socket."""
+
+    instances = []
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        FakePahoClient.instances.append(self)
+
+    def ws_set_options(self, path):
+        self.ws_path = path
+
+    def tls_set_context(self, ctx):
+        pass
+
+    def connect(self, *args, **kwargs):
+        pass
+
+    def loop_start(self):
+        pass
+
+
+class MqttHardeningTests(unittest.TestCase):
+    def setUp(self):
+        paho_client = module("paho.mqtt.client", Client=FakePahoClient,
+                             CallbackAPIVersion=SimpleNamespace(VERSION1=1), MQTTv311=4)
+        self.enterContext(patch.dict(sys.modules, {
+            "sec_mqtt": package("sec_mqtt"),
+            "paho": module("paho"), "paho.mqtt": module("paho.mqtt"),
+            "paho.mqtt.client": paho_client,
+        }))
+        self.mqtt = importlib.import_module("sec_mqtt.dyson_mqtt")
+
+    def client(self, **overrides):
+        args = dict(serial="SER-1", mqtt_prefix="RB05", endpoint="example.invalid",
+                    token_value="tok", token_signature="sig", client_id="cid",
+                    authorizer_name="auth")
+        args.update(overrides)
+        return self.mqtt.DysonMqttClient(**args)
+
+    def test_websocket_query_values_are_encoded(self):
+        client = self.client(token_value="a&b=c#d", authorizer_name="x&y",
+                             token_signature="s/+=")
+        client.connect()
+        path = FakePahoClient.instances[-1].ws_path
+        self.assertIn("token=a%26b%3Dc%23d", path)
+        self.assertIn("x-amz-customauthorizer-name=x%26y", path)
+        self.assertIn("signature=s%2F%2B%3D", path)
+        self.assertEqual(path.count("&"), 2, "only the two real separators remain")
+
+    def test_prefix_autodetect_rejects_wildcards(self):
+        client = self.client()
+        changed = []
+        client.on_prefix_changed = changed.append
+        with patch.object(client, "request_current_state"), \
+             patch.object(client, "_probe_map_id"), \
+             patch.object(self.mqtt.threading, "Timer"):
+            for bad in ["#", "+", "a b", "x" * 40]:
+                msg = SimpleNamespace(topic=f"{bad}/SER-1/status", payload=b"{}")
+                client._on_message(None, None, msg)
+            self.assertEqual(changed, [])
+            self.assertEqual(client._prefix, "RB05")
+            client._on_message(None, None, SimpleNamespace(topic="NROB/SER-1/status", payload=b"{}"))
+        self.assertEqual(changed, ["NROB"])
+
+
 class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.http = module("aiohttp", ClientSession=MagicMock(), TCPConnector=MagicMock())

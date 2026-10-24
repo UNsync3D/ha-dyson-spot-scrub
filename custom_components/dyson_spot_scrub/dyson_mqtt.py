@@ -32,6 +32,7 @@ from urllib.parse import quote
 
 import paho.mqtt.client as mqtt
 
+from .const import MQTT_PREFIX_PATTERN
 from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
 
 _LOGGER = logging.getLogger(__name__)
@@ -382,10 +383,13 @@ class DysonMqttClient:
         paho's built-in retry would reuse the same ClientId and cause the broker
         to kick us off (rc=7), creating a rapid-fire disconnect cascade.
         """
+        # Every query value is URL-encoded: a token or authorizer name that
+        # contains "&", "=" or "#" would otherwise corrupt the query string.
+        # This path carries live credentials — never log it.
         ws_path = (
             f"/mqtt"
-            f"?x-amz-customauthorizer-name={self._authorizer_name}"
-            f"&token={self._token_value}"
+            f"?x-amz-customauthorizer-name={quote(self._authorizer_name, safe='')}"
+            f"&token={quote(self._token_value, safe='')}"
             f"&x-amz-customauthorizer-signature={quote(self._token_signature, safe='')}"
         )
 
@@ -910,7 +914,10 @@ class DysonMqttClient:
             if delay == 0:
                 self._probe_map_id(0)
             else:
-                threading.Timer(delay, self._probe_map_id, args=(_mid,)).start()
+                # Daemon timer: a pending probe must never delay HA shutdown.
+                timer = threading.Timer(delay, self._probe_map_id, args=(_mid,))
+                timer.daemon = True
+                timer.start()
         if self.on_connected:
             self.on_connected()
 
@@ -945,11 +952,14 @@ class DysonMqttClient:
         topic = msg.topic
 
         # Auto-detect the real MQTT prefix from inbound robot messages.
+        # The new prefix is persisted to the config entry and used in every
+        # outbound topic, so only accept plain identifiers (no wildcards).
         parts = topic.split("/")
         if (
             len(parts) >= 2
             and parts[1] == self.serial
             and parts[0] != self._prefix
+            and re.fullmatch(MQTT_PREFIX_PATTERN, parts[0])
         ):
             _LOGGER.warning(
                 "[%s] Real MQTT prefix is '%s' (was '%s') — switching now",
@@ -965,7 +975,10 @@ class DysonMqttClient:
                 if delay == 0:
                     self._probe_map_id(0)
                 else:
-                    threading.Timer(delay, self._probe_map_id, args=(_mid,)).start()
+                    # Daemon timer: a pending probe must never delay HA shutdown.
+                    timer = threading.Timer(delay, self._probe_map_id, args=(_mid,))
+                    timer.daemon = True
+                    timer.start()
 
         _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
 
