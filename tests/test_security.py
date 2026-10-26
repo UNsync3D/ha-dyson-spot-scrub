@@ -169,11 +169,12 @@ class ApiHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("server error", text)
 
     def test_redaction_of_non_json_text(self):
+        # Non-JSON bodies are summarised, never echoed.
         text = self.api._snippet('denied token=tok-SECRET&x=1 "password": "pw SECRET" otp=1')
         self.assertNotIn("SECRET", text)
-        self.assertIn("x=1", text)
+        self.assertIn("not logged", text)
         # Redaction runs before truncation, so a secret can't straddle the cut.
-        long = self.api._snippet("x" * 190 + " token=SECRET-VALUE-THAT-IS-LONG")
+        long = self.api._snippet({"message": "x" * 190 + " token=SECRET-VALUE-THAT-IS-LONG"})
         self.assertNotIn("SECRET", long)
 
     def test_local_credentials_padding_is_validated(self):

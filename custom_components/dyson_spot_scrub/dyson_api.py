@@ -56,23 +56,48 @@ _HEADERS = {
 }
 
 # Response bodies are echoed into exception messages (and therefore HA logs).
-# Sensitive values are redacted first; the result is then length-capped so a
-# misbehaving endpoint can't flood the log.
+#
+# Policy (tightened after review, 26 Oct 2026):
+#   * JSON bodies are logged with sensitive keys replaced by *** and every
+#     string value scrubbed with the text rules below.
+#   * Non-JSON bodies (HTML error pages, plain text, empty) are NEVER echoed;
+#     only their length is logged. Pattern-matching arbitrary text can't
+#     guarantee that every credential format is caught, so we don't rely on it
+#     for unstructured content.
+#   * The result is then length-capped so an endpoint can't flood the log.
 _MAX_BODY_IN_ERROR = 200
 
 # Any JSON key containing one of these (case-insensitive) has its value
 # replaced before logging: bearer/IoT tokens, signatures, passwords, OTP
-# challenge IDs, Basic-auth account secrets and local MQTT credentials.
+# challenge IDs, Basic-auth account secrets, API keys and local MQTT
+# credentials.
 _SENSITIVE_KEY_PARTS = (
-    "token", "password", "secret", "signature", "credential", "authorization",
-    "challenge", "otp", "account", "apikey", "api_key", "session", "cookie",
+    "token", "password", "passwd", "secret", "signature", "credential",
+    "authorization", "challenge", "otp", "account", "apikey", "api_key",
+    "api-key", "access_key", "access-key", "session", "cookie",
 )
 _REDACTED = "***"
-# Same rule for bodies that aren't valid JSON: key=value / "key": "value".
-_SENSITIVE_TEXT = re.compile(
-    r'(?i)("?[\w-]*(?:' + "|".join(map(re.escape, _SENSITIVE_KEY_PARTS)) +
-    r')[\w-]*"?\s*[:=]\s*)("[^"]*"|[^\s,&;}]+)'
+
+_KEY_ALTERNATION = "|".join(map(re.escape, _SENSITIVE_KEY_PARTS))
+_AUTH_SCHEMES = r"(?:bearer|basic|digest|negotiate|token)"
+# Scrubbing rules for text found INSIDE JSON string values, applied in order:
+#  1. key/value pairs: an optionally quoted key containing a sensitive part,
+#     then ":" or "=", then an optional auth scheme word and the whole value -
+#     single-quoted, double-quoted, or up to the next delimiter.
+#  2. a bare "Bearer xyz" / "Basic xyz" credential with no key in front.
+_SENSITIVE_PAIR = re.compile(
+    r"(?i)([\"']?[\w.-]*(?:" + _KEY_ALTERNATION + r")[\w.-]*[\"']?\s*[:=]\s*)"
+    r"(?:" + _AUTH_SCHEMES + r"\s+)?"
+    r"(?:'[^']*'|\"[^\"]*\"|[^\s,&;}<>\"']+)"
 )
+_BARE_CREDENTIAL = re.compile(r"(?i)\b(bearer|basic|digest|negotiate)\s+[A-Za-z0-9._~+/=%-]+")
+
+
+def _scrub_text(text: str) -> str:
+    """Redact credential-looking pairs inside a short JSON string value."""
+    text = _SENSITIVE_PAIR.sub(lambda m: m.group(1) + _REDACTED, text)
+    return _BARE_CREDENTIAL.sub(lambda m: m.group(1) + " " + _REDACTED, text)
+
 
 # ── Exceptions ────────────────────────────────────────────────────────────────
 
@@ -134,21 +159,23 @@ def _redact(data: Any) -> Any:
     if isinstance(data, list):
         return [_redact(v) for v in data]
     if isinstance(data, str):
-        return _SENSITIVE_TEXT.sub(lambda m: m.group(1) + _REDACTED, data)
+        return _scrub_text(data)
     return data
 
 
 def _snippet(data: Any) -> str:
-    """Return a redacted, length-capped repr of a response body for errors.
+    """Return a redacted, length-capped description of a body for errors.
 
-    Redaction happens before truncation so a secret can't survive by
+    Strings are parsed as JSON first. A body that isn't JSON is summarised
+    by length only - its content is never included (see policy above).
+    Redaction happens before truncation, so a secret can't survive by
     straddling the cut-off point.
     """
-    if isinstance(data, str):
+    if isinstance(data, (str, bytes)):
         try:
             data = json.loads(data)
         except ValueError:
-            pass
+            return f"<non-JSON body, {len(data)} chars, not logged>" if data else "<empty body>"
     text = repr(_redact(data))
     if len(text) > _MAX_BODY_IN_ERROR:
         return text[:_MAX_BODY_IN_ERROR] + "…"

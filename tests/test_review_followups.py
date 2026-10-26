@@ -119,5 +119,74 @@ class TokenRejectionTests(unittest.TestCase):
             asyncio.run(api.get_devices("tok"))
         self.assertEqual(caught.exception.status, 401)
 
+
+# ── Finding 2: unstructured bodies must not leak credentials ──────────────────
+
+class RedactionTests(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(patch.dict(sys.modules, {
+            "followup_api": package("followup_api"),
+            "aiohttp": module("aiohttp", ClientSession=MagicMock(), TCPConnector=MagicMock()),
+        }))
+        self.api = importlib.import_module("followup_api.dyson_api")
+
+    def test_review_examples_are_not_echoed(self):
+        # The exact inputs from the review: plain-text bodies are never logged.
+        for text in ["Authorization: Bearer EXAMPLE_SECRET", "token='EXAMPLE SECRET'"]:
+            with self.subTest(text=text):
+                out = self.api._snippet(text)
+                self.assertNotIn("EXAMPLE", out)
+                self.assertNotIn("SECRET", out)
+                self.assertEqual(out, f"<non-JSON body, {len(text)} chars, not logged>")
+
+    def test_html_and_empty_bodies(self):
+        html = "<input name=password value='EXAMPLE SECRET'>"
+        self.assertNotIn("SECRET", self.api._snippet(html))
+        self.assertEqual(self.api._snippet(""), "<empty body>")
+        self.assertNotIn("SECRET", self.api._snippet(html.encode()))
+
+    def test_json_string_values_are_scrubbed(self):
+        # Review examples embedded in a JSON body, which IS logged.
+        for message in ["Authorization: Bearer EXAMPLE_SECRET", "token='EXAMPLE SECRET'"]:
+            with self.subTest(message=message):
+                out = self.api._snippet({"message": message, "code": 401})
+                self.assertNotIn("EXAMPLE", out)
+                self.assertNotIn("SECRET", out)
+                self.assertIn("401", out)
+
+    def test_authorization_schemes(self):
+        for header in ["Authorization: Bearer EXAMPLE_SECRET",
+                       "authorization: Basic dXNlcjpwYXNz",
+                       "Authorization=Bearer EXAMPLE_SECRET",
+                       '"Authorization": "Bearer EXAMPLE_SECRET"',
+                       "Proxy-Authorization: Bearer EXAMPLE_SECRET",
+                       "rejected Bearer EXAMPLE_SECRET"]:
+            with self.subTest(header=header):
+                out = self.api._scrub_text(header)
+                self.assertNotIn("EXAMPLE_SECRET", out)
+                self.assertNotIn("dXNlcjpwYXNz", out)
+
+    def test_quote_styles_and_neighbours_survive(self):
+        out = self.api._scrub_text(
+            "denied: token='EXAMPLE SECRET', password=\"two words\" user=alice")
+        for secret in ("EXAMPLE", "SECRET", "two words"):
+            self.assertNotIn(secret, out)
+        self.assertIn("user=alice", out)
+        self.assertIn("denied", out)
+        out = self.api._scrub_text("x-api-key: EXAMPLE_SECRET\nnext: line")
+        self.assertNotIn("EXAMPLE_SECRET", out)
+        self.assertIn("next: line", out)
+
+    def test_url_encoded_and_query_forms(self):
+        out = self.api._scrub_text(
+            "GET /mqtt?token=abc%20SECRET&x-amz-customauthorizer-signature=SIG%2F1")
+        self.assertNotIn("SECRET", out)
+        self.assertNotIn("SIG%2F1", out)
+
+    def test_ordinary_errors_stay_readable(self):
+        body = {"message": "Service Unavailable: please retry later", "code": 503}
+        self.assertEqual(self.api._snippet(body), repr(body))
+
+
 if __name__ == "__main__":
     unittest.main()
