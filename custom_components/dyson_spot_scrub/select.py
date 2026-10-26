@@ -17,6 +17,7 @@ Per-room array-index mapping (confirmed from FutuRazor MQTT captures, Oct 2026):
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -303,24 +304,32 @@ class DysonRoomSelectEntity(SelectEntity):
             )
             return
 
-        # Mutate the live cache entry so current_option reflects the change immediately
-        previous = room[self._array_index]
-        room[self._array_index] = raw
+        mqtt = self._coordinator.mqtt
+        if mqtt is None:
+            raise HomeAssistantError("The Dyson vacuum is unavailable")
 
-        # Publish the full updated preferences array to the robot
-        saved = False
-        if self._coordinator.mqtt:
-            saved = await self.hass.async_add_executor_job(
-                self._coordinator.mqtt.set_room_preferences,
-                list(self._coordinator.mqtt.room_preferences),
-            )
+        # Edit a COPY of the preferences and send that. The confirmed cache is
+        # only replaced (by set_room_preferences) once the publish is accepted,
+        # so a failed or raising send needs no rollback - and can't clobber a
+        # newer get_preference reply that arrived while the send was in flight.
+        rooms = deepcopy(mqtt.room_preferences)
+        target = next((r for r in rooms if r and str(r[0]) == str(room[0])), None)
+        if target is None or len(target) <= self._array_index:
+            raise HomeAssistantError(f"Room {self._room_name} is no longer in the map")
+        target[self._array_index] = raw
+
+        try:
+            saved = await self.hass.async_add_executor_job(mqtt.set_room_preferences, rooms)
+        except Exception as exc:  # noqa: BLE001 — surface any send failure to the user
+            _LOGGER.warning("[%s] Saving %s for %s raised: %s",
+                            self._coordinator.serial, self._select_type, self._room_name, exc)
+            saved = False
         if not saved:
-            # Roll back the optimistic edit so the UI doesn't show a value the
-            # robot never received.
-            room[self._array_index] = previous
             self.async_write_ha_state()
             raise HomeAssistantError(f"Could not save {self._select_type} for {self._room_name}")
 
+        # Accepted by the MQTT client; the robot's next preference reply is
+        # what actually confirms the change.
         self.async_write_ha_state()
 
     @callback

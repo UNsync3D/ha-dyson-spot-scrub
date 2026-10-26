@@ -634,6 +634,11 @@ class DysonMqttClient:
         Used by per-room select entities to persist a single-setting change
         (cleaning mode, strategy, water level, or mop repetitions) without
         starting a clean cycle.  Safe to call from any thread; does not block.
+
+        Returns True only if the MQTT client accepted the publish. That is
+        local transport acceptance, NOT confirmation that the robot applied
+        it. The cache is updated only after acceptance, so a failed send
+        never leaves a value the robot didn't receive.
         """
         try:
             map_id = int(self.state.get("persistentMapId", ""))
@@ -649,12 +654,19 @@ class DysonMqttClient:
         _LOGGER.debug(
             "[%s] Persisting room preferences (%d room(s))", self.serial, len(rooms)
         )
-        self._publish_jdm("service.set_preference", {
-            "map_id":          map_id,
-            "prefer_type":     1,
-            "room_preference": rooms,
-            "uv_switch":       uv_switch,
-        })
+        try:
+            accepted = self._publish_jdm("service.set_preference", {
+                "map_id":          map_id,
+                "prefer_type":     1,
+                "room_preference": rooms,
+                "uv_switch":       uv_switch,
+            })
+        except Exception:  # noqa: BLE001 — any transport failure means "not sent"
+            _LOGGER.exception("[%s] set_room_preferences: publish raised", self.serial)
+            return False
+        if not accepted:
+            _LOGGER.warning("[%s] set_room_preferences: publish rejected", self.serial)
+            return False
         if self._cached_preference is not None:
             self._cached_preference["room"] = deepcopy(rooms)
         return True
@@ -1105,9 +1117,9 @@ class DysonMqttClient:
 
     # ── Internal publish ──────────────────────────────────────────────────────
 
-    def _publish_jdm(self, method: str, params: dict) -> None:
-        """Publish a JDM RPC call (the newer JSON command channel)."""
-        self._publish_raw(self._jdm_command_topic, {
+    def _publish_jdm(self, method: str, params: dict) -> bool:
+        """Publish a JDM RPC call; True if paho accepted it (not robot confirmation)."""
+        return self._publish_raw(self._jdm_command_topic, {
             "msgId":   _rand_msg_id(),
             "version": "1.0.1",
             "method":  method,
@@ -1129,7 +1141,11 @@ class DysonMqttClient:
         body = json.dumps(payload)
         if self._verbose:
             _LOGGER.debug("[MQTT out] %s: %s", topic, body)
-        result = client.publish(topic, body, qos=0)
+        try:
+            result = client.publish(topic, body, qos=0)
+        except Exception:  # noqa: BLE001 — paho can raise on a closing socket
+            _LOGGER.exception("[%s] Publish raised, topic=%s", self.serial, topic)
+            return False
         if result.rc != 0:
             _LOGGER.warning(
                 "[%s] Publish failed (rc=%d) topic=%s", self.serial, result.rc, topic,

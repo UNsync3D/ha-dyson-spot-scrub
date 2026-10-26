@@ -188,5 +188,104 @@ class RedactionTests(unittest.TestCase):
         self.assertEqual(self.api._snippet(body), repr(body))
 
 
+# ── Finding 3: a failed room-setting send must not change the shown value ─────
+
+class RoomSelectRollbackTests(unittest.TestCase):
+    def setUp(self):
+        class HAError(Exception):
+            pass
+
+        self.HAError = HAError
+        self.enterContext(patch.dict(sys.modules, {
+            "followup_select": package("followup_select"),
+            "aiohttp": module("aiohttp", ClientSession=MagicMock(), TCPConnector=MagicMock()),
+            "paho": module("paho"), "paho.mqtt": module("paho.mqtt"),
+            "paho.mqtt.client": module("paho.mqtt.client"),
+            "homeassistant": module("homeassistant"),
+            "homeassistant.components": module("homeassistant.components"),
+            "homeassistant.components.select": module("select", SelectEntity=object),
+            "homeassistant.config_entries": module("config_entries", ConfigEntry=object),
+            "homeassistant.core": module("core", HomeAssistant=object, callback=lambda f: f),
+            "homeassistant.exceptions": module("exceptions", HomeAssistantError=HAError),
+            "homeassistant.helpers": module("homeassistant.helpers"),
+            "homeassistant.helpers.entity": module("entity", DeviceInfo=dict),
+            "homeassistant.helpers.entity_platform": module("platform", AddEntitiesCallback=object),
+            "homeassistant.helpers.aiohttp_client": module(
+                "aiohttp_client", async_get_clientsession=lambda hass: None),
+        }))
+        self.mqtt = importlib.import_module("followup_select.dyson_mqtt")
+        select = importlib.import_module("followup_select.select")
+
+        # Real MQTT client; only the paho transport (_publish_raw) is replaced.
+        self.client = self.mqtt.DysonMqttClient("SER-1", "RB05", "e", "t", "s", "c", "a")
+        self.client.connected = True
+        self.client.state = {"persistentMapId": "123"}
+        self.client._cached_preference = {
+            "room": [[10, "Living room", 0, 0, 1, 2, 1, 0, 1, 0, 3, 0]],
+            "uv_switch": [[10, 1]],
+        }
+        coordinator = SimpleNamespace(mqtt=self.client, serial="SER-1")
+        entry = SimpleNamespace(data={"serial": "SER-1", "device_name": "Robot"})
+        descriptor = next(d for d in select._ROOM_SELECT_DESCRIPTORS if d[0] == "cleaning_mode")
+        self.entity = select.DysonRoomSelectEntity(
+            coordinator=coordinator, entry=entry, room_name="Living Room",
+            select_type=descriptor[0], label=descriptor[1], icon=descriptor[2],
+            array_index=descriptor[3], options_map=descriptor[4], inverse_map=descriptor[5])
+
+        async def executor(fn, *args):
+            return fn(*args)
+        self.entity.hass = SimpleNamespace(async_add_executor_job=executor)
+        self.entity.async_write_ha_state = lambda: None
+
+    def cached_mode(self):
+        return self.client._cached_preference["room"][0][3]
+
+    def select(self, option="Mop"):
+        return asyncio.run(self.entity.async_select_option(option))
+
+    def test_publish_rejected_keeps_old_value_and_raises(self):
+        # Review case: _publish_raw() returns False → previously "success", mode 2.
+        with patch.object(self.client, "_publish_raw", return_value=False):
+            with self.assertRaises(self.HAError):
+                self.select()
+        self.assertEqual(self.cached_mode(), 0)
+        self.assertEqual(self.entity.current_option, "Vacuum")
+
+    def test_publish_exception_keeps_old_value_and_raises(self):
+        # Review case: _publish_raw() raises → previously propagated with mode 2.
+        with patch.object(self.client, "_publish_raw", side_effect=OSError("socket closed")):
+            with self.assertRaises(self.HAError):
+                self.select()
+        self.assertEqual(self.cached_mode(), 0)
+
+    def test_success_updates_cache_once_accepted(self):
+        sent = []
+        with patch.object(self.client, "_publish_raw",
+                          side_effect=lambda topic, payload: sent.append(payload) or True):
+            self.select()
+        self.assertEqual(self.cached_mode(), 2)
+        self.assertEqual(sent[-1]["params"]["room_preference"][0][3], 2)
+
+    def test_cache_untouched_before_send_and_newer_data_not_overwritten(self):
+        seen_during_send = []
+
+        def rejecting_publish(topic, payload):
+            seen_during_send.append(self.cached_mode())
+            # A fresh get_preference reply lands while the send is in flight.
+            self.client._cached_preference = {
+                "room": [[10, "Living room", 0, 3, 1, 2, 1, 0, 1, 0, 3, 0]], "uv_switch": []}
+            return False
+
+        with patch.object(self.client, "_publish_raw", side_effect=rejecting_publish):
+            with self.assertRaises(self.HAError):
+                self.select()
+        self.assertEqual(seen_during_send, [0], "confirmed cache is not edited before sending")
+        self.assertEqual(self.cached_mode(), 3, "newer telemetry is kept, not rolled back")
+
+    def test_save_room_settings_reports_publish_failure(self):
+        with patch.object(self.client, "_publish_raw", return_value=False):
+            self.assertFalse(self.client.save_room_settings({"10": {"cleaning_mode": "Mop"}}))
+        self.assertEqual(self.cached_mode(), 0)
+
 if __name__ == "__main__":
     unittest.main()
