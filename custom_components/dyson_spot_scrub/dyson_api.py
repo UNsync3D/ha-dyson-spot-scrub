@@ -201,6 +201,24 @@ async def _json(resp: aiohttp.ClientResponse) -> Any:
         ) from exc
 
 
+async def _error_body(resp: aiohttp.ClientResponse) -> Any:
+    """Best-effort body of a failed response, for the error message only.
+
+    Never raises: a rejection's HTTP status must survive whatever the body
+    looks like (HTML error page, plain text, empty). Callers rely on that
+    status — e.g. the config flow must see 401/403 as "token rejected", not
+    as a parsing failure that looks like an outage.
+    """
+    try:
+        return await resp.json(content_type=None)
+    except Exception:  # noqa: BLE001 — not JSON; fall back to text
+        pass
+    try:
+        return await resp.text()
+    except Exception:  # noqa: BLE001 — body unreadable; status is what matters
+        return ""
+
+
 def _auth_headers(token: str) -> dict[str, str]:
     return {**_HEADERS, "Authorization": f"Bearer {token}"}
 
@@ -252,11 +270,14 @@ async def _request(
                     return resp.status, None
                 body = await resp.text()
                 data: Any = body
-            else:
+            elif resp.status == 200:
                 data = await _json(resp)
-                if (resp.status == 200 and isinstance(data, expect)
-                        and (required_key is None or required_key in data)):
+                if isinstance(data, expect) and (required_key is None or required_key in data):
                     return resp.status, data
+            else:
+                # Non-200: build the message from whatever the body is, so the
+                # status-carrying error below is always the one raised.
+                data = await _error_body(resp)
             message = f"{label} failed (HTTP {resp.status}): {_snippet(data)}"
             if issubclass(error, DysonApiError):
                 raise error(message, status=resp.status)
