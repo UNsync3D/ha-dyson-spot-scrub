@@ -17,7 +17,6 @@ Per-room array-index mapping (confirmed from FutuRazor MQTT captures, Oct 2026):
 from __future__ import annotations
 
 import logging
-from copy import deepcopy
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
@@ -308,11 +307,12 @@ class DysonRoomSelectEntity(SelectEntity):
         if mqtt is None:
             raise HomeAssistantError("The Dyson vacuum is unavailable")
 
-        # Edit a COPY of the preferences and send that. The confirmed cache is
-        # only replaced (by set_room_preferences) once the publish is accepted,
-        # so a failed or raising send needs no rollback - and can't clobber a
-        # newer get_preference reply that arrived while the send was in flight.
-        rooms = deepcopy(mqtt.room_preferences)
+        # Edit a COPY and send that. The cache this entity displays is only
+        # ever updated by the robot's own preference reply (requested right
+        # after a successful send), so a failed send needs no rollback and a
+        # successful one can't overwrite newer telemetry. Until that reply
+        # arrives the dropdown keeps showing the old value.
+        rooms = mqtt.room_preferences_for_edit()
         target = next((r for r in rooms if r and str(r[0]) == str(room[0])), None)
         if target is None or len(target) <= self._array_index:
             raise HomeAssistantError(f"Room {self._room_name} is no longer in the map")
@@ -328,8 +328,8 @@ class DysonRoomSelectEntity(SelectEntity):
             self.async_write_ha_state()
             raise HomeAssistantError(f"Could not save {self._select_type} for {self._room_name}")
 
-        # Accepted by the MQTT client; the robot's next preference reply is
-        # what actually confirms the change.
+        # Accepted by the MQTT client only. The robot's preference reply will
+        # update current_option via the coordinator when it arrives.
         self.async_write_ha_state()
 
     @callback

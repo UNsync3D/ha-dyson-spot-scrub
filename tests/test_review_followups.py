@@ -224,18 +224,36 @@ class RoomSelectRollbackTests(unittest.TestCase):
             "room": [[10, "Living room", 0, 0, 1, 2, 1, 0, 1, 0, 3, 0]],
             "uv_switch": [[10, 1]],
         }
+        self.select_module = select
+        self.entity = self.make_entity("cleaning_mode")
+
+    def make_entity(self, select_type):
         coordinator = SimpleNamespace(mqtt=self.client, serial="SER-1")
         entry = SimpleNamespace(data={"serial": "SER-1", "device_name": "Robot"})
-        descriptor = next(d for d in select._ROOM_SELECT_DESCRIPTORS if d[0] == "cleaning_mode")
-        self.entity = select.DysonRoomSelectEntity(
+        descriptor = next(d for d in self.select_module._ROOM_SELECT_DESCRIPTORS
+                          if d[0] == select_type)
+        entity = self.select_module.DysonRoomSelectEntity(
             coordinator=coordinator, entry=entry, room_name="Living Room",
             select_type=descriptor[0], label=descriptor[1], icon=descriptor[2],
             array_index=descriptor[3], options_map=descriptor[4], inverse_map=descriptor[5])
 
         async def executor(fn, *args):
             return fn(*args)
-        self.entity.hass = SimpleNamespace(async_add_executor_job=executor)
-        self.entity.async_write_ha_state = lambda: None
+        entity.hass = SimpleNamespace(async_add_executor_job=executor)
+        entity.async_write_ha_state = lambda: None
+        return entity
+
+    def robot_reply(self, msg_id, mode=0, water=2):
+        """A service.get_preference reply as the robot would publish it."""
+        self.client._handle_jdm({
+            "msgId": msg_id, "code": 0, "method": "service.get_preference",
+            "data": {"room": [[10, "Living room", 0, mode, 1, water, 1, 0, 1, 0, 3, 0]],
+                     "uv_switch": [[10, 1]]}})
+
+    def capture(self):
+        sent = []
+        return sent, patch.object(self.client, "_publish_raw",
+                                  side_effect=lambda topic, payload: sent.append(payload) or True)
 
     def cached_mode(self):
         return self.client._cached_preference["room"][0][3]
@@ -258,13 +276,58 @@ class RoomSelectRollbackTests(unittest.TestCase):
                 self.select()
         self.assertEqual(self.cached_mode(), 0)
 
-    def test_success_updates_cache_once_accepted(self):
-        sent = []
-        with patch.object(self.client, "_publish_raw",
-                          side_effect=lambda topic, payload: sent.append(payload) or True):
+    # ── Option B (follow-up review, 26 Oct): only the robot's reply updates ──
+
+    def test_accepted_send_shows_value_only_after_robot_reply(self):
+        sent, transport = self.capture()
+        with transport:
             self.select()
+        methods = [p["method"] for p in sent]
+        self.assertEqual(methods, ["service.set_preference", "service.get_preference"])
+        self.assertEqual(sent[0]["params"]["room_preference"][0][3], 2)
+        self.assertEqual(self.cached_mode(), 0, "not shown until the robot reports it")
+        self.robot_reply(sent[1]["msgId"], mode=2)
         self.assertEqual(self.cached_mode(), 2)
-        self.assertEqual(sent[-1]["params"]["room_preference"][0][3], 2)
+        self.assertEqual(self.entity.current_option, "Mop")
+
+    def test_accepted_send_does_not_overwrite_intervening_telemetry(self):
+        # The follow-up review's reproduction, with the transport ACCEPTING the
+        # send: mode 3 arrives mid-publish, then the publish returns True.
+        def accepting_publish(topic, payload):
+            if payload["method"] == "service.set_preference":
+                self.robot_reply("app-1234", mode=3)
+            return True
+
+        with patch.object(self.client, "_publish_raw", side_effect=accepting_publish):
+            self.select("Mop")
+        self.assertEqual(self.cached_mode(), 3, "newer telemetry kept after an accepted send")
+
+    def test_quick_second_edit_builds_on_first(self):
+        water = self.make_entity("water_level")
+        sent, transport = self.capture()
+        with transport:
+            self.select("Mop")                                   # mode -> 2
+            # An unrelated/older reply arrives first; it must not drop the
+            # pending edit, or the next send would revert mode to 0.
+            self.robot_reply("app-older", mode=0)
+            asyncio.run(water.async_select_option("Low"))        # water -> 0
+        second = [p for p in sent if p["method"] == "service.set_preference"][1]
+        self.assertEqual(second["params"]["room_preference"][0][3], 2, "first edit kept")
+        self.assertEqual(second["params"]["room_preference"][0][5], 0, "second edit applied")
+
+    def test_edits_rebase_on_robot_data_after_confirmation_or_timeout(self):
+        sent, transport = self.capture()
+        with transport:
+            self.select("Mop")
+            self.robot_reply(sent[1]["msgId"], mode=1)   # robot reports something else
+            self.assertEqual(self.client.room_preferences_for_edit()[0][3], 1)
+
+            self.select("Mop")
+            self.assertEqual(self.client.room_preferences_for_edit()[0][3], 2, "pending")
+            later = self.mqtt.time.monotonic() + self.mqtt._PREFERENCE_TIMEOUT + 1
+            with patch.object(self.mqtt.time, "monotonic", return_value=later):
+                self.assertEqual(self.client.room_preferences_for_edit()[0][3], 1,
+                                 "unconfirmed edit expires; robot data wins")
 
     def test_cache_untouched_before_send_and_newer_data_not_overwritten(self):
         seen_during_send = []

@@ -24,6 +24,7 @@ import random
 import re
 import ssl
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -325,6 +326,14 @@ class DysonMqttClient:
         self.state: dict = {}
 
         self._cached_preference:    dict | None = None
+
+        # Room settings HA has sent but the robot hasn't yet reported back.
+        # The cache above only ever holds what the robot reported; these let a
+        # second quick edit build on the first instead of reverting it. See
+        # room_preferences_for_edit().
+        self._pending_rooms: list | None = None
+        self._pending_refresh_id: str | None = None
+        self._pending_since = 0.0
         self._preferences_fetched              = False
 
         # Guard: only fire on_disconnected once per client instance.
@@ -628,6 +637,21 @@ class DysonMqttClient:
             return self._cached_preference["room"]
         return []
 
+    def room_preferences_for_edit(self) -> list[list]:
+        """A private copy of the room array to base a new settings edit on.
+
+        Normally the robot-reported cache. While a just-sent change is awaiting
+        the robot's confirming reply (at most _PREFERENCE_TIMEOUT seconds), it
+        is that sent array instead, so a second quick edit doesn't send the
+        pre-edit values back and undo the first.
+        """
+        with self._preference_lock:
+            if (self._pending_rooms is not None
+                    and time.monotonic() - self._pending_since < _PREFERENCE_TIMEOUT):
+                return deepcopy(self._pending_rooms)
+            self._pending_rooms = None
+            return deepcopy(self.room_preferences)
+
     def set_room_preferences(self, rooms: list[list]) -> bool:
         """Publish an updated room-preferences array to the robot.
 
@@ -636,9 +660,12 @@ class DysonMqttClient:
         starting a clean cycle.  Safe to call from any thread; does not block.
 
         Returns True only if the MQTT client accepted the publish. That is
-        local transport acceptance, NOT confirmation that the robot applied
-        it. The cache is updated only after acceptance, so a failed send
-        never leaves a value the robot didn't receive.
+        local transport acceptance, NOT confirmation that the robot applied it.
+
+        The cache is never written from here, even on success: HA asks the
+        robot for its preferences straight after, and only the robot's reply
+        updates what entities show. So a failed send leaves the old value, and
+        a successful one can't overwrite telemetry that arrived mid-send.
         """
         try:
             map_id = int(self.state.get("persistentMapId", ""))
@@ -667,8 +694,28 @@ class DysonMqttClient:
         if not accepted:
             _LOGGER.warning("[%s] set_room_preferences: publish rejected", self.serial)
             return False
-        if self._cached_preference is not None:
-            self._cached_preference["room"] = deepcopy(rooms)
+
+        # Remember what we sent until the robot answers THIS refresh (matched
+        # by msgId - an older or app-originated reply doesn't count).
+        refresh_id = _rand_msg_id()
+        with self._preference_lock:
+            self._pending_rooms = deepcopy(rooms)
+            self._pending_refresh_id = refresh_id
+            self._pending_since = time.monotonic()
+        try:
+            requested = self._publish_raw(self._jdm_command_topic, {
+                "msgId": refresh_id, "version": "1.0.1",
+                "method": "service.get_preference",
+                "params": {"map_id": map_id}, "time": _now_iso(),
+            })
+        except Exception:  # noqa: BLE001 — the save itself was accepted
+            requested = False
+        if not requested:
+            # The setting was still sent; HA will show it after the next
+            # preference refresh (reconnect, map probe or app activity).
+            _LOGGER.warning("[%s] Room settings sent but the confirmation request "
+                            "failed; HA may show old values until the next refresh",
+                            self.serial)
         return True
 
     def save_room_settings(self, room_settings: dict[str, dict[str, str]]) -> bool:
@@ -676,7 +723,7 @@ class DysonMqttClient:
         if not isinstance(room_settings, dict) or not room_settings:
             _LOGGER.warning("[%s] No room settings were supplied", self.serial)
             return False
-        rooms = deepcopy(self.room_preferences)
+        rooms = self.room_preferences_for_edit()
         if not rooms:
             _LOGGER.warning("[%s] Cannot save room settings: preferences unavailable", self.serial)
             return False
@@ -1000,6 +1047,12 @@ class DysonMqttClient:
                         and str(data.get("msgId")) == self._preference_request_id):
                     self._preference_response = deepcopy(pref) if success else None
                     self._preference_ready.set()
+                if (self._pending_refresh_id is not None
+                        and str(data.get("msgId")) == self._pending_refresh_id):
+                    # The robot has answered our post-save refresh: from now on
+                    # edits build on what it reports, not on what we sent.
+                    self._pending_rooms = None
+                    self._pending_refresh_id = None
             if not success or not isinstance(pref.get("room"), list):
                 return
             n = len(pref.get("room", []))
