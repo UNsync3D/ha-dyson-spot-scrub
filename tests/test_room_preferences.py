@@ -45,7 +45,7 @@ class RoomSettingsTests(unittest.TestCase):
             "room_test_integration.dyson_api": module(
                 "room_test_integration.dyson_api", DysonApiError=Exception,
                 DysonRateLimitError=Exception,
-                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock(),
+                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock(), get_clean_history=AsyncMock(),
                 get_map_metadata=AsyncMock(return_value=[])),
         }))
         self.mqtt = importlib.import_module("room_test_integration.dyson_mqtt")

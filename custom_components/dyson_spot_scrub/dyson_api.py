@@ -598,6 +598,31 @@ async def get_clean_estimation(
     return data
 
 
+async def get_clean_history(
+    token: str, serial: str, *, session: aiohttp.ClientSession | None = None,
+) -> list[dict[str, Any]]:
+    """Return the robot's recent cleans, newest first (the app's History screen).
+
+    Captured from the iOS app: GET /v2/{serial}/clean-maps returns
+    {"data": [record, ...]} with no paging fields. Each record has:
+      cleanId, persistentMapId, isSpotClean, startTime / endTime (Unix s),
+      cleanDuration (minutes), areaCleaned (m²), startBattery / endBattery,
+      startMethod, faults[], zones[] {id, name, type, isSelected, settings,
+      cleanStatus}, and downloadUrl.
+
+    downloadUrl is a pre-signed S3 link carrying temporary AWS credentials;
+    callers must never log or expose it (clean_history.parse_history drops it).
+    Per-clean detail (route, dirt, obstacles) is /v2/{serial}/clean-maps-data/{cleanId}.
+    """
+    _, data = await _request(
+        "GET", f"/v2/{_seg(serial)}/clean-maps", token=token, session=session,
+        label="Clean history fetch", required_key="data", rate_limited=True,
+    )
+    if not isinstance(data["data"], list):
+        raise DysonApiError("Clean history fetch failed: 'data' is not a list")
+    return data["data"]
+
+
 async def get_current_map(
     token: str, serial: str, *, session: aiohttp.ClientSession | None = None,
 ) -> tuple[str, dict[str, Any]]:

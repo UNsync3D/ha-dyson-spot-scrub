@@ -3,7 +3,8 @@
 The Lovelace card discovers entities by unique_id and device, so these must not
 change. The snapshot in fixtures/entity_registry_snapshot.json was generated
 from main at c1f9d5d (before the security review); any intentional change to
-an entity's identity must update it deliberately.
+an entity's identity must update it deliberately. Entities added since must
+be listed in ADDED, so additions are deliberate too.
 """
 import asyncio
 import enum
@@ -19,6 +20,16 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1] / "custom_components/dyson_spot_scrub"
 SNAPSHOT = Path(__file__).resolve().parent / "fixtures/entity_registry_snapshot.json"
 
+# Entities added after the snapshot: (platform, class, unique_id suffix).
+ADDED = {
+    ("sensor", "DysonLastCleanSensor", "last_clean_start"),
+    ("sensor", "DysonLastCleanDurationSensor", "last_clean_duration"),
+    ("sensor", "DysonLastCleanAreaSensor", "last_clean_area"),
+    ("sensor", "DysonLastCleanBatterySensor", "last_clean_battery_used"),
+    ("sensor", "DysonLastCleanResultSensor", "last_clean_result"),
+}
+SERIAL = "7VD-AU-ABC1234A"
+
 
 def collect(root):
     stubs = {}
@@ -28,11 +39,11 @@ def collect(root):
     mod('homeassistant'); mod('homeassistant.components')
     mod('homeassistant.components.vacuum', StateVacuumEntity=object, VacuumEntityFeature=Flags, VacuumActivity=NS())
     mod('homeassistant.components.binary_sensor', BinarySensorEntity=object, BinarySensorDeviceClass=NS(OCCUPANCY='o', BATTERY_CHARGING='b', PROBLEM='p'))
-    mod('homeassistant.components.sensor', SensorEntity=object, SensorDeviceClass=NS(BATTERY='b', ENUM='e', DURATION='d'), SensorStateClass=NS(MEASUREMENT='m'))
+    mod('homeassistant.components.sensor', SensorEntity=object, SensorDeviceClass=NS(BATTERY='b', ENUM='e', DURATION='d', TIMESTAMP='t'), SensorStateClass=NS(MEASUREMENT='m'))
     for p, c in [('select','SelectEntity'),('button','ButtonEntity'),('switch','SwitchEntity'),('camera','Camera')]:
         mod(f'homeassistant.components.{p}', **{c: object})
     mod('homeassistant.config_entries', ConfigEntry=object)
-    mod('homeassistant.const', PERCENTAGE='%', UnitOfTime=NS(SECONDS='s'))
+    mod('homeassistant.const', PERCENTAGE='%', UnitOfTime=NS(SECONDS='s', MINUTES='min'))
     mod('homeassistant.core', HomeAssistant=object, ServiceCall=object, callback=lambda f: f)
     mod('homeassistant.exceptions', HomeAssistantError=RuntimeError)
     h = mod('homeassistant.helpers')
@@ -66,7 +77,16 @@ def collect(root):
 
 class EntityCompatibilityTests(unittest.TestCase):
     def test_unique_ids_and_devices_match_snapshot(self):
-        self.assertEqual(collect(str(ROOT)), json.loads(SNAPSHOT.read_text()))
+        current = collect(str(ROOT))
+        snapshot = json.loads(SNAPSHOT.read_text())
+        # Every existing entity keeps its platform, class, unique_id and device.
+        self.assertEqual([r for r in current if r in snapshot], snapshot)
+        added = [r for r in current if r not in snapshot]
+        self.assertEqual({(r[0], r[1], r[2].removeprefix(SERIAL + "_")) for r in added}, ADDED)
+        self.assertEqual(len(added), len(ADDED))
+        device = snapshot[0][3]
+        for row in added:
+            self.assertEqual(row[3], device, "new entities belong to the same device")
 
 
 if __name__ == "__main__":

@@ -22,9 +22,9 @@ class ConsumableTests(unittest.TestCase):
             "consumable_test_integration.dyson_mqtt": mod("mqtt", battery_level=lambda state: state.get("battery")),
             "homeassistant": mod("homeassistant"),
             "homeassistant.components": mod("components"),
-            "homeassistant.components.sensor": mod("sensor", SensorEntity=object, SensorDeviceClass=SimpleNamespace(BATTERY="battery", ENUM="enum", DURATION="duration"), SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
+            "homeassistant.components.sensor": mod("sensor", SensorEntity=object, SensorDeviceClass=SimpleNamespace(BATTERY="battery", ENUM="enum", DURATION="duration", TIMESTAMP="timestamp"), SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
             "homeassistant.config_entries": mod("config_entries", ConfigEntry=object),
-            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s")),
+            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s", MINUTES="min")),
             "homeassistant.core": mod("core", HomeAssistant=object, callback=lambda f: f),
             "homeassistant.helpers": mod("helpers"),
             "homeassistant.helpers.entity": mod("entity", DeviceInfo=dict),
@@ -43,8 +43,9 @@ class ConsumableTests(unittest.TestCase):
         self.drying = self.entities[7]
 
     def test_registration_and_discovery_contract(self):
-        self.assertEqual(len(self.entities), 8)
-        self.assertEqual(len({e._attr_unique_id for e in self.entities}), 8)
+        # 8 MQTT sensors, then 5 cleaning-history sensors (test_clean_history).
+        self.assertEqual(len(self.entities), 13)
+        self.assertEqual(len({e._attr_unique_id for e in self.entities}), 13)
         self.assertEqual(self.drying._attr_unique_id, "TEST_drying_remaining")
         self.assertEqual(self.entities[0]._attr_unique_id, "TEST_battery")
         for sensor in self.usage:

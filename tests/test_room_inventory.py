@@ -254,7 +254,7 @@ class CoordinatorInventoryTests(unittest.TestCase):
                 "m", DysonMqttClient=object, is_any_cleaning=None, start_block_reason=None),
             "inventory_coord.dyson_api": module(
                 "a", DysonApiError=Exception, DysonRateLimitError=Exception,
-                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock(),
+                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock(), get_clean_history=AsyncMock(),
                 get_map_metadata=self.get_meta),
             "aiohttp": module("aiohttp", ClientSession=MagicMock(), TCPConnector=MagicMock()),
             "homeassistant": module("homeassistant"),

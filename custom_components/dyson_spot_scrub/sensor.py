@@ -14,6 +14,7 @@ from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .clean_history import RESULTS, history_summary, record_attributes
 from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import battery_level
@@ -34,6 +35,11 @@ async def async_setup_entry(
           for kind, key, name in CONSUMABLES),
         DysonCleaningSolutionSensor(coordinator, entry),
         DysonDryingCountdownSensor(coordinator, entry),
+        DysonLastCleanSensor(coordinator, entry),
+        DysonLastCleanDurationSensor(coordinator, entry),
+        DysonLastCleanAreaSensor(coordinator, entry),
+        DysonLastCleanBatterySensor(coordinator, entry),
+        DysonLastCleanResultSensor(coordinator, entry),
     ])
 
 
@@ -205,3 +211,102 @@ class DysonDryingCountdownSensor(DysonBatterySensor):
         if updated_at is not None:
             attrs["updated_at"] = updated_at
         return attrs
+
+
+class DysonLastCleanBase(DysonBatterySensor):
+    """Base for sensors describing the most recent clean (cloud history).
+
+    Unlike the MQTT sensors these stay available while MQTT is down: the data
+    comes from the REST history, which is fetched at startup, after each clean
+    and hourly. Unavailable only until the first successful fetch.
+    """
+
+    _attr_device_class = None
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
+    _key = ""          # record field shown as the state
+    _suffix = ""       # unique_id suffix
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_{self._suffix}"
+
+    @property
+    def available(self) -> bool:
+        return getattr(self._coordinator, "clean_history", None) is not None
+
+    @property
+    def _record(self) -> dict | None:
+        return getattr(self._coordinator, "last_clean", None)
+
+    @property
+    def native_value(self):
+        record = self._record
+        return None if record is None else record.get(self._key)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        record = self._record
+        return {"clean_id": record["clean_id"]} if record else {}
+
+
+class DysonLastCleanSensor(DysonLastCleanBase):
+    """When the last clean started; attributes carry its details and recent history."""
+
+    _attr_name = "Last clean"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+    _attr_icon = "mdi:history"
+    _key = "start"
+    _suffix = "last_clean_start"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        record = self._record
+        if record is None:
+            return {}
+        return {**record_attributes(record),
+                "history": history_summary(self._coordinator.clean_history)}
+
+
+class DysonLastCleanDurationSensor(DysonLastCleanBase):
+    _attr_name = "Last clean duration"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_icon = "mdi:timer-outline"
+    _key = "duration_minutes"
+    _suffix = "last_clean_duration"
+
+
+class DysonLastCleanAreaSensor(DysonLastCleanBase):
+    # No device class: AREA needs a newer Home Assistant than we require.
+    _attr_name = "Last clean area"
+    _attr_native_unit_of_measurement = "m²"
+    _attr_icon = "mdi:texture-box"
+    _key = "area_m2"
+    _suffix = "last_clean_area"
+
+
+class DysonLastCleanBatterySensor(DysonLastCleanBase):
+    _attr_name = "Last clean battery used"
+    _attr_native_unit_of_measurement = PERCENTAGE
+    _attr_icon = "mdi:battery-arrow-down"
+    _key = "battery_used"
+    _suffix = "last_clean_battery_used"
+
+
+class DysonLastCleanResultSensor(DysonLastCleanBase):
+    _attr_name = "Last clean result"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = RESULTS
+    _attr_translation_key = "last_clean_result"
+    _attr_icon = "mdi:clipboard-check-outline"
+    _key = "result"
+    _suffix = "last_clean_result"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        record = self._record
+        if record is None:
+            return {}
+        return {"clean_id": record["clean_id"],
+                "rooms": {r["name"] or r["id"]: r["status"] for r in record["rooms"]}}

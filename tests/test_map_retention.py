@@ -73,7 +73,7 @@ package.__path__ = [str(Path(__file__).resolve().parents[1] /
 module('retention_integration.dyson_api', DysonApiError=ApiError,
        DysonRateLimitError=RateLimitError,
        get_current_map=AsyncMock(), get_map_metadata=AsyncMock(),
-       get_live_map=AsyncMock(), get_iot_credentials=AsyncMock())
+       get_live_map=AsyncMock(), get_iot_credentials=AsyncMock(), get_clean_history=AsyncMock())
 camera_module = importlib.import_module('retention_integration.camera')
 coordinator_module = importlib.import_module('retention_integration.coordinator')
 real_render_map = camera_module.render_map

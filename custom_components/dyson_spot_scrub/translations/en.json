@@ -84,6 +84,15 @@
           "ok": "OK",
           "refill_required": "Refill required"
         }
+      },
+      "last_clean_result": {
+        "name": "Last clean result",
+        "state": {
+          "complete": "Complete",
+          "partial": "Partly complete",
+          "stopped": "Stopped early",
+          "cant_clean": "Couldn't clean"
+        }
       }
     }
   },

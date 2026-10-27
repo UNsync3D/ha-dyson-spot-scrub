@@ -19,10 +19,12 @@ from .const import (
 from .dyson_api import (
     DysonApiError,
     DysonRateLimitError,
+    get_clean_history,
     get_iot_credentials,
     get_live_map,
     get_map_metadata,
 )
+from .clean_history import parse_history
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
 
 _LOGGER = logging.getLogger(__name__)
@@ -38,6 +40,12 @@ _CLEAN_COMPLETE_ROBOT_STATES: frozenset[str] = frozenset({"CHARGING", "INACTIVE_
 
 # Minimum seconds between upstream live-map API calls (shared across all viewers)
 _LIVE_MAP_MIN_INTERVAL = 5.0
+
+# Cleaning history (GET /v2/{serial}/clean-maps). Fetched at startup, after
+# each clean ends (twice: the robot uploads the record some time after it
+# stops) and hourly as a fallback, e.g. for cleans that ended while HA was down.
+_HISTORY_AFTER_CLEAN_DELAYS = (90.0, 360.0)
+_HISTORY_PERIODIC_INTERVAL = 3600.0
 
 
 class DysonCoordinator:
@@ -101,6 +109,14 @@ class DysonCoordinator:
         self._live_map_lock: asyncio.Lock = asyncio.Lock()
         self._live_map_generation = 0
 
+        # Cleaning history, newest first (see clean_history.parse_history).
+        # None until the first successful fetch, so entities can tell
+        # "not loaded yet" from "no cleans".
+        self.clean_history: list[dict] | None = None
+        self._history_task: asyncio.Task | None = None
+        self._history_timers: set[asyncio.TimerHandle] = set()   # one-shot, after a clean
+        self._history_periodic: asyncio.TimerHandle | None = None  # the single hourly timer
+
     # ── Setup / teardown ──────────────────────────────────────────────────────
 
     async def async_setup(self) -> None:
@@ -115,6 +131,8 @@ class DysonCoordinator:
         """
         self._shutting_down = False
         self._reconnect_attempt = 0
+        # Independent of MQTT: the history is plain REST.
+        self._async_schedule_history_refresh(0)
 
         try:
             await self._async_connect_cloud()
@@ -165,6 +183,14 @@ class DysonCoordinator:
         await self._async_cancel_cleaning_task()
         if self._inventory_task and not self._inventory_task.done():
             self._inventory_task.cancel()
+        for handle in self._history_timers:
+            handle.cancel()
+        self._history_timers.clear()
+        if self._history_periodic is not None:
+            self._history_periodic.cancel()
+            self._history_periodic = None
+        if self._history_task and not self._history_task.done():
+            self._history_task.cancel()
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
             try:
@@ -360,6 +386,67 @@ class DysonCoordinator:
             if isinstance(entry, dict) and entry.get("id") is not None:
                 mqtt.set_map_inventory(entry["id"], entry.get("zones") or [])
 
+    # ── Cleaning history ──────────────────────────────────────────────────────
+
+    @property
+    def last_clean(self) -> dict | None:
+        """The most recent clean, or None if none is known yet."""
+        return self.clean_history[0] if self.clean_history else None
+
+    @callback
+    def _async_schedule_history_refresh(self, delay: float) -> None:
+        """Refresh the history after `delay` seconds (0 = now)."""
+        if self._shutting_down:
+            return
+        if delay <= 0:
+            self._async_start_history_refresh()
+            return
+        handle: asyncio.TimerHandle | None = None
+
+        def _fire() -> None:
+            self._history_timers.discard(handle)
+            self._async_start_history_refresh()
+
+        handle = self.hass.loop.call_later(delay, _fire)
+        self._history_timers.add(handle)
+
+    @callback
+    def _async_start_history_refresh(self) -> None:
+        if self._shutting_down:
+            return
+        task = self._history_task
+        if task is None or task.done():
+            self._history_task = self.hass.async_create_task(
+                self.async_refresh_clean_history())
+
+    async def async_refresh_clean_history(self) -> None:
+        """Fetch the cleaning history; keep the previous copy on failure."""
+        try:
+            raw = await get_clean_history(self._token, self.serial, session=self.http_session)
+        except Exception as exc:  # noqa: BLE001 — best effort, retried hourly
+            _LOGGER.debug("[%s] Clean history fetch failed: %s", self.serial, exc)
+        else:
+            records = parse_history(raw)
+            if records != self.clean_history:
+                self.clean_history = records
+                _LOGGER.debug("[%s] Clean history: %d cleans", self.serial, len(records))
+                self._async_notify_listeners()
+        finally:
+            # Restart the single hourly fallback timer (never stacks).
+            if self._history_periodic is not None:
+                self._history_periodic.cancel()
+                self._history_periodic = None
+            if not self._shutting_down:
+                self._history_periodic = self.hass.loop.call_later(
+                    _HISTORY_PERIODIC_INTERVAL, self._async_start_history_refresh)
+
+    @callback
+    def _async_check_clean_finished(self, previous: dict, current: dict) -> None:
+        """A clean just ended: its record reaches the cloud shortly after."""
+        if previous and is_any_cleaning(previous) and not is_any_cleaning(current):
+            for delay in _HISTORY_AFTER_CLEAN_DELAYS:
+                self._async_schedule_history_refresh(delay)
+
     def _on_mqtt_disconnected(self) -> None:
         _LOGGER.warning("[%s] MQTT disconnected — will reconnect", self.serial)
         self.hass.loop.call_soon_threadsafe(self._async_on_disconnected)
@@ -396,7 +483,8 @@ class DysonCoordinator:
     @callback
     def _async_apply_state(self, snapshot: dict) -> None:
         """Store the state snapshot then notify listeners (runs on HA event loop)."""
-        self._state_snapshot = snapshot
+        previous, self._state_snapshot = self._state_snapshot, snapshot
+        self._async_check_clean_finished(previous, snapshot)
         self._async_update_rooms_and_notify()
 
     @callback

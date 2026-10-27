@@ -215,6 +215,20 @@ MIT
 
 Five percentage sensors report used lifespan for the brush bar, mop roller, side brushes, robot filter and dock filter. A cleaning-solution sensor reports OK or Refill required. See [Consumable sensors](CONSUMABLES.md) for entity identification, card integration and testing.
 
+## Cleaning history (preview, issue #26)
+
+Five sensors describe the most recent clean, from the same cloud history the MyDyson app shows (`GET /v2/{serial}/clean-maps`):
+
+| Sensor | Value |
+|---|---|
+| Last clean | Start time; attributes hold end time, rooms with their status and settings, and the last 10 cleans (`history`) |
+| Last clean duration | Minutes |
+| Last clean area | m² (the app's figure) |
+| Last clean battery used | Percentage points |
+| Last clean result | Complete, Partly complete, Stopped early or Couldn't clean |
+
+The history is fetched at startup, about 1½ and 6 minutes after a clean ends (the robot uploads its record shortly after stopping), and hourly as a fallback. It does not depend on MQTT, so these sensors stay available while MQTT reconnects. Each record's pre-signed download link carries temporary AWS credentials and is never stored, logged or exposed.
+
 
 ### Mop roller drying (fork build v1.4.5)
 
