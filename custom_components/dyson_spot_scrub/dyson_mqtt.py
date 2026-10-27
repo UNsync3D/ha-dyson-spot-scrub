@@ -332,6 +332,13 @@ class DysonMqttClient:
         # second quick edit build on the first instead of reverting it. See
         # room_preferences_for_edit().
         self._pending_rooms: list | None = None
+        # Serialises each complete read -> merge -> publish of room settings,
+        # so overlapping edits (two selects, a select and a card batch save,
+        # automations) each build on the previous one instead of on the same
+        # stale snapshot. Held only while preparing and publishing - never
+        # while waiting for the robot's reply. Re-entrant because the edit
+        # helpers call set_room_preferences() while holding it.
+        self._room_edit_lock = threading.RLock()
         self._pending_refresh_id: str | None = None
         self._pending_since = 0.0
         self._preferences_fetched              = False
@@ -652,8 +659,39 @@ class DysonMqttClient:
             self._pending_rooms = None
             return deepcopy(self.room_preferences)
 
+    def edit_room_setting(self, room_id, index: int, value) -> bool:
+        """Change one raw field of one room and publish, as one serialised step.
+
+        Used by the per-room selects. The base array is read inside the lock,
+        so an overlapping edit always sees this one's result.
+        """
+        def change(rooms: list[list]) -> bool:
+            room = next((r for r in rooms if r and str(r[0]) == str(room_id)), None)
+            if room is None or len(room) <= index:
+                _LOGGER.warning("[%s] Room ID %r is no longer in the map", self.serial, room_id)
+                return False
+            room[index] = value
+            return True
+        return self._edit_rooms(change)
+
+    def _edit_rooms(self, change: Callable[[list[list]], bool]) -> bool:
+        """Read the edit base, apply ``change`` to a copy, publish - atomically."""
+        with self._room_edit_lock:
+            rooms = self.room_preferences_for_edit()
+            if not rooms:
+                _LOGGER.warning("[%s] Cannot save room settings: preferences unavailable",
+                                self.serial)
+                return False
+            if not change(rooms):
+                return False
+            return self.set_room_preferences(rooms)
+
     def set_room_preferences(self, rooms: list[list]) -> bool:
         """Publish an updated room-preferences array to the robot.
+
+        Prefer edit_room_setting()/save_room_settings(), which read their base
+        array under the same lock; a caller passing a full array it prepared
+        earlier can still race with other edits.
 
         Used by per-room select entities to persist a single-setting change
         (cleaning mode, strategy, water level, or mop repetitions) without
@@ -667,6 +705,11 @@ class DysonMqttClient:
         updates what entities show. So a failed send leaves the old value, and
         a successful one can't overwrite telemetry that arrived mid-send.
         """
+        with self._room_edit_lock:
+            return self._send_room_preferences(rooms)
+
+    def _send_room_preferences(self, rooms: list[list]) -> bool:
+        """Body of set_room_preferences(); caller holds _room_edit_lock."""
         try:
             map_id = int(self.state.get("persistentMapId", ""))
         except (TypeError, ValueError):
@@ -723,19 +766,19 @@ class DysonMqttClient:
         if not isinstance(room_settings, dict) or not room_settings:
             _LOGGER.warning("[%s] No room settings were supplied", self.serial)
             return False
-        rooms = self.room_preferences_for_edit()
-        if not rooms:
-            _LOGGER.warning("[%s] Cannot save room settings: preferences unavailable", self.serial)
-            return False
-        by_id = {str(room[0]): room for room in rooms if isinstance(room, list) and room}
-        for room_id, settings in room_settings.items():
-            room = by_id.get(str(room_id))
-            if room is None or len(room) < 7 or not isinstance(settings, dict) or not settings:
-                _LOGGER.warning("[%s] Invalid room settings for room ID %r", self.serial, room_id)
-                return False
-            if not self._apply_room_settings(room, settings):
-                return False
-        return self.set_room_preferences(rooms)
+
+        def change(rooms: list[list]) -> bool:
+            by_id = {str(room[0]): room for room in rooms if isinstance(room, list) and room}
+            for room_id, settings in room_settings.items():
+                room = by_id.get(str(room_id))
+                if room is None or len(room) < 7 or not isinstance(settings, dict) or not settings:
+                    _LOGGER.warning("[%s] Invalid room settings for room ID %r",
+                                    self.serial, room_id)
+                    return False
+                if not self._apply_room_settings(room, settings):
+                    return False
+            return True
+        return self._edit_rooms(change)
 
     def _apply_room_settings(self, room: list, settings: dict) -> bool:
         """Write label-valued settings into one room array; False if any is invalid.

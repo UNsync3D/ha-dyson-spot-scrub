@@ -11,6 +11,7 @@ import asyncio
 import importlib
 from pathlib import Path
 import sys
+import threading
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -190,7 +191,9 @@ class RedactionTests(unittest.TestCase):
 
 # ── Finding 3: a failed room-setting send must not change the shown value ─────
 
-class RoomSelectRollbackTests(unittest.TestCase):
+class RoomSelectFixture(unittest.TestCase):
+    """Real select entity + real MQTT client; only _publish_raw is replaced."""
+
     def setUp(self):
         class HAError(Exception):
             pass
@@ -261,6 +264,8 @@ class RoomSelectRollbackTests(unittest.TestCase):
     def select(self, option="Mop"):
         return asyncio.run(self.entity.async_select_option(option))
 
+
+class RoomSelectRollbackTests(RoomSelectFixture):
     def test_publish_rejected_keeps_old_value_and_raises(self):
         # Review case: _publish_raw() returns False → previously "success", mode 2.
         with patch.object(self.client, "_publish_raw", return_value=False):
@@ -349,6 +354,89 @@ class RoomSelectRollbackTests(unittest.TestCase):
         with patch.object(self.client, "_publish_raw", return_value=False):
             self.assertFalse(self.client.save_room_settings({"10": {"cleaning_mode": "Mop"}}))
         self.assertEqual(self.cached_mode(), 0)
+
+class OverlappingEditTests(RoomSelectFixture):
+    """Re-review of 9cd3fac (FutuRazor, 27 Oct): truly overlapping edits.
+
+    The executor below holds every job at a barrier until BOTH have been
+    submitted, reproducing the review's schedule: neither call can publish
+    before the other has started. Runs on real worker threads.
+    """
+
+    def overlap(self, *jobs):
+        """Run (entity_or_None, callable) jobs concurrently through one executor."""
+        from concurrent.futures import ThreadPoolExecutor
+        barrier = threading.Barrier(len(jobs), timeout=5)
+        pool = ThreadPoolExecutor(max_workers=len(jobs))
+        self.addCleanup(pool.shutdown, wait=True)
+
+        async def run_all():
+            loop = asyncio.get_running_loop()
+
+            async def executor(fn, *args):
+                def held():
+                    barrier.wait()
+                    return fn(*args)
+                return await loop.run_in_executor(pool, held)
+
+            coros = []
+            for entity, call in jobs:
+                if entity is not None:
+                    entity.hass = SimpleNamespace(async_add_executor_job=executor)
+                coros.append(call(executor))
+            return await asyncio.gather(*coros, return_exceptions=True)
+
+        return asyncio.run(run_all())
+
+    def sets(self, sent):
+        return [p["params"]["room_preference"][0]
+                for p in sent if p["method"] == "service.set_preference"]
+
+    def test_overlapping_selects_keep_both_changes(self):
+        # Review case: mode=0 water=2; concurrently Mop (mode 2) and Low (water 0).
+        water = self.make_entity("water_level")
+        sent, transport = self.capture()
+        with transport:
+            results = self.overlap(
+                (self.entity, lambda ex: self.entity.async_select_option("Mop")),
+                (water, lambda ex: water.async_select_option("Low")),
+            )
+        self.assertEqual(results, [None, None])
+        published = self.sets(sent)
+        self.assertEqual(len(published), 2)
+        self.assertEqual((published[-1][3], published[-1][5]), (2, 0),
+                         "the later send carries both changes")
+        pending = self.client.room_preferences_for_edit()[0]
+        self.assertEqual((pending[3], pending[5]), (2, 0))
+        self.assertEqual(self.cached_mode(), 0, "display still waits for the robot")
+
+    def test_batch_save_and_select_overlap(self):
+        # A card batch save (water Very Low = 99) overlapping a dropdown change (Mop).
+        sent, transport = self.capture()
+
+        async def batch(executor):
+            return await executor(self.client.save_room_settings,
+                                  {"10": {"water_level": "Very Low"}})
+        with transport:
+            results = self.overlap(
+                (self.entity, lambda ex: self.entity.async_select_option("Mop")),
+                (None, batch),
+            )
+        self.assertIn(True, results)
+        last = self.sets(sent)[-1]
+        self.assertEqual((last[3], last[5]), (2, 99), "both edits survive")
+
+    def test_lock_not_held_while_waiting_for_robot_reply(self):
+        sent, transport = self.capture()
+        with transport:
+            self.select("Mop")
+        # No robot reply has arrived, yet both locks are free for the next edit
+        # and for the paho thread delivering replies.
+        self.assertTrue(self.client._room_edit_lock.acquire(blocking=False))
+        self.client._room_edit_lock.release()
+        self.assertTrue(self.client._preference_lock.acquire(blocking=False))
+        self.client._preference_lock.release()
+
 
 if __name__ == "__main__":
     unittest.main()

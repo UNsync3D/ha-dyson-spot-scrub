@@ -307,19 +307,15 @@ class DysonRoomSelectEntity(SelectEntity):
         if mqtt is None:
             raise HomeAssistantError("The Dyson vacuum is unavailable")
 
-        # Edit a COPY and send that. The cache this entity displays is only
-        # ever updated by the robot's own preference reply (requested right
-        # after a successful send), so a failed send needs no rollback and a
-        # successful one can't overwrite newer telemetry. Until that reply
-        # arrives the dropdown keeps showing the old value.
-        rooms = mqtt.room_preferences_for_edit()
-        target = next((r for r in rooms if r and str(r[0]) == str(room[0])), None)
-        if target is None or len(target) <= self._array_index:
-            raise HomeAssistantError(f"Room {self._room_name} is no longer in the map")
-        target[self._array_index] = raw
-
+        # Send only this field's change. edit_room_setting() reads the latest
+        # base (including any not-yet-confirmed edit), applies the change and
+        # publishes as one serialised step, so overlapping edits don't undo
+        # each other. The cache this entity displays is only updated by the
+        # robot's own preference reply, so until it arrives the dropdown keeps
+        # showing the old value, and a failed send needs no rollback.
         try:
-            saved = await self.hass.async_add_executor_job(mqtt.set_room_preferences, rooms)
+            saved = await self.hass.async_add_executor_job(
+                mqtt.edit_room_setting, room[0], self._array_index, raw)
         except Exception as exc:  # noqa: BLE001 — surface any send failure to the user
             _LOGGER.warning("[%s] Saving %s for %s raised: %s",
                             self._coordinator.serial, self._select_type, self._room_name, exc)
