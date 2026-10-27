@@ -44,15 +44,24 @@ _LOGGER = logging.getLogger(__name__)
 
 API_HOST = "appapi.cp.dyson.com"
 
+# MyDyson app version to report. Same format as the App Store version
+# (a Proxyman capture of the iOS app sent X-App-Version 6.4.26340 when that
+# was current). Update here after app releases; both version headers use it.
+# 6.4.26420: App Store, released 24 Oct 2026.
+MYDYSON_APP_VERSION = "6.4.26420"
+
 # Mimic the MyDyson mobile app; Dyson's API rejects unknown clients.
+# NOTE: the User-Agent is still an Android string while X-Platform says
+# "ios". The real iOS app sends "DysonLink/<build> CFNetwork/<v> Darwin/<v>";
+# switching needs a fresh capture so build/iOS numbers match this version.
 _HEADERS = {
     "Content-Type":            "application/json",
     "User-Agent":              "Dalvik/2.1.0 (Linux; U; Android 11; Build/RQ3A.210905.001)",
     "Accept":                  "application/json, text/plain, */*",
     "Accept-Language":         "en-AU,en;q=0.9",
-    "X-App-Version":           "6.4.26341",
+    "X-App-Version":           MYDYSON_APP_VERSION,
     "X-Platform":              "ios",
-    "X-Dyson-LinkApp-Version": "6.4.26340",
+    "X-Dyson-LinkApp-Version": MYDYSON_APP_VERSION,
 }
 
 # Response bodies are echoed into exception messages (and therefore HA logs).
