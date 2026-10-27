@@ -188,10 +188,42 @@ class OtpLoginTests(unittest.TestCase):
         self.replies["post"].append(reply)
         return self.run_step("otp", {"otp_code": "123456"})
 
-    # The maintainer's capture while Dyson had locked the account: the real
-    # app's verify got HTTP 401 with an empty text/html body - identical to a
-    # wrong code.
+    # verify's reply to a wrong code, a wrong password or a locked account:
+    # HTTP 401 with an empty text/html body (maintainer's captures).
     LOCKED = staticmethod(lambda: response(401, None, text=""))
+
+    @staticmethod
+    def fields(result):
+        return [str(key) for key in result["data_schema"].schema]
+
+    def test_wrong_password_is_corrected_without_a_new_code(self):
+        # Replays the maintainer's 1 Sep 2026 capture: verify 401 (wrong
+        # password), then 15 s later the same challenge with the right
+        # password -> token. No second auth request in between.
+        first = self.login(response(200, {"challengeId": "chal-1"}))
+        self.assertEqual(self.fields(first), ["otp_code"], "no password field at first")
+        rejected = self.verify(self.LOCKED())
+        self.assertEqual(rejected["errors"], {"base": "invalid_otp"})
+        self.assertEqual(self.fields(rejected), ["otp_code", "password"])
+        self.assertNotIn("default", repr(rejected["data_schema"].schema), "never pre-filled")
+        self.replies["post"].append(response(200, {"account": "a", "token": "bearer-1",
+                                                   "tokenType": "Bearer"}))
+        self.replies["get"].append(response(200, [ROBOT]))
+        result = self.run_step("otp", {"otp_code": "123456", "password": "pw-RIGHT"})
+        self.assertEqual(result["type"], "create_entry")
+        verifies = [kw["json"] for verb, url, kw in self.calls if url.endswith("/verify")]
+        self.assertEqual([v["password"] for v in verifies], ["pw-SECRET", "pw-RIGHT"])
+        self.assertEqual({v["challengeId"] for v in verifies}, {"chal-1"})
+        self.assertEqual(self.paths().count(("post", "/v3/userregistration/email/auth")), 1,
+                         "no new code requested")
+
+    def test_blank_password_keeps_the_first_one(self):
+        self.login(response(200, {"challengeId": "chal-1"}))
+        self.verify(self.LOCKED())
+        self.replies["post"].append(self.LOCKED())
+        self.run_step("otp", {"otp_code": "123456", "password": ""})
+        verifies = [kw["json"] for verb, url, kw in self.calls if url.endswith("/verify")]
+        self.assertEqual([v["password"] for v in verifies], ["pw-SECRET", "pw-SECRET"])
 
     def test_two_rejected_codes_pause_login_without_contacting_dyson(self):
         self.login(response(200, {"challengeId": "chal-1"}))
@@ -241,6 +273,7 @@ class OtpLoginTests(unittest.TestCase):
         for name in ("strings.json", "translations/en.json"):
             errors = __import__("json").loads((ROOT / name).read_text())["config"]["error"]
             self.assertIn("rejected again, stop", errors["invalid_otp"], name)
+            self.assertIn("code or password", errors["invalid_otp"], name)
             self.assertIn("15 minutes", errors["too_many_attempts"], name)
 
     def test_account_checks_stop_before_any_code_is_requested(self):

@@ -50,10 +50,10 @@ _LOGGER = logging.getLogger(__name__)
 # The iOS app requests the code ~1.5-2 s after its user-status check.
 _USER_STATUS_PAUSE = 1.5
 
-# Login cool-down. A Dyson account lock is indistinguishable from a wrong code
-# (the maintainer's capture while locked: HTTP 401, empty HTML body), and every
+# Login cool-down. verify answers HTTP 401 (empty HTML body) for a wrong code,
+# a wrong password AND a locked account, so a lock can't be detected, and every
 # further attempt while locked risks extending it. So after this many rejected
-# codes in a row (or a 429), refuse to contact Dyson for this email for a while.
+# attempts in a row (or a 429), refuse to contact Dyson for this email for a while.
 # Module level so it survives closing and reopening the config flow; it resets
 # when Home Assistant restarts.
 _MAX_REJECTED_CODES = 2
@@ -104,8 +104,19 @@ def _login_schema(default_country: str) -> vol.Schema:
     )
 
 
-def _otp_schema() -> vol.Schema:
-    return vol.Schema({vol.Required("otp_code"): str})
+def _otp_schema(ask_password: bool = False) -> vol.Schema:
+    """The code form; after a rejection it also offers the password.
+
+    Dyson only checks the password at verify (the earlier steps send just the
+    email), and a wrong password gets the same 401 as a wrong code. The iOS app
+    lets the user correct the password and retry with the same challenge, so
+    no new code is emailed; this does the same. Left blank, the password from
+    the first step is kept.
+    """
+    fields: dict = {vol.Required("otp_code"): str}
+    if ask_password:
+        fields[vol.Optional("password")] = str
+    return vol.Schema(fields)
 
 
 def _token_schema(default_country: str) -> vol.Schema:
@@ -160,6 +171,7 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._email:        str = ""
         self._password:     str = ""
         self._challenge_id: str = ""
+        self._verify_rejected: bool = False   # show the password field again
         self._robots:       list[dict] = []
         self._selected_device: dict = {}
 
@@ -301,6 +313,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "too_many_attempts"
         elif user_input is not None:
             otp_code = re.sub(r"\s+", "", user_input["otp_code"])
+            if user_input.get("password"):
+                self._password = user_input["password"]   # corrected password
             try:
                 # Same country as the OTP request (it previously defaulted to GB).
                 token = await verify_v3_auth(
@@ -317,6 +331,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except (DysonAuthError, DysonApiError) as exc:
                 errors["base"] = _record_login_failure(
                     self._email, self._auth_error(exc, "invalid_otp"))
+                if errors["base"] in ("invalid_otp", "too_many_attempts"):
+                    self._verify_rejected = True
                 _LOGGER.warning("OTP verification failed (HTTP %s)",
                                 getattr(exc, "status", None))
             except Exception as exc:  # noqa: BLE001 — network etc.
@@ -325,7 +341,7 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="otp",
-            data_schema=_otp_schema(),
+            data_schema=_otp_schema(ask_password=self._verify_rejected),
             errors=errors,
             description_placeholders={"email": self._email},
         )
