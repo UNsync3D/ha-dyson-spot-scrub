@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from typing import Any
 
 import voluptuous as vol
@@ -48,6 +49,47 @@ _LOGGER = logging.getLogger(__name__)
 
 # The iOS app requests the code ~1.5-2 s after its user-status check.
 _USER_STATUS_PAUSE = 1.5
+
+# Login cool-down. A Dyson account lock is indistinguishable from a wrong code
+# (the maintainer's capture while locked: HTTP 401, empty HTML body), and every
+# further attempt while locked risks extending it. So after this many rejected
+# codes in a row (or a 429), refuse to contact Dyson for this email for a while.
+# Module level so it survives closing and reopening the config flow; it resets
+# when Home Assistant restarts.
+_MAX_REJECTED_CODES = 2
+_LOCKOUT_SECONDS = 15 * 60
+_login_failures: dict[str, tuple[int, float]] = {}   # email -> (rejections, locked until)
+
+
+def _email_key(email: str) -> str:
+    return email.strip().lower()
+
+
+def _login_paused(email: str) -> bool:
+    """True while this email is in its cool-down."""
+    _, until = _login_failures.get(_email_key(email), (0, 0.0))
+    return time.monotonic() < until
+
+
+def _record_login_failure(email: str, error: str) -> str:
+    """Count a rejected code; returns the form error to show."""
+    key = _email_key(email)
+    count, _ = _login_failures.get(key, (0, 0.0))
+    if error == "rate_limited":
+        count = _MAX_REJECTED_CODES      # Dyson itself asked us to slow down
+    elif error == "invalid_otp":
+        count += 1
+    else:
+        return error                     # network/server errors don't count
+    if count >= _MAX_REJECTED_CODES:
+        _login_failures[key] = (0, time.monotonic() + _LOCKOUT_SECONDS)
+        return "too_many_attempts"
+    _login_failures[key] = (count, 0.0)
+    return error
+
+
+def _clear_login_failures(email: str) -> None:
+    _login_failures.pop(_email_key(email), None)
 
 
 # ── Schema helpers ─────────────────────────────────────────────────────────────
@@ -180,6 +222,9 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if not _valid_country(country):
                 errors["base"] = "invalid_country"
+            elif _login_paused(email):
+                # Don't request another code (or check status) mid cool-down.
+                errors["base"] = "too_many_attempts"
             else:
                 errors = await self._pre_login_checks(email, country)
             if not errors:
@@ -252,7 +297,9 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Accept the 6-digit OTP code and verify it."""
         errors: dict[str, str] = {}
 
-        if user_input is not None:
+        if user_input is not None and _login_paused(self._email):
+            errors["base"] = "too_many_attempts"
+        elif user_input is not None:
             otp_code = re.sub(r"\s+", "", user_input["otp_code"])
             try:
                 # Same country as the OTP request (it previously defaulted to GB).
@@ -265,9 +312,11 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 self._token = token
                 self._password = ""   # no longer needed; don't keep it in memory
+                _clear_login_failures(self._email)
                 return await self._fetch_robots()
             except (DysonAuthError, DysonApiError) as exc:
-                errors["base"] = self._auth_error(exc, "invalid_otp")
+                errors["base"] = _record_login_failure(
+                    self._email, self._auth_error(exc, "invalid_otp"))
                 _LOGGER.warning("OTP verification failed (HTTP %s)",
                                 getattr(exc, "status", None))
             except Exception as exc:  # noqa: BLE001 — network etc.

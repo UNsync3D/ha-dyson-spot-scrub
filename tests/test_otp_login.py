@@ -88,6 +88,7 @@ class OtpLoginTests(unittest.TestCase):
             setattr(session, verb, make(verb))
         self.http.ClientSession.return_value.__aenter__.return_value = session
         self.enterContext(patch.object(self.flow_module, "_USER_STATUS_PAUSE", 0))
+        self.enterContext(patch.dict(self.flow_module._login_failures, clear=True))
         self.flow = self.flow_module.DysonConfigFlow()
         self.flow.hass = SimpleNamespace(config=SimpleNamespace(country="AU"))
 
@@ -169,17 +170,78 @@ class OtpLoginTests(unittest.TestCase):
         # The dyson_local report: a non-JSON verify reply crashed with HTTP 500.
         for status, body, expected in [(400, {"message": "bad code"}, "invalid_otp"),
                                        (401, None, "invalid_otp"),
-                                       (429, None, "rate_limited"),
+                                       # Dyson asking us to slow down starts the cool-down.
+                                       (429, None, "too_many_attempts"),
                                        (502, None, "cannot_connect"),
                                        (200, None, "cannot_connect"),
                                        (200, {"unexpected": True}, "cannot_connect")]:
             with self.subTest(status=status, json=body is not None):
+                self.flow_module._login_failures.clear()
                 self.login(response(200, {"challengeId": "chal-1"}))
                 self.replies["post"].append(response(status, body, text="<html>err</html>"))
                 result = self.run_step("otp", {"otp_code": "123456"})
                 self.assertEqual(result["type"], "form")
                 self.assertEqual(result["step_id"], "otp")
                 self.assertEqual(result["errors"], {"base": expected})
+
+    def verify(self, reply):
+        self.replies["post"].append(reply)
+        return self.run_step("otp", {"otp_code": "123456"})
+
+    # The maintainer's capture while Dyson had locked the account: the real
+    # app's verify got HTTP 401 with an empty text/html body - identical to a
+    # wrong code.
+    LOCKED = staticmethod(lambda: response(401, None, text=""))
+
+    def test_two_rejected_codes_pause_login_without_contacting_dyson(self):
+        self.login(response(200, {"challengeId": "chal-1"}))
+        self.assertEqual(self.verify(self.LOCKED())["errors"], {"base": "invalid_otp"})
+        self.assertEqual(self.verify(self.LOCKED())["errors"], {"base": "too_many_attempts"})
+        sent = len(self.calls)
+        result = self.run_step("otp", {"otp_code": "654321"})   # third try: refused locally
+        self.assertEqual(result["errors"], {"base": "too_many_attempts"})
+        self.assertEqual(len(self.calls), sent, "no request while paused")
+        # Closing the dialog and starting again doesn't get around it.
+        self.flow = self.flow_module.DysonConfigFlow()
+        self.flow.hass = SimpleNamespace(config=SimpleNamespace(country="AU"))
+        result = self.run_step("login", {"email": " ME@example.com ", "password": "pw",
+                                         "country": "au"})
+        self.assertEqual(result["errors"], {"base": "too_many_attempts"})
+        self.assertEqual(len(self.calls), sent, "no status check or new code while paused")
+        # Another account is unaffected.
+        self.replies["get"].append(response(200, "5.0.21062"))
+        self.replies["post"] += [response(200, self.ACTIVE), response(200, {"challengeId": "c2"})]
+        result = self.run_step("login", {"email": "other@example.com", "password": "pw",
+                                         "country": "au"})
+        self.assertEqual(result["step_id"], "otp")
+
+    def test_pause_expires(self):
+        clock = [1000.0]
+        self.enterContext(patch.object(self.flow_module.time, "monotonic", lambda: clock[0]))
+        self.login(response(200, {"challengeId": "chal-1"}))
+        self.verify(self.LOCKED())
+        self.verify(self.LOCKED())
+        clock[0] += 15 * 60 - 1
+        self.assertEqual(self.run_step("otp", {"otp_code": "1"})["errors"],
+                         {"base": "too_many_attempts"})
+        clock[0] += 2
+        self.replies["get"].append(response(200, [ROBOT]))
+        self.assertEqual(self.verify(response(200, {"token": "bearer-1"}))["type"], "create_entry")
+
+    def test_success_resets_and_server_errors_do_not_count(self):
+        self.login(response(200, {"challengeId": "chal-1"}))
+        self.assertEqual(self.verify(self.LOCKED())["errors"], {"base": "invalid_otp"})
+        self.assertEqual(self.verify(response(503, None))["errors"], {"base": "cannot_connect"})
+        self.assertEqual(self.verify(response(502, None))["errors"], {"base": "cannot_connect"})
+        self.replies["get"].append(response(200, [ROBOT]))
+        self.assertEqual(self.verify(response(200, {"token": "bearer-1"}))["type"], "create_entry")
+        self.assertEqual(self.flow_module._login_failures, {}, "success clears the count")
+
+    def test_messages_warn_against_retrying(self):
+        for name in ("strings.json", "translations/en.json"):
+            errors = __import__("json").loads((ROOT / name).read_text())["config"]["error"]
+            self.assertIn("rejected again, stop", errors["invalid_otp"], name)
+            self.assertIn("15 minutes", errors["too_many_attempts"], name)
 
     def test_account_checks_stop_before_any_code_is_requested(self):
         for status_body, expected in [
