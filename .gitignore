@@ -19,3 +19,6 @@ test_auth_flow.py
 
 # Secrets - never commit
 .github_token
+
+# macOS Finder metadata
+.DS_Store
