@@ -25,6 +25,7 @@ import re
 import ssl
 import threading
 import time
+from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -42,6 +43,15 @@ _PREFERENCE_TIMEOUT = 10.0
 # Map IDs probed on connect (and their stagger) before persistentMapId is known.
 _PROBE_MAP_IDS = range(4)
 _PROBE_INTERVAL = 2.5
+# How many outstanding get_preference msgId -> map_id mappings to remember.
+_MAX_TRACKED_REQUESTS = 64
+# A room-preference row must reach index [10] (roomOrder) to be usable.
+_MIN_ROOM_ROW_LEN = 11
+
+
+def _valid_room_row(row) -> bool:
+    return (isinstance(row, list) and len(row) >= _MIN_ROOM_ROW_LEN
+            and isinstance(row[0], (int, str)) and not isinstance(row[0], bool))
 _DRYING_TIME_KEYS = ("drying_total_seconds", "drying_remaining_seconds", "drying_updated_at")
 
 # Per-room setting name → (index in the room-preference array, label → raw value).
@@ -325,7 +335,23 @@ class DysonMqttClient:
         self.connected   = False
         self.state: dict = {}
 
-        self._cached_preference:    dict | None = None
+        # ── Room preference store (see _cached_preference) ─────────────────
+        # get_preference is NOT a complete room inventory: after a scheduled
+        # start it can contain only the scheduled room (FutuRazor captures,
+        # 26 Oct 2026), and a reply can be for a different map than the
+        # current one (new-map capture, 25 Oct). So replies are MERGED per
+        # map and room ID into this store and never remove rooms. Rooms are
+        # removed only when the authoritative REST map metadata for that map
+        # no longer lists them (set_map_inventory). All guarded by
+        # _preference_lock (the paho thread writes, executor/loop read).
+        self._room_store: dict[str, dict[str, list]] = {}    # map -> room id -> row
+        self._uv_store: dict[str, dict[str, list]] = {}      # map -> room id -> [id, on]
+        self._pref_extras: dict[str, dict] = {}              # map -> other reply keys
+        self._map_inventory: dict[str, dict[str, str]] = {}  # map -> room id -> name
+        # get_preference msgId -> map_id, for our requests and the app's
+        # (seen on command/jdm), so each reply is filed under the right map.
+        self._pref_request_maps: OrderedDict[str, str] = OrderedDict()
+        self._prefs_map_id: str | None = None   # map whose prefs were last fetched
 
         # Room settings HA has sent but the robot hasn't yet reported back.
         # The cache above only ever holds what the robot reported; these let a
@@ -341,7 +367,6 @@ class DysonMqttClient:
         self._room_edit_lock = threading.RLock()
         self._pending_refresh_id: str | None = None
         self._pending_since = 0.0
-        self._preferences_fetched              = False
 
         # Guard: only fire on_disconnected once per client instance.
         # paho's loop_start() may call _on_disconnect multiple times if it
@@ -354,6 +379,8 @@ class DysonMqttClient:
         # Start calls run in HA's executor; MQTT replies arrive on paho's thread.
         self._start_lock = threading.Lock()
         self._preference_lock = threading.RLock()
+        # Called (paho thread) when the robot reports a different current map.
+        self.on_map_changed: Callable[[str], None] | None = None
         self._preference_ready = threading.Event()
         self._preference_request_id: str | None = None
         self._preference_response: dict | None = None
@@ -612,12 +639,119 @@ class DysonMqttClient:
 
     # ── Room listing ──────────────────────────────────────────────────────────
 
+    # ── Room preference store ─────────────────────────────────────────────────
+
+    def _map_key(self, map_id=None) -> str:
+        """Store key for a map ID; the current map if none is given."""
+        if map_id is None:
+            map_id = self.state.get("persistentMapId")
+        return "?" if map_id in (None, "") else str(map_id)
+
+    def _merge_preference(self, map_key: str, pref: dict) -> int:
+        """Merge one get_preference payload into the store; returns rooms merged.
+
+        Rooms absent from the payload are left untouched: a partial reply
+        updates only the rooms it contains.
+        """
+        merged = 0
+        with self._preference_lock:
+            rooms = self._room_store.setdefault(map_key, {})
+            uv = self._uv_store.setdefault(map_key, {})
+            room_rows = pref.get("room")
+            for row in room_rows if isinstance(room_rows, list) else []:
+                # Malformed rows are never stored: they would later be sent
+                # back to the robot as part of a full preference list.
+                if _valid_room_row(row):
+                    rooms[str(row[0])] = deepcopy(row)
+                    merged += 1
+            for pair in pref.get("uv_switch") or []:
+                if isinstance(pair, list) and len(pair) >= 2:
+                    uv[str(pair[0])] = list(pair)
+            extras = {k: deepcopy(v) for k, v in pref.items() if k not in ("room", "uv_switch")}
+            if extras:
+                self._pref_extras.setdefault(map_key, {}).update(extras)
+        return merged
+
+    def _preference_view(self, map_key: str) -> dict | None:
+        """The merged preferences for one map, shaped like a get_preference reply."""
+        with self._preference_lock:
+            rooms = self._room_store.get(map_key)
+            if not rooms:
+                return None
+            room_rows = [deepcopy(row) for row in rooms.values()]
+            uv = self._uv_store.get(map_key, {})
+            uv_rows = [list(uv[rid]) for rid in rooms if rid in uv]
+            return {**deepcopy(self._pref_extras.get(map_key, {})),
+                    "room": room_rows, "uv_switch": uv_rows}
+
+    @property
+    def _cached_preference(self) -> dict | None:
+        """Merged preferences for the CURRENT map (a fresh copy), or None.
+
+        Kept under its historical name: callers and tests read it like the
+        single cached get_preference reply it used to be.
+        """
+        return self._preference_view(self._map_key())
+
+    @_cached_preference.setter
+    def _cached_preference(self, value: dict | None) -> None:
+        """Replace the current map's stored preferences wholesale (tests/reset)."""
+        key = self._map_key()
+        with self._preference_lock:
+            self._room_store.pop(key, None)
+            self._uv_store.pop(key, None)
+            self._pref_extras.pop(key, None)
+        if value:
+            self._merge_preference(key, value)
+
+    def set_map_inventory(self, map_id, zones: list) -> None:
+        """Record a map's authoritative room list (REST persistent-map metadata).
+
+        Rooms the store holds for that map but the metadata no longer lists are
+        removed - this is the only way a room disappears. As a safety net, if
+        none of the metadata's zone IDs match any stored room ID the data is
+        assumed inconsistent and nothing is removed.
+        """
+        if not isinstance(zones, list):
+            return
+        inventory = {str(z.get("id")): str(z.get("name") or "")
+                     for z in zones if isinstance(z, dict) and z.get("id") is not None}
+        key = self._map_key(map_id)
+        removed: list[str] = []
+        with self._preference_lock:
+            self._map_inventory[key] = inventory
+            stored = self._room_store.get(key, {})
+            if inventory and stored and set(stored) & set(inventory):
+                removed = [rid for rid in stored if rid not in inventory]
+                for rid in removed:
+                    stored.pop(rid, None)
+                    self._uv_store.get(key, {}).pop(rid, None)
+            elif inventory and stored:
+                _LOGGER.warning("[%s] Map %s metadata shares no room IDs with stored "
+                                "preferences; not removing any rooms", self.serial, key)
+        if removed:
+            _LOGGER.info("[%s] Rooms %s removed from map %s (no longer in map data)",
+                         self.serial, removed, key)
+            self._notify_state_change()
+
+    def _track_preference_request(self, msg_id, map_id) -> None:
+        """Remember which map a get_preference request (ours or the app's) asked for."""
+        if msg_id is None or map_id is None:
+            return
+        with self._preference_lock:
+            self._pref_request_maps[str(msg_id)] = self._map_key(map_id)
+            while len(self._pref_request_maps) > _MAX_TRACKED_REQUESTS:
+                self._pref_request_maps.popitem(last=False)
+
+    # ── Room listing ──────────────────────────────────────────────────────────
+
     @property
     def room_names(self) -> list[str]:
-        """Normalised display names of every room in the preference cache."""
-        if not (self._cached_preference and self._cached_preference.get("room")):
+        """Normalised display names of every known room on the current map."""
+        pref = self._cached_preference
+        if not (pref and pref.get("room")):
             return []
-        return [_room_display_name(r[1]) for r in self._cached_preference["room"]]
+        return [_room_display_name(r[1]) for r in pref["room"]]
 
     @property
     def room_preferences(self) -> list[list]:
@@ -637,11 +771,13 @@ class DysonMqttClient:
           [10] roomOrder         int
           [11] additional field  (preserved, newer firmware)
 
-        Returns a direct reference into the cache — callers may modify a room
-        entry in-place and then call set_room_preferences() to persist the change.
+        Returns a COPY of the merged rows for the current map: every room seen
+        in any preference reply for it, minus rooms the map metadata removed.
+        Change settings with edit_room_setting() / save_room_settings().
         """
-        if self._cached_preference and isinstance(self._cached_preference.get("room"), list):
-            return self._cached_preference["room"]
+        pref = self._cached_preference
+        if pref and isinstance(pref.get("room"), list):
+            return pref["room"]
         return []
 
     def room_preferences_for_edit(self) -> list[list]:
@@ -888,11 +1024,20 @@ class DysonMqttClient:
                         self.serial, _PREFERENCE_TIMEOUT,
                     )
                     return False
-                rooms = pref.get("room")
-                if not isinstance(rooms, list) or not rooms or any(
-                    not isinstance(room, list) or len(room) < 11
-                    or not isinstance(room[0], (int, str)) for room in rooms
-                ):
+                # The fresh reply itself must be well-formed - a malformed or
+                # empty one still aborts, and nothing is padded with defaults.
+                fresh = pref.get("room")
+                if not isinstance(fresh, list) or not fresh or not all(
+                        _valid_room_row(room) for room in fresh):
+                    _LOGGER.warning("[%s] Cannot start: incomplete room preferences", self.serial)
+                    return False
+                # It may still be PARTIAL (e.g. only the scheduled room). It has
+                # already been merged into the store, so start from the merged
+                # view: every robot-reported room stays addressable and the
+                # outgoing set_preference carries the full list, as the app does.
+                merged = self._preference_view(self._map_key(map_id)) or {}
+                rooms = merged.get("room") or []
+                if not rooms:
                     _LOGGER.warning("[%s] Cannot start: incomplete room preferences", self.serial)
                     return False
                 if room_ids is not None:
@@ -945,13 +1090,14 @@ class DysonMqttClient:
                     "[%s] Starting cleaning in rooms %s with refreshed preferences",
                     self.serial, ordered_room_ids,
                 )
-                if room_ids is not None and self._cached_preference is not None:
-                    self._cached_preference["room"] = deepcopy(updated_rooms)
+                if room_ids is not None:
+                    # Pre-existing optimistic update of the card start path.
+                    self._merge_preference(self._map_key(map_id), {"room": updated_rooms})
                 self._publish_jdm("service.set_preference", {
                     "map_id": map_id,
                     "prefer_type": 1,
                     "room_preference": updated_rooms,
-                    "uv_switch": deepcopy(pref.get("uv_switch", [])),
+                    "uv_switch": deepcopy(merged.get("uv_switch", [])),
                 })
                 self._abort_dock_action()
                 published = self._publish({
@@ -997,7 +1143,7 @@ class DysonMqttClient:
         for key in ("state", "dockState", "workMode", "jdmStatus", *STATE_FIELDS):
             self.state.pop(key, None)
         self._notify_state_change()
-        self._preferences_fetched = False  # Allow re-fetch on reconnect
+        self._prefs_map_id = None  # Re-fetch the current map's rooms on reconnect
         # Single wildcard subscription covers every prefix (RB05, NROB, …).
         client.subscribe(f"+/{self.serial}/#", qos=0)
         self.request_current_state()
@@ -1053,7 +1199,7 @@ class DysonMqttClient:
             if self.on_prefix_changed:
                 self.on_prefix_changed(parts[0])
             self.request_current_state()
-            self._preferences_fetched = False
+            self._prefs_map_id = None
             self._schedule_map_probes()
 
         # json.dumps of large map/state payloads is costly; skip it unless
@@ -1061,7 +1207,13 @@ class DysonMqttClient:
         if _LOGGER.isEnabledFor(logging.DEBUG):
             _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
 
-        if topic.endswith("/status/jdm"):
+        if topic.endswith("/command/jdm"):
+            # Our own and the Dyson app's requests. Only used to learn which
+            # map each get_preference reply belongs to.
+            if data.get("method") == "service.get_preference":
+                params = data.get("params") if isinstance(data.get("params"), dict) else {}
+                self._track_preference_request(data.get("msgId"), params.get("map_id"))
+        elif topic.endswith("/status/jdm"):
             self._handle_jdm(data)
         elif topic.endswith("/status") or topic.endswith("/status/current"):
             self._handle_status(data)
@@ -1086,6 +1238,16 @@ class DysonMqttClient:
             pref = data.get("data")
             success = data.get("code") == 0 and isinstance(pref, dict)
             with self._preference_lock:
+                # File the reply under the map it was requested for. Unknown
+                # msgIds (request not seen) are assumed to be the current map;
+                # merging can only add or update rooms, never remove them.
+                map_key = self._pref_request_maps.pop(str(data.get("msgId")), None)
+                if map_key is None:
+                    map_key = self._map_key()
+                merged = 0
+                if success and isinstance(pref.get("room"), list):
+                    # Merge BEFORE waking a pending start, which reads the store.
+                    merged = self._merge_preference(map_key, pref)
                 if (self._preference_request_id is not None
                         and str(data.get("msgId")) == self._preference_request_id):
                     self._preference_response = deepcopy(pref) if success else None
@@ -1096,21 +1258,13 @@ class DysonMqttClient:
                     # edits build on what it reports, not on what we sent.
                     self._pending_rooms = None
                     self._pending_refresh_id = None
-            if not success or not isinstance(pref.get("room"), list):
+            if not merged:
+                _LOGGER.debug("[%s] get_preference for map %s: 0 rooms", self.serial, map_key)
                 return
-            n = len(pref.get("room", []))
-            if n == 0:
-                _LOGGER.debug("[%s] get_preference: 0 rooms (map probe)", self.serial)
-                return
-            first_cache = self._cached_preference is None
-            self._cached_preference = pref
-            if first_cache:
-                _LOGGER.info("[%s] Room preferences cached (%d room(s))", self.serial, n)
-                self._notify_state_change()
-            else:
-                _LOGGER.debug("[%s] Room preferences refreshed (%d room(s))", self.serial, n)
-                # Notify even on a refresh so room-switch entities update when
-                # the cache was replaced (e.g. stale wrong-map rooms → correct map).
+            known = len(self._room_store.get(map_key, {}))
+            _LOGGER.debug("[%s] Room preferences for map %s: %d in reply, %d known",
+                          self.serial, map_key, merged, known)
+            if map_key == self._map_key():
                 self._notify_state_change()
 
     def _handle_status(self, data: dict) -> None:
@@ -1121,9 +1275,15 @@ class DysonMqttClient:
                 self._clear_drying_time()
             self._notify_state_change()
 
-            if not self._preferences_fetched and self.state.get("persistentMapId"):
-                self._preferences_fetched = True
+            # Fetch rooms whenever the current map changes (and after
+            # reconnect), not just once per connection: a new map must not
+            # keep showing the previous map's rooms.
+            map_id = self.state.get("persistentMapId")
+            if map_id not in (None, "") and str(map_id) != self._prefs_map_id:
+                self._prefs_map_id = str(map_id)
                 self._fetch_room_preferences()
+                if self.on_map_changed:
+                    self.on_map_changed(str(map_id))
 
         elif "faultCode" in data or "faultId" in data:
             _LOGGER.warning(
@@ -1184,21 +1344,14 @@ class DysonMqttClient:
     def _probe_map_id(self, map_id: int) -> None:
         """Send service.get_preference for one map_id.
 
-        Skips only when we already have rooms cached for this exact map.  Probes
-        for low integer IDs (0–3) fire speculatively at connection time before
-        the robot has reported persistentMapId; if one of those happens to return
-        rooms from a different map we must not let it block the authoritative
-        fetch that fires once the real persistentMapId arrives via MQTT state.
+        Probes for low integer IDs (0–3) fire speculatively at connection time
+        before the robot has reported persistentMapId. Replies are filed under
+        the map they were requested for, so a probe can no longer put another
+        map's rooms on the current map. Skipped if rooms for that map are known.
         """
-        if self._cached_preference and self._cached_preference.get("room"):
-            current_map_id = self.state.get("persistentMapId")
-            # Skip only when the robot hasn't reported its map yet (early probe
-            # race — any cached rooms are fine for now) OR the current map
-            # matches this probe (we already have the right rooms).
-            if current_map_id is None or str(current_map_id) == str(map_id):
+        with self._preference_lock:
+            if self._room_store.get(self._map_key(map_id)):
                 return
-            # Current map differs from probe target — cache is stale; fall
-            # through to re-fetch so room entities show correct rooms.
         _LOGGER.debug("[%s] Probing map_id=%d for room preferences", self.serial, map_id)
         self._publish_jdm("service.get_preference", {"map_id": map_id})
 
@@ -1209,7 +1362,8 @@ class DysonMqttClient:
         except (TypeError, ValueError):
             return
         _LOGGER.debug("[%s] Fetching room preferences for map %s", self.serial, map_id_int)
-        self._probe_map_id(map_id_int)
+        # Always ask (unlike the probes): refreshes known rooms after reconnect.
+        self._publish_jdm("service.get_preference", {"map_id": map_id_int})
 
     # ── Internal publish ──────────────────────────────────────────────────────
 
@@ -1229,6 +1383,9 @@ class DysonMqttClient:
 
     def _publish_raw(self, topic: str, payload: dict) -> bool:
         """Publish a JSON payload; returns True if paho accepted the message."""
+        if payload.get("method") == "service.get_preference":
+            params = payload.get("params") or {}
+            self._track_preference_request(payload.get("msgId"), params.get("map_id"))
         with self._lock:
             client = self._client
         if not client or not self.connected:
