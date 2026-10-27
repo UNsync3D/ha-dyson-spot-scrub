@@ -16,3 +16,6 @@ __pycache__/
 *.swp
 dump_manifest.py
 test_auth_flow.py
+
+# Secrets - never commit
+.github_token
