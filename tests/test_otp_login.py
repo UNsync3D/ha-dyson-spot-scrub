@@ -133,6 +133,9 @@ class OtpLoginTests(unittest.TestCase):
         for _, _, kw in self.calls:
             headers = kw["headers"]
             self.assertEqual(headers["X-Platform"], "ios")
+            # One consistent iOS identity, as captured from the real app.
+            self.assertTrue(headers["User-Agent"].startswith("DysonLink/237306 CFNetwork/"))
+            self.assertEqual(headers["X-App-Version"], "6.4.26340")
             self.assertEqual(headers["Accept"], "application/json")
             self.assertEqual(headers["Cache-Control"], "no-cache")
             self.assertNotIn("X-Dyson-LinkApp-Version", headers)

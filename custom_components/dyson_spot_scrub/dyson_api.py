@@ -44,21 +44,18 @@ _LOGGER = logging.getLogger(__name__)
 
 API_HOST = "appapi.cp.dyson.com"
 
-# MyDyson app version to report. Same format as the App Store version
-# (a Proxyman capture of the iOS app sent X-App-Version 6.4.26340 when that
-# was current). Update here after app releases; both version headers use it.
-# 6.4.26420: App Store, released 24 Oct 2026.
-MYDYSON_APP_VERSION = "6.4.26420"
+# Identity: the MyDyson iOS app, exactly as captured with Proxyman (Aug 2026).
+# All three values below come from the SAME real request, so they agree with
+# each other: app version, app build (in the User-Agent) and iOS version.
+# Dyson's minimum supported app version was 5.0.21062 at the time, so this
+# older-than-current version is accepted. When refreshing, take all three
+# from one fresh capture - never mix a new version with an old User-Agent.
+MYDYSON_APP_VERSION = "6.4.26340"
+MYDYSON_USER_AGENT = "DysonLink/237306 CFNetwork/3896.100.1.2.1 Darwin/27.0.0"
 
-# Mimic the MyDyson iOS app; Dyson's API rejects unknown clients. Header set
-# and values follow Proxyman captures of the iOS app (Aug 2026): it sends
-# Accept: application/json and no X-Dyson-LinkApp-Version header.
-# NOTE: the User-Agent is still an Android string while X-Platform says
-# "ios". The real iOS app sends "DysonLink/<build> CFNetwork/<v> Darwin/<v>";
-# switching needs a fresh capture so build/iOS numbers match this version.
 _HEADERS = {
     "Content-Type":    "application/json",
-    "User-Agent":      "Dalvik/2.1.0 (Linux; U; Android 11; Build/RQ3A.210905.001)",
+    "User-Agent":      MYDYSON_USER_AGENT,
     "Accept":          "application/json",
     "Accept-Language": "en-AU,en;q=0.9",
     "X-App-Version":   MYDYSON_APP_VERSION,
