@@ -50,19 +50,25 @@ API_HOST = "appapi.cp.dyson.com"
 # 6.4.26420: App Store, released 24 Oct 2026.
 MYDYSON_APP_VERSION = "6.4.26420"
 
-# Mimic the MyDyson mobile app; Dyson's API rejects unknown clients.
+# Mimic the MyDyson iOS app; Dyson's API rejects unknown clients. Header set
+# and values follow Proxyman captures of the iOS app (Aug 2026): it sends
+# Accept: application/json and no X-Dyson-LinkApp-Version header.
 # NOTE: the User-Agent is still an Android string while X-Platform says
 # "ios". The real iOS app sends "DysonLink/<build> CFNetwork/<v> Darwin/<v>";
 # switching needs a fresh capture so build/iOS numbers match this version.
 _HEADERS = {
-    "Content-Type":            "application/json",
-    "User-Agent":              "Dalvik/2.1.0 (Linux; U; Android 11; Build/RQ3A.210905.001)",
-    "Accept":                  "application/json, text/plain, */*",
-    "Accept-Language":         "en-AU,en;q=0.9",
-    "X-App-Version":           MYDYSON_APP_VERSION,
-    "X-Platform":              "ios",
-    "X-Dyson-LinkApp-Version": MYDYSON_APP_VERSION,
+    "Content-Type":    "application/json",
+    "User-Agent":      "Dalvik/2.1.0 (Linux; U; Android 11; Build/RQ3A.210905.001)",
+    "Accept":          "application/json",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "X-App-Version":   MYDYSON_APP_VERSION,
+    "X-Platform":      "ios",
 }
+# The app's login requests (userstatus captured) also send this.
+_LOGIN_HEADERS = {**_HEADERS, "Cache-Control": "no-cache"}
+
+# Platform segment of the app's startup version check (iOS app: lowercase).
+_APP_PLATFORM = "ios"
 
 # Response bodies are echoed into exception messages (and therefore HA logs).
 #
@@ -282,6 +288,7 @@ async def _request(
     required_key: str | None = None,
     rate_limited: bool = False,
     error: type[Exception] = DysonApiError,
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, Any]:
     """Perform one API call and return (status, parsed JSON).
 
@@ -295,7 +302,8 @@ async def _request(
     error:        exception class raised on failure.
     """
     url = f"https://{API_HOST}{path}"
-    headers = _auth_headers(token) if token else _HEADERS
+    if headers is None:
+        headers = _auth_headers(token) if token else _HEADERS
     kwargs: dict[str, Any] = {"headers": headers}
     if params:
         kwargs["params"] = params
@@ -348,6 +356,43 @@ async def authenticate_v1(email: str, password: str, country: str = "GB") -> str
     return _basic_token(data["Account"], data["Password"])
 
 
+def version_tuple(version: str) -> tuple[int, ...]:
+    """'6.4.26420' -> (6, 4, 26420). Non-numeric parts count as 0."""
+    return tuple(int(p) if p.isdigit() else 0 for p in str(version).strip().split("."))
+
+
+async def get_minimum_app_version(platform: str = _APP_PLATFORM) -> str:
+    """The app's startup check: minimum supported MyDyson app version.
+
+    GET /v1/provisioningservice/application/ios/version, unauthenticated
+    here (the captured app call carried a token from a previous session).
+    The iOS app makes it before logging in; it answered "5.0.21062" in
+    Aug 2026, i.e. a minimum, not the latest version.
+    """
+    _, data = await _request(
+        "GET", f"/v1/provisioningservice/application/{_seg(platform)}/version",
+        headers=_LOGIN_HEADERS, label="App version check", expect=str,
+    )
+    return data
+
+
+async def get_user_status(email: str, country: str = "GB") -> dict[str, Any]:
+    """Account status check the app makes immediately before requesting a code.
+
+    POST /v3/userregistration/email/userstatus?country=XX  {"email": ...}
+    Captured reply: {"accountStatus": "ACTIVE",
+                     "authenticationMethod": "EMAIL_PWD_2FA"}
+    Sends no OTP and no password.
+    """
+    _, data = await _request(
+        "POST", "/v3/userregistration/email/userstatus",
+        params={"country": country}, json_body={"email": email},
+        headers=_LOGIN_HEADERS, label="User status check",
+        required_key="accountStatus", error=DysonAuthError,
+    )
+    return data
+
+
 async def initiate_v3_auth(email: str, country: str = "GB") -> str:
     """Start v3 OTP flow. Returns challengeId (OTP email sent to user).
 
@@ -357,7 +402,7 @@ async def initiate_v3_auth(email: str, country: str = "GB") -> str:
     _, data = await _request(
         "POST", "/v3/userregistration/email/auth",
         params={"country": country, "culture": f"en-{country}"},
-        json_body={"email": email},
+        json_body={"email": email}, headers=_LOGIN_HEADERS,
         label="v3 auth initiation", required_key="challengeId",
         error=DysonAuthError,
     )
@@ -378,7 +423,7 @@ async def verify_v3_auth(
             "challengeId": challenge_id,
             "otpCode": otp_code,
         },
-        label="v3 OTP verification", error=DysonAuthError,
+        headers=_LOGIN_HEADERS, label="v3 OTP verification", error=DysonAuthError,
     )
     if data.get("token"):
         return data["token"]

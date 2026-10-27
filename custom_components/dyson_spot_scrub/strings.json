@@ -55,7 +55,10 @@
       "serial_not_found": "That serial number was not found in your Dyson account.",
       "invalid_serial":   "The serial number contains invalid characters. Use letters, digits and hyphens only.",
       "invalid_country":  "Enter a two-letter country code, e.g. GB or AU.",
-      "rate_limited":     "Dyson is limiting login attempts for this account. Wait a while before trying again rather than retrying straight away."
+      "rate_limited":     "Dyson is limiting login attempts for this account. Wait a while before trying again rather than retrying straight away.",
+      "account_not_active": "Dyson reports this account is not active, so no login code was requested. Check the account in the MyDyson app.",
+      "unsupported_auth_method": "This Dyson account uses a sign-in method the integration doesn't support yet. No login code was requested; use a bearer token instead.",
+      "app_version_unsupported": "Dyson now requires a newer MyDyson app version than this integration reports. No login code was requested; the integration needs updating."
     }
   },
   "services": {

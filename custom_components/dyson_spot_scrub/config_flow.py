@@ -1,6 +1,7 @@
 """Config flow for Dyson Spot+Scrub AI — v1.2."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -32,7 +33,11 @@ from .const import (
 )
 from .map_options import map_options
 from .dyson_api import (
+    MYDYSON_APP_VERSION,
+    get_minimum_app_version,
+    get_user_status,
     initiate_v3_auth,
+    version_tuple,
     verify_v3_auth,
     get_devices,
     DysonAuthError,
@@ -40,6 +45,9 @@ from .dyson_api import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# The iOS app requests the code ~1.5-2 s after its user-status check.
+_USER_STATUS_PAUSE = 1.5
 
 
 # ── Schema helpers ─────────────────────────────────────────────────────────────
@@ -150,10 +158,14 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Accept email, password and country, then request an emailed OTP.
 
-        Only the email (and country/culture) is sent here; the password is
-        sent at the verify step, as the MyDyson app does. The legacy v1
-        password login is no longer attempted: it is believed retired and
-        would add a failed login against the account before every OTP.
+        Mirrors the MyDyson iOS app's captured sequence (Aug 2026):
+          1. GET  provisioningservice/application/ios/version (minimum version)
+          2. POST userregistration/email/userstatus  {"email"}
+          3. POST userregistration/email/auth        {"email"}  -> challengeId
+          4. POST userregistration/email/verify      (async_step_otp)
+        Steps 1-2 send no password and trigger no email. If step 2 shows the
+        account isn't ACTIVE or doesn't use EMAIL_PWD_2FA, we stop BEFORE
+        requesting a code. The legacy v1 password login is not attempted.
         """
         errors: dict[str, str] = {}
 
@@ -169,6 +181,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not _valid_country(country):
                 errors["base"] = "invalid_country"
             else:
+                errors = await self._pre_login_checks(email, country)
+            if not errors:
                 try:
                     self._challenge_id = await initiate_v3_auth(email, country)
                     _LOGGER.debug("OTP requested; waiting for the emailed code")
@@ -186,6 +200,49 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=_login_schema(_ha_country(self.hass)),
             errors=errors,
         )
+
+    async def _pre_login_checks(self, email: str, country: str) -> dict[str, str]:
+        """The app's version and user-status checks; errors stop the login.
+
+        A failed version check is not fatal (the app treats it as a startup
+        check). A failed or unexpected user status IS: requesting a code for
+        an account Dyson doesn't report as ACTIVE + EMAIL_PWD_2FA risks the
+        same kind of block the maintainer's account suffered.
+        """
+        try:
+            minimum = await get_minimum_app_version()
+            _LOGGER.debug("Dyson minimum app version %s (we report %s)",
+                          minimum, MYDYSON_APP_VERSION)
+            if version_tuple(minimum) > version_tuple(MYDYSON_APP_VERSION):
+                _LOGGER.warning("Dyson now requires app version %s; integration "
+                                "reports %s - not requesting a code", minimum,
+                                MYDYSON_APP_VERSION)
+                return {"base": "app_version_unsupported"}
+        except Exception as exc:  # noqa: BLE001 — informational check only
+            _LOGGER.debug("App version check failed (HTTP %s); continuing",
+                          getattr(exc, "status", type(exc).__name__))
+
+        try:
+            status = await get_user_status(email, country)
+        except (DysonAuthError, DysonApiError) as exc:
+            _LOGGER.warning("User status check failed (HTTP %s)",
+                            getattr(exc, "status", None))
+            return {"base": self._auth_error(exc, "invalid_auth")}
+        except Exception as exc:  # noqa: BLE001 — network etc.
+            _LOGGER.warning("User status check failed: %s", type(exc).__name__)
+            return {"base": "cannot_connect"}
+
+        account, method = status.get("accountStatus"), status.get("authenticationMethod")
+        _LOGGER.debug("Dyson account status %s, method %s", account, method)
+        if account != "ACTIVE":
+            _LOGGER.warning("Dyson reports account status %r - not requesting a code", account)
+            return {"base": "account_not_active"}
+        if method != "EMAIL_PWD_2FA":
+            _LOGGER.warning("Dyson reports sign-in method %r - not requesting a code", method)
+            return {"base": "unsupported_auth_method"}
+
+        await asyncio.sleep(_USER_STATUS_PAUSE)
+        return {}
 
     # ── Step 1b: OTP verification ─────────────────────────────────────────────
 

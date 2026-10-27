@@ -64,6 +64,8 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
             'homeassistant.helpers': module('homeassistant.helpers', selector=selectors),
             'map_flow_integration.dyson_api': module('map_flow_integration.dyson_api',
                 authenticate_v1=None, initiate_v3_auth=None, verify_v3_auth=None,
+                MYDYSON_APP_VERSION="0", get_minimum_app_version=None,
+                get_user_status=None, version_tuple=None,
                 get_devices=None, DysonAuthError=Exception, DysonApiError=Exception),
         }
         self.enterContext(patch.dict(sys.modules, modules))

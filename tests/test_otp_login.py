@@ -87,16 +87,27 @@ class OtpLoginTests(unittest.TestCase):
                 return call
             setattr(session, verb, make(verb))
         self.http.ClientSession.return_value.__aenter__.return_value = session
+        self.enterContext(patch.object(self.flow_module, "_USER_STATUS_PAUSE", 0))
         self.flow = self.flow_module.DysonConfigFlow()
         self.flow.hass = SimpleNamespace(config=SimpleNamespace(country="AU"))
 
     def run_step(self, step, data=None):
         return asyncio.run(getattr(self.flow, f"async_step_{step}")(data))
 
-    def login(self, reply):
-        self.replies["post"].append(reply)
+    ACTIVE = {"accountStatus": "ACTIVE", "authenticationMethod": "EMAIL_PWD_2FA"}
+
+    def login(self, reply, *, status=None, minimum="5.0.21062"):
+        """Version check -> user status -> code request, as the iOS app does."""
+        self.replies["get"].append(minimum if not isinstance(minimum, str)
+                                   else response(200, minimum))
+        self.replies["post"].append(status or response(200, self.ACTIVE))
+        if reply is not None:
+            self.replies["post"].append(reply)
         return self.run_step("login", {"email": "me@example.com", "password": "pw-SECRET",
                                        "country": "au"})
+
+    def paths(self):
+        return [(verb, url.split("appapi.cp.dyson.com")[1]) for verb, url, _ in self.calls]
 
     def test_menu_offers_login_and_token(self):
         result = self.run_step("user")
@@ -106,16 +117,30 @@ class OtpLoginTests(unittest.TestCase):
     def test_happy_path_sends_the_right_things(self):
         result = self.login(response(200, {"challengeId": "chal-1"}))
         self.assertEqual(result["step_id"], "otp")
-        verb, url, kwargs = self.calls[0]
-        self.assertEqual(len(self.calls), 1, "no legacy v1 attempt before the OTP request")
-        self.assertTrue(url.endswith("/v3/userregistration/email/auth"))
+        self.assertEqual(self.paths(), [
+            ("get", "/v1/provisioningservice/application/ios/version"),
+            ("post", "/v3/userregistration/email/userstatus"),
+            ("post", "/v3/userregistration/email/auth"),
+        ], "the iOS app's order; no legacy v1 attempt")
+        _, _, version_kw = self.calls[0]
+        self.assertNotIn("Authorization", version_kw["headers"])
+        _, _, status_kw = self.calls[1]
+        self.assertEqual(status_kw["json"], {"email": "me@example.com"})
+        self.assertEqual(status_kw["params"], {"country": "AU"})
+        _, _, kwargs = self.calls[2]
         self.assertEqual(kwargs["json"], {"email": "me@example.com"}, "password not sent yet")
         self.assertEqual(kwargs["params"], {"country": "AU", "culture": "en-AU"})
+        for _, _, kw in self.calls:
+            headers = kw["headers"]
+            self.assertEqual(headers["X-Platform"], "ios")
+            self.assertEqual(headers["Accept"], "application/json")
+            self.assertEqual(headers["Cache-Control"], "no-cache")
+            self.assertNotIn("X-Dyson-LinkApp-Version", headers)
 
         self.replies["post"].append(response(200, {"token": "bearer-1"}))
         self.replies["get"].append(response(200, [ROBOT]))
         result = self.run_step("otp", {"otp_code": " 123 456 "})
-        verb, url, kwargs = self.calls[1]
+        verb, url, kwargs = self.calls[3]
         self.assertTrue(url.endswith("/v3/userregistration/email/verify"))
         self.assertEqual(kwargs["params"], {"country": "AU"}, "same country as the request")
         self.assertEqual(kwargs["json"], {"email": "me@example.com", "password": "pw-SECRET",
@@ -152,6 +177,46 @@ class OtpLoginTests(unittest.TestCase):
                 self.assertEqual(result["type"], "form")
                 self.assertEqual(result["step_id"], "otp")
                 self.assertEqual(result["errors"], {"base": expected})
+
+    def test_account_checks_stop_before_any_code_is_requested(self):
+        for status_body, expected in [
+            ({"accountStatus": "LOCKED", "authenticationMethod": "EMAIL_PWD_2FA"},
+             "account_not_active"),
+            ({"accountStatus": "UNREGISTERED"}, "account_not_active"),
+            ({"accountStatus": "ACTIVE", "authenticationMethod": "EMAIL_OTP"},
+             "unsupported_auth_method"),
+            ({"accountStatus": "ACTIVE"}, "unsupported_auth_method"),
+        ]:
+            with self.subTest(status=status_body):
+                self.calls.clear()
+                result = self.login(None, status=response(200, status_body))
+                self.assertEqual(result["errors"], {"base": expected})
+                self.assertNotIn(("post", "/v3/userregistration/email/auth"), self.paths())
+
+    def test_user_status_failure_stops_before_code_request(self):
+        for status, body, expected in [(429, None, "rate_limited"),
+                                       (401, {"message": "no"}, "invalid_auth"),
+                                       (503, None, "cannot_connect"),
+                                       (200, {"unexpected": 1}, "cannot_connect")]:
+            with self.subTest(status=status):
+                self.calls.clear()
+                result = self.login(None, status=response(status, body, text="<html/>"))
+                self.assertEqual(result["errors"], {"base": expected})
+                self.assertNotIn(("post", "/v3/userregistration/email/auth"), self.paths())
+
+    def test_version_check(self):
+        # Dyson's minimum above what we report: stop, no account calls at all.
+        result = self.login(None, minimum="9.9.0")
+        self.assertEqual(result["errors"], {"base": "app_version_unsupported"})
+        self.assertEqual(len(self.calls), 1)
+        # A failed check is informational only: login carries on.
+        self.replies["post"].clear(); self.replies["get"].clear(); self.calls.clear()
+        result = self.login(response(200, {"challengeId": "c"}),
+                            minimum=response(503, None, text="<html/>"))
+        self.assertEqual(result["step_id"], "otp")
+        self.assertEqual(self.flow_module.version_tuple("6.4.26420"), (6, 4, 26420))
+        self.assertGreater(self.flow_module.version_tuple("6.4.26420"),
+                           self.flow_module.version_tuple("5.0.21062"))
 
     def test_bad_country_makes_no_request(self):
         result = self.run_step("login", {"email": "me@example.com", "password": "pw",
