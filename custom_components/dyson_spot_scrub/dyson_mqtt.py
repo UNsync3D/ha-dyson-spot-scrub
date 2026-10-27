@@ -298,6 +298,11 @@ def _room_display_name(raw_name: Any) -> str:
     return s.title()
 
 
+def _same_room_name(a: Any, b: Any) -> bool:
+    """Robot and REST name the same room in different formats; compare normalised."""
+    return _room_display_name(a).casefold() == _room_display_name(b).casefold()
+
+
 # ── MQTT client ───────────────────────────────────────────────────────────────
 
 
@@ -671,6 +676,26 @@ class DysonMqttClient:
             if extras:
                 self._pref_extras.setdefault(map_key, {}).update(extras)
         return merged
+
+    def _reply_matches_map(self, map_key: str, pref: dict) -> bool:
+        """Could this reply (to a request we didn't see) be for this map?
+
+        Every room in it must already be known for the map with the same name:
+        from the REST inventory when we have it, otherwise from rooms already
+        stored. With neither, it is not trusted; our own (tracked) request
+        fills the map instead.
+        """
+        rows = [r for r in pref.get("room") or [] if _valid_room_row(r)]
+        if not rows:
+            return False
+        with self._preference_lock:
+            known = self._map_inventory.get(map_key)
+            if not known:
+                known = {rid: row[1] for rid, row in self._room_store.get(map_key, {}).items()}
+        if not known:
+            return False
+        return all(str(r[0]) in known and _same_room_name(r[1], known[str(r[0])])
+                   for r in rows)
 
     def _preference_view(self, map_key: str) -> dict | None:
         """The merged preferences for one map, shaped like a get_preference reply."""
@@ -1238,14 +1263,25 @@ class DysonMqttClient:
             pref = data.get("data")
             success = data.get("code") == 0 and isinstance(pref, dict)
             with self._preference_lock:
-                # File the reply under the map it was requested for. Unknown
-                # msgIds (request not seen) are assumed to be the current map;
-                # merging can only add or update rooms, never remove them.
+                # File the reply under the map it was requested for. The reply
+                # itself doesn't say which map it describes, and room IDs are
+                # reused across maps (both start at 10), so a reply to a request
+                # we never saw is only trusted if it matches what we already
+                # know about the current map; otherwise it may be an older map's
+                # (FutuRazor review, #24) and would bring back stale names.
                 map_key = self._pref_request_maps.pop(str(data.get("msgId")), None)
+                trusted = map_key is not None
                 if map_key is None:
                     map_key = self._map_key()
+                    if success and not self._reply_matches_map(map_key, pref):
+                        _LOGGER.debug("[%s] Ignoring get_preference reply %s: request "
+                                      "not seen and rooms don't match map %s",
+                                      self.serial, data.get("msgId"), map_key)
+                        trusted = False
+                    else:
+                        trusted = True
                 merged = 0
-                if success and isinstance(pref.get("room"), list):
+                if success and trusted and isinstance(pref.get("room"), list):
                     # Merge BEFORE waking a pending start, which reads the store.
                     merged = self._merge_preference(map_key, pref)
                 if (self._preference_request_id is not None

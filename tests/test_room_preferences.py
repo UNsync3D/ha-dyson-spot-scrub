@@ -70,6 +70,9 @@ class RoomSettingsTests(unittest.TestCase):
     def publish(self, topic, payload):
         self.sent.append((topic, deepcopy(payload)))
         if payload.get("method") == "service.get_preference":
+            # As the real _publish_raw does: remember which map we asked about.
+            self.client._track_preference_request(
+                payload.get("msgId"), payload["params"].get("map_id"))
             self.on_request(payload)
         return True  # Match the transport's successful-publication contract.
 

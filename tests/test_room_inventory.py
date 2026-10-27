@@ -64,6 +64,10 @@ class InventoryFixture(unittest.TestCase):
 
         def publish(topic, payload):
             self.sent.append(payload)
+            if payload.get("method") == "service.get_preference":
+                # As the real _publish_raw does: remember which map we asked about.
+                self.client._track_preference_request(
+                    payload.get("msgId"), payload["params"].get("map_id"))
             if (payload.get("method") == "service.get_preference"
                     and self.robot_answers is not None):
                 self.client._handle_jdm({
@@ -172,11 +176,44 @@ class MapCorrelationTests(InventoryFixture):
         self.message("status", {"msg": "CURRENT-STATE", "persistentMapId": str(self.MAP1)})
         self.assertEqual(len(self.sent), before)
 
-    def test_unknown_request_merges_into_current_map_only(self):
-        self.robot_replies("never-seen", FULL_ROOMS)
+    # Replies to requests we never saw (sent before we subscribed, or missed).
+    # The reply doesn't name its map and room IDs repeat across maps, so these
+    # are only trusted when every room matches the current map (FutuRazor, #24).
+
+    def test_unseen_request_with_nothing_known_is_ignored(self):
+        self.client.state["persistentMapId"] = str(self.MAP1)
+        self.robot_replies("never-seen", self.HOME_ROOMS)     # e.g. the old map's
+        self.assertEqual(self.names(), [], "old map's names not shown")
+
+    def test_unseen_request_matching_current_rooms_updates_settings(self):
+        self.app_requests("seen", MAP)
+        self.robot_replies("seen", FULL_ROOMS)
+        updated = [list(PARTIAL_12[0])]
+        updated[0][5] = 1                                       # water level changed
+        self.robot_replies("never-seen", updated)
+        row = next(r for r in self.client._cached_preference["room"] if r[0] == 12)
+        self.assertEqual(row[5], 1)
         self.assertEqual(len(self.names()), 5)
-        self.robot_replies("never-seen-2", PARTIAL_12)
-        self.assertEqual(len(self.names()), 5)
+
+    def test_unseen_request_from_another_map_is_ignored(self):
+        self.app_requests("seen", MAP)
+        self.robot_replies("seen", FULL_ROOMS)
+        other_map = [[10, "Hallway", 0, 0, 0, 0, 0, 0, 0, 0, 1, 0]]  # same ID, other name
+        self.robot_replies("never-seen", other_map)
+        self.assertIn("Room 10", self.names())
+        self.assertNotIn("Hallway", self.names())
+        extra = [[15, "Garage", 0, 0, 0, 0, 0, 0, 0, 0, 6, 0]]       # ID unknown here
+        self.robot_replies("never-seen-2", extra)
+        self.assertNotIn("Garage", self.names())
+
+    def test_unseen_request_checked_against_map_metadata(self):
+        self.client.set_map_inventory(MAP, [{"id": "10", "name": "Room10"},
+                                            {"id": "12", "name": "Room 12"}])
+        self.robot_replies("never-seen", [FULL_ROOMS[1], FULL_ROOMS[2]])  # 12 and 10
+        self.assertEqual(sorted(self.names()), ["Room 10", "Room 12"],
+                         "names compared after normalising (Room10 = Room 10)")
+        self.robot_replies("never-seen-2", [[11, "Room 11", 0, 0, 0, 0, 0, 0, 0, 0, 4, 0]])
+        self.assertNotIn("Room 11", self.names(), "not in this map's metadata")
 
 
 class InventoryRemovalTests(InventoryFixture):
@@ -185,6 +222,7 @@ class InventoryRemovalTests(InventoryFixture):
 
     def setUp(self):
         super().setUp()
+        self.app_requests("a")
         self.robot_replies("a", FULL_ROOMS, FULL_UV)
 
     def test_room_removed_only_by_map_metadata(self):
