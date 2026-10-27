@@ -32,7 +32,6 @@ from .const import (
 )
 from .map_options import map_options
 from .dyson_api import (
-    authenticate_v1,
     initiate_v3_auth,
     verify_v3_auth,
     get_devices,
@@ -119,30 +118,43 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Route directly to token entry.
+        """Choose between email + OTP login and pasting a bearer token.
 
-        NOTE: Email/password login is temporarily disabled — the OTP auth flow
-        has not yet been confirmed working end-to-end. Enabling it prematurely
-        risks rate-limiting users' Dyson accounts. Re-enable the menu below
-        once a successful curl test has been completed.
+        TEST BRANCH: email login re-enabled for a single supervised attempt.
+        It has not yet been confirmed end to end. Repeated failed attempts can
+        get a Dyson account rate-limited, so the flow makes one request per
+        step and reports 429 explicitly.
         """
-        return await self.async_step_token()
-
-        # Disabled until OTP flow is confirmed working:
-        # return self.async_show_menu(
-        #     step_id="user",
-        #     menu_options={
-        #         "login": "Log in with Dyson account (email + OTP)",
-        #         "token": "Enter a bearer token directly",
-        #     },
-        # )
+        return self.async_show_menu(
+            step_id="user",
+            menu_options={
+                "login": "Log in with Dyson account (email + OTP)",
+                "token": "Enter a bearer token directly",
+            },
+        )
 
     # ── Step 1a: email + password login ───────────────────────────────────────
+
+    @staticmethod
+    def _auth_error(exc: Exception, rejected: str) -> str:
+        """Map a login failure to a form error using its HTTP status."""
+        status = getattr(exc, "status", None)
+        if status in (400, 401, 403):
+            return rejected
+        if status == 429:
+            return "rate_limited"
+        return "cannot_connect"
 
     async def async_step_login(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Accept email and password, try v1 then v3 OTP."""
+        """Accept email, password and country, then request an emailed OTP.
+
+        Only the email (and country/culture) is sent here; the password is
+        sent at the verify step, as the MyDyson app does. The legacy v1
+        password login is no longer attempted: it is believed retired and
+        would add a failed login against the account before every OTP.
+        """
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -154,29 +166,20 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._password = password
             self._country  = country
 
-            try:
-                token = await authenticate_v1(email, password, country)
-                self._token = token
-                return await self._fetch_robots()
-            except DysonAuthError:
-                pass
-            except Exception as exc:
-                _LOGGER.warning("v1 auth error: %s", exc)
-
-            try:
-                challenge_id = await initiate_v3_auth(email, country)
-                self._challenge_id = challenge_id
-                return await self.async_step_otp()
-            except DysonAuthError as exc:
-                _LOGGER.warning("v3 auth initiation failed: %s", exc)
-                msg = str(exc).lower()
-                if "401" in msg or "unauthori" in msg:
-                    errors["base"] = "invalid_auth"
-                else:
+            if not _valid_country(country):
+                errors["base"] = "invalid_country"
+            else:
+                try:
+                    self._challenge_id = await initiate_v3_auth(email, country)
+                    _LOGGER.debug("OTP requested; waiting for the emailed code")
+                    return await self.async_step_otp()
+                except (DysonAuthError, DysonApiError) as exc:
+                    errors["base"] = self._auth_error(exc, "invalid_auth")
+                    _LOGGER.warning("OTP request failed (HTTP %s)",
+                                    getattr(exc, "status", None))
+                except Exception as exc:  # noqa: BLE001 — network etc.
+                    _LOGGER.warning("OTP request failed: %s", type(exc).__name__)
                     errors["base"] = "cannot_connect"
-            except Exception as exc:
-                _LOGGER.exception("Unexpected login error: %s", exc)
-                errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="login",
@@ -193,25 +196,25 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            otp_code = user_input["otp_code"].strip()
+            otp_code = re.sub(r"\s+", "", user_input["otp_code"])
             try:
+                # Same country as the OTP request (it previously defaulted to GB).
                 token = await verify_v3_auth(
                     self._email,
                     self._password,
                     self._challenge_id,
                     otp_code,
+                    country=self._country,
                 )
                 self._token = token
+                self._password = ""   # no longer needed; don't keep it in memory
                 return await self._fetch_robots()
-            except DysonAuthError as exc:
-                _LOGGER.warning("OTP verification failed: %s", exc)
-                msg = str(exc).lower()
-                if "401" in msg or "unauthori" in msg:
-                    errors["base"] = "invalid_otp"
-                else:
-                    errors["base"] = "cannot_connect"
-            except Exception as exc:
-                _LOGGER.exception("Unexpected OTP error: %s", exc)
+            except (DysonAuthError, DysonApiError) as exc:
+                errors["base"] = self._auth_error(exc, "invalid_otp")
+                _LOGGER.warning("OTP verification failed (HTTP %s)",
+                                getattr(exc, "status", None))
+            except Exception as exc:  # noqa: BLE001 — network etc.
+                _LOGGER.warning("OTP verification failed: %s", type(exc).__name__)
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(

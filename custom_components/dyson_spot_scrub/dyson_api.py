@@ -103,7 +103,16 @@ def _scrub_text(text: str) -> str:
 
 
 class DysonAuthError(Exception):
-    """Raised when authentication with Dyson's API fails."""
+    """Raised when authentication with Dyson's API fails.
+
+    ``status`` is the HTTP status (None for non-HTTP failures such as an
+    unparseable 200 reply), so the login flow can tell a wrong password or
+    OTP (401/403) from rate limiting (429) or an outage.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class DysonApiError(Exception):
@@ -221,10 +230,11 @@ async def _json(resp: aiohttp.ClientResponse) -> Any:
     """Parse JSON from a response, raising DysonAuthError on empty/invalid body."""
     try:
         return await resp.json(content_type=None)
-    except (json.JSONDecodeError, aiohttp.ContentTypeError) as exc:
+    except (ValueError, aiohttp.ContentTypeError) as exc:  # JSONDecodeError is a ValueError
         body = await resp.text()
         raise DysonAuthError(
-            f"Non-JSON response (HTTP {resp.status}): {_snippet(body)}"
+            f"Non-JSON response (HTTP {resp.status}): {_snippet(body)}",
+            status=resp.status,
         ) from exc
 
 
@@ -286,6 +296,10 @@ async def _request(
         # getattr keeps the call shape (session.get / .post / .put) that the
         # offline tests mock.
         async with getattr(http, method.lower())(url, **kwargs) as resp:
+            # Status and content type only - never the body, query or headers,
+            # which can carry credentials. Enough to diagnose login problems.
+            _LOGGER.debug("%s: HTTP %s (%s)", label, resp.status,
+                          resp.headers.get("Content-Type", "no content type"))
             if rate_limited and resp.status == 429:
                 retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
                 raise DysonRateLimitError(
@@ -306,9 +320,7 @@ async def _request(
                 # status-carrying error below is always the one raised.
                 data = await _error_body(resp)
             message = f"{label} failed (HTTP {resp.status}): {_snippet(data)}"
-            if issubclass(error, DysonApiError):
-                raise error(message, status=resp.status)
-            raise error(message)
+            raise error(message, status=resp.status)
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────

@@ -54,7 +54,8 @@
       "invalid_otp":      "The OTP code was incorrect or has expired. Please try again.",
       "serial_not_found": "That serial number was not found in your Dyson account.",
       "invalid_serial":   "The serial number contains invalid characters. Use letters, digits and hyphens only.",
-      "invalid_country":  "Enter a two-letter country code, e.g. GB or AU."
+      "invalid_country":  "Enter a two-letter country code, e.g. GB or AU.",
+      "rate_limited":     "Dyson is limiting login attempts for this account. Wait a while before trying again rather than retrying straight away."
     }
   },
   "services": {
