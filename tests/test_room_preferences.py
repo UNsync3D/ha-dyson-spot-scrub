@@ -296,5 +296,81 @@ class RoomSettingsTests(unittest.TestCase):
         asyncio.run(run())
 
 
+    # The card/room start sends a full room list, like a settings save, so it
+    # must not revert a setting change that is in flight (Oct 2026 follow-up).
+
+    def last_set(self):
+        return [p for _, p in self.sent if p.get("method") == "service.set_preference"][-1]
+
+    def test_start_keeps_a_just_sent_setting_change(self):
+        self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 5))
+        self.on_request = lambda payload: None      # robot hasn't confirmed the edit yet
+        self.assertTrue(self.client.edit_room_setting(12, 5, 1))   # Flur: water level 1
+        self.on_request = lambda payload: self.reply(payload)      # still reports the OLD value
+        self.assertTrue(self.client.start_room("flur", 0))
+        flur = next(r for r in self.last_set()["params"]["room_preference"] if r[0] == 12)
+        self.assertEqual(flur[5], 1, "the start must not send the old water level back")
+        self.assertEqual(flur[8], 1)
+
+    def test_edit_lock_held_while_preparing_and_sending_not_while_waiting(self):
+        lock_free = {}
+
+        def probe():
+            result = []
+            def attempt():
+                got = self.client._room_edit_lock.acquire(blocking=False)
+                result.append(got)
+                if got:
+                    self.client._room_edit_lock.release()
+            worker = threading.Thread(target=attempt)
+            worker.start()
+            worker.join(2)
+            return result[0]
+
+        original = self.publish
+        def publish(topic, payload):
+            name = payload.get("method") or payload.get("msg")
+            lock_free.setdefault(name, probe())
+            return original(topic, payload)
+        self.enterContext(patch.object(self.client, "_publish_raw", publish))
+        self.assertTrue(self.client.start_room("flur", 0))
+        self.assertTrue(lock_free["service.get_preference"], "free while waiting for the robot")
+        for name in ("service.set_preference", "START", "service.set_room_clean"):
+            self.assertFalse(lock_free[name], f"{name} sent while an edit could interleave")
+
+    def test_edit_that_read_before_the_start_cannot_revert_it(self):
+        # The race: an edit reads its base (robot's old selection: Flur), the
+        # start then selects Schlafzimmer and publishes, then the edit publishes
+        # its stale full list. The edit lock makes the start wait for the edit
+        # and build on it instead, so the LAST list sent has both.
+        self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 5))
+        read_base, start_sent = threading.Event(), threading.Event()
+        original = self.client.room_preferences_for_edit
+        def edit_base():
+            rooms = original()
+            if threading.current_thread().name == "edit":
+                read_base.set()
+                start_sent.wait(0.5)        # give the start its chance to interleave
+            return rooms
+        self.enterContext(patch.object(self.client, "room_preferences_for_edit", edit_base))
+        sent_before = self.publish
+        def publish(topic, payload):
+            if payload.get("msg") == "START":
+                start_sent.set()
+            return sent_before(topic, payload)
+        self.enterContext(patch.object(self.client, "_publish_raw", publish))
+        self.on_request = lambda payload: (self.reply(payload)
+                                           if threading.current_thread().name != "edit" else None)
+        edit = threading.Thread(name="edit",
+                                target=lambda: self.client.edit_room_setting(12, 5, 1))
+        edit.start()
+        self.assertTrue(read_base.wait(2))
+        self.assertTrue(self.client.start_room("schlafzimmer", 0))
+        edit.join(2)
+        rooms = {r[0]: r for r in self.last_set()["params"]["room_preference"]}
+        self.assertEqual((rooms[10][8], rooms[12][8]), (1, 0), "start's selection survives")
+        self.assertEqual(rooms[12][5], 1, "and so does the edit")
+
+
 if __name__ == "__main__":
     unittest.main()
