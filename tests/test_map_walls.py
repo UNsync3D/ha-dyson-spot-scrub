@@ -98,5 +98,37 @@ class WallTests(unittest.TestCase):
         self.assertEqual({p[0] for pairs in split for a, b in pairs for p in (a, b)}, {0.975})
 
 
+class AreaLabelTests(unittest.TestCase):
+    """Pillow's default font has no '²': labels showed 'm' plus a box."""
+
+    def drawn_text(self, **options):
+        texts = []
+        original = renderer.ImageDraw.ImageDraw.text
+        def record(draw, xy, text, *args, **kwargs):
+            texts.append(text)
+            return original(draw, xy, text, *args, **kwargs)
+        renderer.ImageDraw.ImageDraw.text = record
+        try:
+            render(json.loads(FIXTURE.read_text()), **options)
+        finally:
+            renderer.ImageDraw.ImageDraw.text = original
+        return texts
+
+    def test_area_is_drawn_without_the_squared_glyph(self):
+        texts = self.drawn_text()
+        self.assertFalse(any("\u00b2" in t for t in texts), texts)
+        self.assertIn("4.2 m", texts)          # Room2: 4.1525 m²
+        self.assertIn("2", texts)              # the raised 2
+
+    def test_fallback_without_measurable_fonts(self):
+        calls = []
+        draw = type("Draw", (), {"text": lambda self, xy, text, **kw: calls.append(text)})()
+        renderer._draw_area_label(draw, 10, 10, 16.95, object(), (255, 255, 255, 255))
+        self.assertEqual(calls, ["16.9 m2"])
+        calls.clear()
+        renderer._draw_area_label(draw, 10, 10, "not a number", object(), (0, 0, 0, 0))
+        self.assertEqual(calls, [])
+
+
 if __name__ == "__main__":
     unittest.main()

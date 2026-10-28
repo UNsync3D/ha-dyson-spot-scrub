@@ -321,11 +321,10 @@ def _render(
         lx, ly = int(tx(lx_m)), int(ty(ly_m))
         draw = ImageDraw.Draw(img)
         name = (z.get("name") or "").upper()
-        area = f"{z.get('area', 0):.1f} m²"
         if options["map_show_room_names"]:
             _draw_centered_text(draw, lx, ly - 12, name, font_l, ZONE_LABEL)
         if options["map_show_room_areas"]:
-            _draw_centered_text(draw, lx, ly + 2, area, font_s, area_label_col)
+            _draw_area_label(draw, lx, ly + 2, z.get("area", 0), font_s, area_label_col)
     if options["map_show_legend"]:
         _draw_legend(img, zones, font_s)
 
@@ -649,6 +648,39 @@ def _load_fonts() -> tuple[Any, Any]:
         return f, f
     except Exception:
         return None, None
+
+
+@lru_cache(maxsize=1)
+def _load_superscript_font() -> Any:
+    """A smaller font for the '2' of m², or None if sizes aren't supported."""
+    try:
+        return ImageFont.load_default(size=7)
+    except (TypeError, OSError):
+        return None
+
+
+def _draw_area_label(draw, x, y, area, font, colour):
+    """Draw '16.9 m²' centred on (x, y) without needing a '²' glyph.
+
+    Pillow's default font has no '²' and drew a box in its place, so the 2 is
+    drawn as a small raised digit instead. Falls back to 'm2' when the fonts
+    can't be measured.
+    """
+    try:
+        value = f"{float(area):.1f}"
+    except (TypeError, ValueError):
+        return
+    base = f"{value} m"
+    sup_font = _load_superscript_font()
+    try:
+        base_w = font.getlength(base)
+        sup_w = sup_font.getlength("2")
+    except AttributeError:
+        _draw_centered_text(draw, x, y, f"{value} m2", font, colour)
+        return
+    left = x - (base_w + sup_w) / 2
+    draw.text((left, y), base, fill=colour, font=font, anchor="lm")
+    draw.text((left + base_w - 1, y - 3), "2", fill=colour, font=sup_font, anchor="lm")
 
 
 def _draw_centered_text(draw, x, y, text, font, colour):
