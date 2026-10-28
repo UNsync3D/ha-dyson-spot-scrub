@@ -6,11 +6,16 @@ Confirmed API structure (from live HA debug logs, Sep 2026):
     id, orientation, dimensions, dockLocation, furniture, restrictions,
     hazardZones
     zones[]: id, name, type, nameLocation {x,y}, area, cleanStatus,
-             visited [{x,y}],
-             presentation [{start:{x,y}, end:{x,y}, type:int}]
-               type 0 = perimeter pass  ← outlines the zone boundary
-               type 1 = sweep pass
-               type 2 = turn
+             visited [{x,y}]  ← despite the name, a closed outline (points
+               every 5 cm) of the floor the robot can reach in the room: it
+               follows open walls but goes around furniture
+             presentation [{start:{x,y}, end:{x,y}, type:int}]  ← the room's
+               simplified, straight-line outline:
+               type 0 = wall edge
+               type 1 = boundary shared with another room (e.g. a split)
+               type 2 = short join between a wall and a shared boundary
+             (Types confirmed by splitting a room in the MyDyson app,
+             28 Oct 2026: the split line appeared as type 1 in both rooms.)
 
   live_data (from get_live_map, only while robot is cleaning):
     robotLocation {x, y, angle}
@@ -20,8 +25,7 @@ Confirmed API structure (from live HA debug logs, Sep 2026):
     furniture [], restrictions [], dirt [], hazardZones []
 
 Zone boundary polygons are NOT in the REST API as explicit polygons.
-We reconstruct them from the perimeter-pass (type=0) presentation
-segments, which the robot drives around the edge of each zone.
+We reconstruct them from the wall (type=0) presentation segments.
 """
 from __future__ import annotations
 
@@ -67,6 +71,9 @@ FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
 
 # Zone colours — single style for all zones (Dyson app aesthetic)
 ZONE_BORDER    = (220, 220, 225, 180)   # soft white outline
+WALL           = (232, 232, 238, 255)   # solid wall (presentation type 0)
+DIVIDER        = (220, 220, 225, 150)   # dashed room boundary (types 1 and 2)
+WALL_WIDTH_M   = 0.05                   # drawn wall thickness in metres
 ZONE_VISITED   = (160, 160, 168, 60)    # subtle grey visited path
 ZONE_LABEL     = (220, 220, 225, 220)   # white label text
 
@@ -218,20 +225,9 @@ def _render(
             _poly_alpha(img, txy_list(bnd), KEEPOUT_FILL, KEEPOUT_STROKE,
                         stroke_width=1, dashed=True)
 
-    # ── 5. Zone outlines and visited paths ───────────────────────────────────
-    # Each perimeter segment is drawn individually — never chained into a
-    # polygon — so non-contiguous segments never produce diagonal artefacts.
+    # ── 5. Floor outlines, then walls and room dividers ──────────────────────
     for z in zones:
-        # Perimeter border — one line per segment, skip large jumps
-        draw = ImageDraw.Draw(img)
-        for seg_start, seg_end in (_perimeter_segments(z) if options["map_show_perimeter"] else []):
-            sx, sy = _pt(seg_start)
-            ex, ey = _pt(seg_end)
-            if math.hypot(ex - sx, ey - sy) > 1.5:
-                continue
-            draw.line([txy(seg_start), txy(seg_end)], fill=ZONE_BORDER, width=2)
-
-        # Historical visited path — skip large jumps
+        # Floor outline ('visited') - skip jumps between separate loops
         visited = z.get("visited", [])
         if options["map_show_visited_paths"] and len(visited) > 1:
             draw = ImageDraw.Draw(img)
@@ -242,6 +238,19 @@ def _render(
                 if math.hypot(x1 - x0, y1 - y0) > 0.8:
                     continue
                 draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=ZONE_VISITED, width=1)
+
+    # Walls and dividers are drawn segment by segment - never chained into a
+    # polygon - so separate runs can't produce diagonal artefacts. Walls of
+    # any length are drawn: an earlier 1.5 m cut-off dropped most real walls.
+    if options["map_show_perimeter"]:
+        wall_width = max(2, round(WALL_WIDTH_M * scale))
+        for z in zones:
+            for kind, seg_start, seg_end in _outline_segments(z):
+                if kind == 0:
+                    ImageDraw.Draw(img).line([txy(seg_start), txy(seg_end)],
+                                             fill=WALL, width=wall_width)
+                else:
+                    _dashed_seg(img, txy(seg_start), txy(seg_end), DIVIDER, width=2)
 
     # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in (_get_furniture(map_data, live_data) if options["map_show_furniture"] else []):
@@ -425,18 +434,28 @@ def _perimeter_points(zone: dict) -> list[Any]:
 
 
 def _perimeter_segments(zone: dict) -> list[tuple[Any, Any]]:
-    """Return each perimeter-pass segment as a (start, end) pair.
+    """Return each wall (type 0) segment as a (start, end) pair."""
+    return [(start, end) for kind, start, end in _outline_segments(zone) if kind == 0]
 
-    Unlike _perimeter_points, this does NOT chain segments together,
-    so non-contiguous perimeter runs never produce diagonal connector lines.
+
+def _outline_segments(zone: dict) -> list[tuple[int, Any, Any]]:
+    """Every usable presentation segment as (type, start, end).
+
+    Types 0 (wall), 1 (shared boundary) and 2 (join) only; malformed,
+    non-finite and zero-length segments are dropped.
     """
-    return [
-        (seg["start"], seg["end"])
-        for seg in zone.get("presentation", [])
-        if seg.get("type") == 0
-        and seg.get("start") is not None
-        and seg.get("end") is not None
-    ]
+    out = []
+    for seg in zone.get("presentation") or []:
+        if not isinstance(seg, dict) or seg.get("type") not in (0, 1, 2):
+            continue
+        try:
+            start, end = _pt(seg["start"]), _pt(seg["end"])
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        if not all(math.isfinite(v) for v in (*start, *end)) or start == end:
+            continue
+        out.append((seg["type"], start, end))
+    return out
 
 
 def _bounds_from_dimensions(map_data: dict) -> tuple:
@@ -482,11 +501,9 @@ def _collect_all_coords(
             pts.append((float(loc["x"]), float(loc["y"])))
         for p in z.get("visited", []):
             pts.append(_pt(p))
-        for seg in z.get("presentation", []):
-            for field in ("start", "end"):
-                p = seg.get(field)
-                if p:
-                    pts.append(_pt(p))
+        # Same filtering as drawing, so a malformed segment can't break bounds.
+        for _kind, start, end in _outline_segments(z):
+            pts += [start, end]
 
     for f in _get_furniture(map_data, live_data):
         for p in (f.get("points") or f.get("boundary") or []):

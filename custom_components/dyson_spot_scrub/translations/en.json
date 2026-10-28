@@ -127,8 +127,8 @@
               "map_show_room_areas": "Show room areas (m²)",
               "map_show_legend": "Show legend",
               "map_show_status_areas": "Show cleaning status areas",
-              "map_show_perimeter": "Show room perimeter paths",
-              "map_show_visited_paths": "Show historical room paths",
+              "map_show_perimeter": "Show walls and room dividers",
+              "map_show_visited_paths": "Show floor outlines",
               "map_show_grid": "Show grid",
               "map_show_dock": "Show charging station",
               "map_show_restrictions": "Show keep-out zones",
@@ -136,8 +136,8 @@
             },
             "data_description": {
               "map_show_status_areas": "Colored room fills indicating cleaning progress.",
-              "map_show_perimeter": "Room-edge segments from the Dyson map. These are separate from the live cleaning path.",
-              "map_show_visited_paths": "Additional room tracks provided by Dyson. These may also trace room boundaries.",
+              "map_show_perimeter": "Walls (solid) and boundaries between rooms (dashed), from the Dyson map.",
+              "map_show_visited_paths": "Outline of the floor the robot can reach in each room. It goes around furniture.",
               "map_show_grid": "Includes distance labels and the map origin marker.",
               "map_show_waypoints": "Dots along the cleaning path. The robot position remains visible.",
               "map_show_legend": "The legend has its own room labels, independent of Show room names."
