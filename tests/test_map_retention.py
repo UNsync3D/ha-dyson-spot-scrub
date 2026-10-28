@@ -63,6 +63,7 @@ module('homeassistant.helpers')
 module('homeassistant.helpers.entity', DeviceInfo=dict)
 module('homeassistant.helpers.entity_platform', AddEntitiesCallback=object)
 module('homeassistant.helpers.storage', Store=Store)
+module('homeassistant.helpers.aiohttp_client', async_get_clientsession=lambda hass: None)
 module('paho')
 module('paho.mqtt')
 module('paho.mqtt.client')
@@ -87,7 +88,7 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
                                       SimpleNamespace(monotonic=lambda: self.now)))
         self.path = {'cleanPath': [[1, 1], [2, 2]]}
         self.fetch = self.enterContext(patch.object(
-            coordinator_module, 'get_live_map', AsyncMock(side_effect=lambda *args: self.path)))
+            coordinator_module, 'get_live_map', AsyncMock(side_effect=lambda *args, **kwargs: self.path)))
         self.rendered = []
 
         def render(map_data, metadata, live, options=None, **kwargs):
@@ -227,7 +228,7 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         await self.start()
         self.now += 5
         entered, release = asyncio.Event(), asyncio.Event()
-        async def delayed(*args):
+        async def delayed(*args, **kwargs):
             entered.set()
             await release.wait()
             return self.path
@@ -289,7 +290,7 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
     async def test_old_static_fetch_is_discarded_after_map_change(self):
         self.camera._map_data = None
         entered, release = asyncio.Event(), asyncio.Event()
-        async def delayed(*args):
+        async def delayed(*args, **kwargs):
             entered.set()
             await release.wait()
             return 1, {'zones': [{'id': 'old'}]}

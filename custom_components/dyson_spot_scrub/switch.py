@@ -10,12 +10,12 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE
+from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .station_entity import StationEntity
+from .entity_helpers import device_info, room_slug
 from .station_settings import SWITCHES
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,15 +33,7 @@ async def async_setup_entry(
 
     @callback
     def _check_for_new_rooms() -> None:
-        # Prefer live MQTT room names; fall back to coordinator's persisted cache
-        # so entities are created immediately on startup even if MQTT hasn't
-        # connected yet (e.g. robot is drying or briefly offline).
-        if coordinator.mqtt and coordinator.mqtt.room_names:
-            rooms = coordinator.mqtt.room_names
-        else:
-            rooms = coordinator.cached_room_names
-
-        new_rooms = [r for r in rooms if r not in known_rooms]
+        new_rooms = [r for r in coordinator.room_names if r not in known_rooms]
         if not new_rooms:
             return
         known_rooms.update(new_rooms)
@@ -82,19 +74,10 @@ class DysonRoomSwitchEntity(SwitchEntity):
     ) -> None:
         self._coordinator = coordinator
         self._room_name = room_name
-        serial = entry.data[CONF_SERIAL]
-
         # Unique ID based on serial + room name (slugified)
-        slug = room_name.lower().replace(" ", "_")
-        self._attr_unique_id = f"{serial}_room_{slug}"
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_room_{room_slug(room_name)}"
         self._attr_name = f"Room {room_name}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial)},
-            name=entry.data[CONF_DEVICE_NAME],
-            manufacturer="Dyson",
-            model=entry.data.get(CONF_PRODUCT_TYPE, "RB0S"),
-            serial_number=serial,
-        )
+        self._attr_device_info = device_info(entry)
 
     async def async_added_to_hass(self) -> None:
         self._coordinator.async_add_listener(self)
@@ -106,6 +89,8 @@ class DysonRoomSwitchEntity(SwitchEntity):
     def is_on(self) -> bool:
         return self._room_name in self._coordinator.enabled_rooms
 
+    # Room selection lives only in memory (coordinator.enabled_rooms) and is
+    # consumed by the "Vacuum Start" button; nothing is sent to the robot here.
     async def async_turn_on(self, **kwargs) -> None:
         self._coordinator.enabled_rooms.add(self._room_name)
         self.async_write_ha_state()

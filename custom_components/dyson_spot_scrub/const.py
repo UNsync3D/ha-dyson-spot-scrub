@@ -53,10 +53,13 @@ CONF_DEVICE_NAME    = "device_name"
 CONF_PRODUCT_TYPE   = "product_type"
 CONF_MQTT_PREFIX    = "mqtt_prefix"
 
-# Local MQTT connection (replaces cloud IoT credentials)
-CONF_ROBOT_HOST          = "robot_host"
-CONF_LOCAL_MQTT_USERNAME = "local_mqtt_username"
-CONF_LOCAL_MQTT_PASSWORD = "local_mqtt_password"
+# Input validation. The serial and MQTT prefix are interpolated into MQTT
+# topics ("{prefix}/{serial}/command"), REST URLs and the HA storage key, so
+# anything outside this conservative character set is rejected. In particular
+# MQTT wildcards (+ #), "/" and ".." must never reach those places.
+SERIAL_PATTERN      = r"[A-Z0-9][A-Z0-9-]{2,31}"
+MQTT_PREFIX_PATTERN = r"[A-Za-z0-9_-]{1,32}"
+COUNTRY_PATTERN     = r"[A-Z]{2}"
 
 # Persisted room names — cached so switch entities survive HA restarts even
 # when MQTT hasn't connected yet (e.g. robot is drying or briefly offline).
@@ -86,8 +89,9 @@ DEFAULT_MODE = MODE_VACUUM
 # "276", "277" = older robot models
 ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804")
 
-# How long (seconds) to suppress snap-back on optimistic OFF
-OPTIMISTIC_OFF_TIMEOUT = 15
+# Dock states during which a new station action (empty bin / wash mop) must
+# not be sent — the dock is already running one.
+DOCK_BUSY_STATES: frozenset[str] = frozenset({"COLLECTING_DUST", "WASHING_MOP", "DRYING_MOP"})
 
 
 # ── Fault code mapping (hardware-verified, FutuRazor Oct 2026) ─────────────────────

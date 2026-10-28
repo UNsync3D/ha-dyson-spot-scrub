@@ -12,12 +12,12 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE
+from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import battery_level
+from .entity_helpers import device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +38,11 @@ async def async_setup_entry(
 
 
 class DysonBatterySensor(SensorEntity):
-    """Battery level sensor for the Dyson Spot+Scrub AI."""
+    """Battery level sensor for the Dyson Spot+Scrub AI.
+
+    Also the base class for the other sensors here: subclasses inherit the
+    coordinator listener wiring and override unique_id/value/availability.
+    """
 
     _attr_has_entity_name  = True
     _attr_name             = "Battery"
@@ -49,18 +53,8 @@ class DysonBatterySensor(SensorEntity):
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
-        serial       = entry.data[CONF_SERIAL]
-        device_name  = entry.data[CONF_DEVICE_NAME]
-        product_type = entry.data.get(CONF_PRODUCT_TYPE, "RB0S")
-
-        self._attr_unique_id   = f"{serial}_battery"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, serial)},
-            name=device_name,
-            manufacturer="Dyson",
-            model=product_type,
-            serial_number=serial,
-        )
+        self._attr_unique_id   = f"{entry.data[CONF_SERIAL]}_battery"
+        self._attr_device_info = device_info(entry)
 
     # ── HA lifecycle ──────────────────────────────────────────────────────────
 

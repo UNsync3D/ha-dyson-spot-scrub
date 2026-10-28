@@ -21,7 +21,10 @@ from .const import (
     CONF_MQTT_PREFIX,
     CONF_COUNTRY,
     CONF_CACHED_ROOMS,
+    COUNTRY_PATTERN,
+    MQTT_PREFIX_PATTERN,
     ROBOT_PRODUCT_PREFIXES,
+    SERIAL_PATTERN,
     MAP_RETENTION_DEFAULTS,
     MAP_APPEARANCE_DEFAULTS,
     MAP_VISIBILITY_DEFAULTS,
@@ -74,6 +77,14 @@ def _ha_country(hass) -> str:
 def _is_robot(device: dict) -> bool:
     pt = (device.get("ProductType") or device.get("productType") or "").upper()
     return any(pt.startswith(p) for p in ROBOT_PRODUCT_PREFIXES)
+
+
+def _valid_serial(serial: str) -> bool:
+    return re.fullmatch(SERIAL_PATTERN, serial) is not None
+
+
+def _valid_country(country: str) -> bool:
+    return re.fullmatch(COUNTRY_PATTERN, country) is not None
 
 
 def _device_name(device: dict) -> str:
@@ -226,6 +237,18 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._token   = token
             self._country = country
 
+            # Validate before the serial reaches URLs, MQTT topics or storage.
+            if not _valid_serial(serial):
+                errors["base"] = "invalid_serial"
+            elif not _valid_country(country):
+                errors["base"] = "invalid_country"
+            if errors:
+                return self.async_show_form(
+                    step_id="token",
+                    data_schema=_token_schema(_ha_country(self.hass)),
+                    errors=errors,
+                )
+
             # Try the manifest; fall back to a minimal synthetic entry.
             try:
                 devices = await get_devices(token)
@@ -239,26 +262,41 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     self._selected_device = match
                     return self._create_entry(self._selected_device)
                 errors["base"] = "serial_not_found"
+            except DysonApiError as exc:
+                if getattr(exc, "status", None) not in (401, 403):
+                    # Treat other API errors like an outage (below).
+                    return self._create_synthetic_entry(serial, exc)
+                # The token itself was rejected. Previously this fell through to
+                # the synthetic entry and saved a dead token, leaving the
+                # integration permanently unavailable.
+                _LOGGER.warning("Bearer token rejected by Dyson (HTTP %s)", exc.status)
+                errors["base"] = "invalid_auth"
             except Exception as exc:
-                # Manifest fetch failed — create a minimal synthetic device dict.
-                _LOGGER.warning(
-                    "Manifest fetch failed (%s) — continuing with synthetic entry",
-                    exc,
-                )
-                guessed_prefix = "RB05" if serial.startswith("7VD") else "NROB"
-                self._selected_device = {
-                    "Serial":            serial,
-                    "Name":              f"Dyson Robot ({serial})",
-                    "ProductType":       "RB0S",
-                    "mqttRootTopicLevel": guessed_prefix,
-                }
-                return self._create_entry(self._selected_device)
+                return self._create_synthetic_entry(serial, exc)
 
         return self.async_show_form(
             step_id="token",
             data_schema=_token_schema(_ha_country(self.hass)),
             errors=errors,
         )
+
+    def _create_synthetic_entry(self, serial: str, exc: Exception) -> FlowResult:
+        """Create an entry without the manifest (Dyson API temporarily down).
+
+        The MQTT prefix is a guess; dyson_mqtt auto-corrects and persists it
+        from the first inbound message.
+        """
+        _LOGGER.warning(
+            "Manifest fetch failed (%s) — continuing with synthetic entry", exc,
+        )
+        guessed_prefix = "RB05" if serial.startswith("7VD") else "NROB"
+        self._selected_device = {
+            "Serial":            serial,
+            "Name":              f"Dyson Robot ({serial})",
+            "ProductType":       "RB0S",
+            "mqttRootTopicLevel": guessed_prefix,
+        }
+        return self._create_entry(self._selected_device)
 
     # ── Device selection (shared by login/OTP paths) ──────────────────────────
 
@@ -302,6 +340,12 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="select_robot", data_schema=schema)
 
     def _create_entry(self, device: dict) -> FlowResult:
+        """Store the bearer token and device identity in the config entry.
+
+        The token is kept in entry.data, which HA stores unencrypted in
+        .storage/core.config_entries — standard for HA integrations, but it
+        means backups of the config directory contain the Dyson token.
+        """
         serial  = device.get("Serial") or device.get("serial", "")
         name    = _device_name(device)
         pt      = device.get("ProductType") or device.get("productType", "RB0S")
@@ -312,6 +356,11 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             or (version[:4].upper() if version.upper().startswith("RB") else None)
             or "NROB"
         )
+        # Manifest values are remote data: never let them inject MQTT wildcards.
+        if not re.fullmatch(MQTT_PREFIX_PATTERN, str(prefix)):
+            prefix = "NROB"
+        if not _valid_serial(str(serial).upper()):
+            return self.async_abort(reason="invalid_serial")
 
         self._async_abort_entries_match({CONF_SERIAL: serial})
 

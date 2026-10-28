@@ -1,0 +1,563 @@
+[
+ [
+  "sensor",
+  "DysonBatterySensor",
+  "7VD-AU-ABC1234A_battery",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "binary_sensor",
+  "DysonChargingSensor",
+  "7VD-AU-ABC1234A_charging",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonCleaningModeSelectEntity",
+  "7VD-AU-ABC1234A_cleaning_mode",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonConsumableSensor",
+  "7VD-AU-ABC1234A_consumable_brush_bar_usage",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonCleaningSolutionSensor",
+  "7VD-AU-ABC1234A_consumable_cleaning_solution",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonConsumableSensor",
+  "7VD-AU-ABC1234A_consumable_dock_filter_usage",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonConsumableSensor",
+  "7VD-AU-ABC1234A_consumable_mop_roller_usage",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonConsumableSensor",
+  "7VD-AU-ABC1234A_consumable_robot_filter_usage",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonConsumableSensor",
+  "7VD-AU-ABC1234A_consumable_side_brushes_usage",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "binary_sensor",
+  "DysonDockSensor",
+  "7VD-AU-ABC1234A_docked",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "sensor",
+  "DysonDryingCountdownSensor",
+  "7VD-AU-ABC1234A_drying_remaining",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "button",
+  "DysonEmptyBinButton",
+  "7VD-AU-ABC1234A_empty_bin",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "binary_sensor",
+  "DysonFaultSensor",
+  "7VD-AU-ABC1234A_fault",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "camera",
+  "DysonMapCamera",
+  "7VD-AU-ABC1234A_floor_map",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonRoomSwitchEntity",
+  "7VD-AU-ABC1234A_room_kitchen_1",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_kitchen_1_cleaning_mode",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_kitchen_1_cleaning_strategy",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_kitchen_1_mop_repetitions",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_kitchen_1_water_level",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonRoomSwitchEntity",
+  "7VD-AU-ABC1234A_room_living_room",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_living_room_cleaning_mode",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_living_room_cleaning_strategy",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_living_room_mop_repetitions",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonRoomSelectEntity",
+  "7VD-AU-ABC1234A_room_living_room_water_level",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "button",
+  "DysonStartButton",
+  "7VD-AU-ABC1234A_start_button",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonStationSwitch",
+  "7VD-AU-ABC1234A_station_cleaning_solution",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonStationSwitch",
+  "7VD-AU-ABC1234A_station_extended_roller_preparation",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonStationSwitch",
+  "7VD-AU-ABC1234A_station_hot_water_mopping",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonStationSwitch",
+  "7VD-AU-ABC1234A_station_hot_water_self_cleaning",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonStationSelect",
+  "7VD-AU-ABC1234A_station_roller_drying_duration",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "select",
+  "DysonStationSelect",
+  "7VD-AU-ABC1234A_station_self_cleaning_frequency",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "vacuum",
+  "DysonVacuumEntity",
+  "7VD-AU-ABC1234A_vacuum",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "button",
+  "DysonWashMopButton",
+  "7VD-AU-ABC1234A_wash_mop",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ]
+]

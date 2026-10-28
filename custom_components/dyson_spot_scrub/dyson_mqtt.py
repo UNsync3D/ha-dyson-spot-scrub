@@ -20,11 +20,11 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 import random
 import re
 import ssl
 import threading
+import time
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -32,13 +32,20 @@ from urllib.parse import quote
 
 import paho.mqtt.client as mqtt
 
+from .const import DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATTERN
 from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
 
 _LOGGER = logging.getLogger(__name__)
 
+# Seconds to wait for the robot's service.get_preference reply before a start.
 _PREFERENCE_TIMEOUT = 10.0
+# Map IDs probed on connect (and their stagger) before persistentMapId is known.
+_PROBE_MAP_IDS = range(4)
+_PROBE_INTERVAL = 2.5
 _DRYING_TIME_KEYS = ("drying_total_seconds", "drying_remaining_seconds", "drying_updated_at")
 
+# Per-room setting name → (index in the room-preference array, label → raw value).
+# Index meanings are documented on DysonMqttClient.room_preferences.
 _ROOM_SETTING_OPTIONS = {
     "cleaning_mode": (3, {
         "Vacuum": 0, "Vacuum and Mop": 1, "Mop": 2, "Vacuum then Mop": 3,
@@ -194,18 +201,16 @@ def _fault_code(fault: dict) -> int | None:
         return None
 
 
-def has_fault(state: dict) -> bool:
-    """True when there is an actionable (non-informational) fault.
+def _actionable_faults(state: dict):
+    """Yield the fault code (or None if it has none) of each actionable fault.
 
-    Informational codes (dock baseline 2105, maintenance log 2103) are excluded
-    so they never cause VacuumActivity.ERROR — see FAULT_CODE_INFORMATIONAL.
+    Shared by has_fault() and active_fault_code() so both apply identical
+    rules: skip LOG_ONLY faults and informational codes (dock baseline 2105,
+    maintenance log 2103 — see FAULT_CODE_INFORMATIONAL).
     """
-    if has_freeze_fault(state):
-        return True
-    from .const import FAULT_CODE_INFORMATIONAL
     faults = state.get("activeFaults")
-    if not isinstance(faults, list) or not faults:
-        return False
+    if not isinstance(faults, list):
+        return
     for f in faults:
         if not isinstance(f, dict):
             continue
@@ -213,33 +218,28 @@ def has_fault(state: dict) -> bool:
         #   CURRENT-STATE uses "nextActionRequired"
         #   prop.post / older firmware use "status"
         severity = f.get("nextActionRequired") or f.get("status")
-        if severity is not None and severity != "LOG_ONLY":
-            fid = _fault_code(f)
-            if fid is not None and fid in FAULT_CODE_INFORMATIONAL:
-                continue  # informational — skip
-            return True
-    return False
+        if severity is None or severity == "LOG_ONLY":
+            continue
+        fid = _fault_code(f)
+        if fid is not None and fid in FAULT_CODE_INFORMATIONAL:
+            continue
+        yield fid
+
+
+def has_fault(state: dict) -> bool:
+    """True when there is an actionable (non-informational) fault.
+
+    A fault with no parseable code still counts — it is actionable but unknown.
+    """
+    return has_freeze_fault(state) or any(True for _ in _actionable_faults(state))
 
 
 def active_fault_code(state: dict) -> int | None:
     """Return the first actionable fault code from activeFaults, or None.
 
-    Skips LOG_ONLY faults and informational codes (2103, 2105).
     Look the result up in FAULT_CODE_MESSAGES for a user-readable string.
     """
-    from .const import FAULT_CODE_INFORMATIONAL
-    faults = state.get("activeFaults")
-    if not isinstance(faults, list):
-        return None
-    for f in faults:
-        if not isinstance(f, dict):
-            continue
-        severity = f.get("nextActionRequired") or f.get("status")
-        if severity is not None and severity != "LOG_ONLY":
-            fid = _fault_code(f)
-            if fid is not None and fid not in FAULT_CODE_INFORMATIONAL:
-                return fid
-    return None
+    return next((fid for fid in _actionable_faults(state) if fid is not None), None)
 
 
 def dock_needs_maintenance(state: dict) -> bool:
@@ -255,6 +255,7 @@ def _now_iso() -> str:
 
 
 def _rand_msg_id() -> str:
+    # Only a correlation ID for matching replies — not security sensitive.
     return str(random.randint(0, 4294967295))
 
 
@@ -325,6 +326,21 @@ class DysonMqttClient:
         self.state: dict = {}
 
         self._cached_preference:    dict | None = None
+
+        # Room settings HA has sent but the robot hasn't yet reported back.
+        # The cache above only ever holds what the robot reported; these let a
+        # second quick edit build on the first instead of reverting it. See
+        # room_preferences_for_edit().
+        self._pending_rooms: list | None = None
+        # Serialises each complete read -> merge -> publish of room settings,
+        # so overlapping edits (two selects, a select and a card batch save,
+        # automations) each build on the previous one instead of on the same
+        # stale snapshot. Held only while preparing and publishing - never
+        # while waiting for the robot's reply. Re-entrant because the edit
+        # helpers call set_room_preferences() while holding it.
+        self._room_edit_lock = threading.RLock()
+        self._pending_refresh_id: str | None = None
+        self._pending_since = 0.0
         self._preferences_fetched              = False
 
         # Guard: only fire on_disconnected once per client instance.
@@ -382,10 +398,13 @@ class DysonMqttClient:
         paho's built-in retry would reuse the same ClientId and cause the broker
         to kick us off (rc=7), creating a rapid-fire disconnect cascade.
         """
+        # Every query value is URL-encoded: a token or authorizer name that
+        # contains "&", "=" or "#" would otherwise corrupt the query string.
+        # This path carries live credentials — never log it.
         ws_path = (
             f"/mqtt"
-            f"?x-amz-customauthorizer-name={self._authorizer_name}"
-            f"&token={self._token_value}"
+            f"?x-amz-customauthorizer-name={quote(self._authorizer_name, safe='')}"
+            f"&token={quote(self._token_value, safe='')}"
             f"&x-amz-customauthorizer-signature={quote(self._token_signature, safe='')}"
         )
 
@@ -525,61 +544,50 @@ class DysonMqttClient:
     def empty_bin(self) -> bool:
         """Trigger the dock to collect dust from the robot's bin.
 
-        Mirrors the Dyson app sequence (MQTT capture Oct 2026):
-          legacy: START-DOCK-ACTION / action=COLLECT_DUST
-          JDM:    service.start_station_act / station_act=3, ctrl_value=1
+        legacy: START-DOCK-ACTION / action=COLLECT_DUST (confirmed, app captures)
+        JDM:    service.start_station_act / station_act=3
         Returns False if not connected or a dock action is already running.
         """
-        dock = self.state.get("dockState")
-        if not self.connected:
-            _LOGGER.warning("[%s] empty_bin: not connected", self.serial)
-            return False
-        if dock in {"COLLECTING_DUST", "WASHING_MOP", "DRYING_MOP"}:
-            _LOGGER.warning(
-                "[%s] empty_bin: dock already busy (%s)", self.serial, dock
-            )
-            return False
-        _LOGGER.info("[%s] → EMPTY_BIN (station_act=3)", self.serial)
-        self._publish({
-            "msg":         "START-DOCK-ACTION",
-            "action":      "COLLECT_DUST",
-            "mode-reason": "RAPP",
-            "time":        _now_iso(),
-        })
-        self._publish_jdm("service.start_station_act", {
-            "station_act": 3,
-            "ctrl_value":  1,
-        })
-        return True
+        return self._start_dock_action("COLLECT_DUST", 3)
 
     def wash_mop(self) -> bool:
         """Trigger the dock to wash then air-dry the mop roller.
 
-        Mirrors the Dyson app sequence (MQTT capture Oct 2026):
-          legacy: START-DOCK-ACTION / action=WASH_MOP
-          JDM:    service.start_station_act / station_act=1, ctrl_value=1
+        legacy: START-DOCK-ACTION / action=WASH_MOP (confirmed, app captures)
+        JDM:    service.start_station_act / station_act=1
         The dock auto-transitions to DRYING_MOP after washing (station_act=2)
         — no separate dry command is needed.
         Returns False if not connected or a dock action is already running.
         """
+        return self._start_dock_action("WASH_MOP", 1)
+
+    def _start_dock_action(self, action: str, station_act: int) -> bool:
+        """Send one station action on both command channels, if the dock is free.
+
+        OPEN QUESTION (FutuRazor testing, Oct 2026): HA-triggered actions show
+        TWO service.start_station_act requests with different msgIds, while
+        app-triggered actions show one. This method publishes the JDM call
+        exactly once, so the extra request is probably generated upstream
+        (robot/cloud translating the legacy START-DOCK-ACTION into JDM). Under
+        investigation: compare a legacy-only publish against this pair before
+        changing anything.
+        """
         dock = self.state.get("dockState")
         if not self.connected:
-            _LOGGER.warning("[%s] wash_mop: not connected", self.serial)
+            _LOGGER.warning("[%s] %s: not connected", self.serial, action)
             return False
-        if dock in {"COLLECTING_DUST", "WASHING_MOP", "DRYING_MOP"}:
-            _LOGGER.warning(
-                "[%s] wash_mop: dock already busy (%s)", self.serial, dock
-            )
+        if dock in DOCK_BUSY_STATES:
+            _LOGGER.warning("[%s] %s: dock already busy (%s)", self.serial, action, dock)
             return False
-        _LOGGER.info("[%s] → WASH_MOP (station_act=1)", self.serial)
+        _LOGGER.info("[%s] → %s (station_act=%d)", self.serial, action, station_act)
         self._publish({
             "msg":         "START-DOCK-ACTION",
-            "action":      "WASH_MOP",
+            "action":      action,
             "mode-reason": "RAPP",
             "time":        _now_iso(),
         })
         self._publish_jdm("service.start_station_act", {
-            "station_act": 1,
+            "station_act": station_act,
             "ctrl_value":  1,
         })
         return True
@@ -636,13 +644,72 @@ class DysonMqttClient:
             return self._cached_preference["room"]
         return []
 
+    def room_preferences_for_edit(self) -> list[list]:
+        """A private copy of the room array to base a new settings edit on.
+
+        Normally the robot-reported cache. While a just-sent change is awaiting
+        the robot's confirming reply (at most _PREFERENCE_TIMEOUT seconds), it
+        is that sent array instead, so a second quick edit doesn't send the
+        pre-edit values back and undo the first.
+        """
+        with self._preference_lock:
+            if (self._pending_rooms is not None
+                    and time.monotonic() - self._pending_since < _PREFERENCE_TIMEOUT):
+                return deepcopy(self._pending_rooms)
+            self._pending_rooms = None
+            return deepcopy(self.room_preferences)
+
+    def edit_room_setting(self, room_id, index: int, value) -> bool:
+        """Change one raw field of one room and publish, as one serialised step.
+
+        Used by the per-room selects. The base array is read inside the lock,
+        so an overlapping edit always sees this one's result.
+        """
+        def change(rooms: list[list]) -> bool:
+            room = next((r for r in rooms if r and str(r[0]) == str(room_id)), None)
+            if room is None or len(room) <= index:
+                _LOGGER.warning("[%s] Room ID %r is no longer in the map", self.serial, room_id)
+                return False
+            room[index] = value
+            return True
+        return self._edit_rooms(change)
+
+    def _edit_rooms(self, change: Callable[[list[list]], bool]) -> bool:
+        """Read the edit base, apply ``change`` to a copy, publish - atomically."""
+        with self._room_edit_lock:
+            rooms = self.room_preferences_for_edit()
+            if not rooms:
+                _LOGGER.warning("[%s] Cannot save room settings: preferences unavailable",
+                                self.serial)
+                return False
+            if not change(rooms):
+                return False
+            return self.set_room_preferences(rooms)
+
     def set_room_preferences(self, rooms: list[list]) -> bool:
         """Publish an updated room-preferences array to the robot.
+
+        Prefer edit_room_setting()/save_room_settings(), which read their base
+        array under the same lock; a caller passing a full array it prepared
+        earlier can still race with other edits.
 
         Used by per-room select entities to persist a single-setting change
         (cleaning mode, strategy, water level, or mop repetitions) without
         starting a clean cycle.  Safe to call from any thread; does not block.
+
+        Returns True only if the MQTT client accepted the publish. That is
+        local transport acceptance, NOT confirmation that the robot applied it.
+
+        The cache is never written from here, even on success: HA asks the
+        robot for its preferences straight after, and only the robot's reply
+        updates what entities show. So a failed send leaves the old value, and
+        a successful one can't overwrite telemetry that arrived mid-send.
         """
+        with self._room_edit_lock:
+            return self._send_room_preferences(rooms)
+
+    def _send_room_preferences(self, rooms: list[list]) -> bool:
+        """Body of set_room_preferences(); caller holds _room_edit_lock."""
         try:
             map_id = int(self.state.get("persistentMapId", ""))
         except (TypeError, ValueError):
@@ -657,14 +724,41 @@ class DysonMqttClient:
         _LOGGER.debug(
             "[%s] Persisting room preferences (%d room(s))", self.serial, len(rooms)
         )
-        self._publish_jdm("service.set_preference", {
-            "map_id":          map_id,
-            "prefer_type":     1,
-            "room_preference": rooms,
-            "uv_switch":       uv_switch,
-        })
-        if self._cached_preference is not None:
-            self._cached_preference["room"] = deepcopy(rooms)
+        try:
+            accepted = self._publish_jdm("service.set_preference", {
+                "map_id":          map_id,
+                "prefer_type":     1,
+                "room_preference": rooms,
+                "uv_switch":       uv_switch,
+            })
+        except Exception:  # noqa: BLE001 — any transport failure means "not sent"
+            _LOGGER.exception("[%s] set_room_preferences: publish raised", self.serial)
+            return False
+        if not accepted:
+            _LOGGER.warning("[%s] set_room_preferences: publish rejected", self.serial)
+            return False
+
+        # Remember what we sent until the robot answers THIS refresh (matched
+        # by msgId - an older or app-originated reply doesn't count).
+        refresh_id = _rand_msg_id()
+        with self._preference_lock:
+            self._pending_rooms = deepcopy(rooms)
+            self._pending_refresh_id = refresh_id
+            self._pending_since = time.monotonic()
+        try:
+            requested = self._publish_raw(self._jdm_command_topic, {
+                "msgId": refresh_id, "version": "1.0.1",
+                "method": "service.get_preference",
+                "params": {"map_id": map_id}, "time": _now_iso(),
+            })
+        except Exception:  # noqa: BLE001 — the save itself was accepted
+            requested = False
+        if not requested:
+            # The setting was still sent; HA will show it after the next
+            # preference refresh (reconnect, map probe or app activity).
+            _LOGGER.warning("[%s] Room settings sent but the confirmation request "
+                            "failed; HA may show old values until the next refresh",
+                            self.serial)
         return True
 
     def save_room_settings(self, room_settings: dict[str, dict[str, str]]) -> bool:
@@ -672,27 +766,38 @@ class DysonMqttClient:
         if not isinstance(room_settings, dict) or not room_settings:
             _LOGGER.warning("[%s] No room settings were supplied", self.serial)
             return False
-        rooms = deepcopy(self.room_preferences)
-        if not rooms:
-            _LOGGER.warning("[%s] Cannot save room settings: preferences unavailable", self.serial)
-            return False
-        by_id = {str(room[0]): room for room in rooms if isinstance(room, list) and room}
-        for room_id, settings in room_settings.items():
-            room = by_id.get(str(room_id))
-            if room is None or len(room) < 7 or not isinstance(settings, dict) or not settings:
-                _LOGGER.warning("[%s] Invalid room settings for room ID %r", self.serial, room_id)
+
+        def change(rooms: list[list]) -> bool:
+            by_id = {str(room[0]): room for room in rooms if isinstance(room, list) and room}
+            for room_id, settings in room_settings.items():
+                room = by_id.get(str(room_id))
+                if room is None or len(room) < 7 or not isinstance(settings, dict) or not settings:
+                    _LOGGER.warning("[%s] Invalid room settings for room ID %r",
+                                    self.serial, room_id)
+                    return False
+                if not self._apply_room_settings(room, settings):
+                    return False
+            return True
+        return self._edit_rooms(change)
+
+    def _apply_room_settings(self, room: list, settings: dict) -> bool:
+        """Write label-valued settings into one room array; False if any is invalid.
+
+        Only keys/labels in _ROOM_SETTING_OPTIONS are accepted, so service-call
+        input can never write arbitrary values or indices into the array.
+        May partially modify ``room`` before failing — callers work on a copy.
+        """
+        for key, option in settings.items():
+            field = _ROOM_SETTING_OPTIONS.get(key)
+            if field is None or not isinstance(option, str):
+                _LOGGER.warning("[%s] Invalid room setting %r=%r", self.serial, key, option)
                 return False
-            for key, option in settings.items():
-                field = _ROOM_SETTING_OPTIONS.get(key)
-                if field is None or not isinstance(option, str):
-                    _LOGGER.warning("[%s] Invalid room setting %r=%r", self.serial, key, option)
-                    return False
-                index, option_values = field
-                if option not in option_values:
-                    _LOGGER.warning("[%s] Unsupported value for %s: %r", self.serial, key, option)
-                    return False
-                room[index] = option_values[option]
-        return self.set_room_preferences(rooms)
+            index, option_values = field
+            if option not in option_values:
+                _LOGGER.warning("[%s] Unsupported value for %s: %r", self.serial, key, option)
+                return False
+            room[index] = option_values[option]
+        return True
 
     # ── Single-room clean ─────────────────────────────────────────────────────
 
@@ -818,8 +923,9 @@ class DysonMqttClient:
                 # fields and any trailing fields returned by get_preference.
                 updated_rooms = deepcopy(rooms)
                 settings_by_id = room_settings or {}
+                selected_set = {str(room_id) for room_id in selected_room_ids}
                 for room in updated_rooms:
-                    enabled = str(room[0]) in {str(room_id) for room_id in selected_room_ids}
+                    enabled = str(room[0]) in selected_set
                     room[8] = int(enabled)
                     if enabled and mode is not None:
                         room[3] = mode
@@ -827,16 +933,8 @@ class DysonMqttClient:
                     if not isinstance(settings, dict):
                         _LOGGER.warning("[%s] Invalid room settings for room ID %r", self.serial, room[0])
                         return False
-                    for key, option in settings.items():
-                        field = _ROOM_SETTING_OPTIONS.get(key)
-                        if field is None or not isinstance(option, str):
-                            _LOGGER.warning("[%s] Invalid room setting %r=%r", self.serial, key, option)
-                            return False
-                        index, option_values = field
-                        if option not in option_values:
-                            _LOGGER.warning("[%s] Unsupported value for %s: %r", self.serial, key, option)
-                            return False
-                        room[index] = option_values[option]
+                    if not self._apply_room_settings(room, settings):
+                        return False
                 if set(settings_by_id) - {str(room[0]) for room in updated_rooms}:
                     _LOGGER.warning("[%s] Room settings refer to a missing room ID", self.serial)
                     return False
@@ -903,14 +1001,7 @@ class DysonMqttClient:
         # Single wildcard subscription covers every prefix (RB05, NROB, …).
         client.subscribe(f"+/{self.serial}/#", qos=0)
         self.request_current_state()
-        # Probe map IDs 0-3 at staggered intervals so rooms populate even
-        # when the robot omits persistentMapId from its idle CURRENT-STATE.
-        for _mid in range(4):
-            delay = _mid * 2.5  # 0 s, 2.5 s, 5 s, 7.5 s
-            if delay == 0:
-                self._probe_map_id(0)
-            else:
-                threading.Timer(delay, self._probe_map_id, args=(_mid,)).start()
+        self._schedule_map_probes()
         if self.on_connected:
             self.on_connected()
 
@@ -945,11 +1036,14 @@ class DysonMqttClient:
         topic = msg.topic
 
         # Auto-detect the real MQTT prefix from inbound robot messages.
+        # The new prefix is persisted to the config entry and used in every
+        # outbound topic, so only accept plain identifiers (no wildcards).
         parts = topic.split("/")
         if (
             len(parts) >= 2
             and parts[1] == self.serial
             and parts[0] != self._prefix
+            and re.fullmatch(MQTT_PREFIX_PATTERN, parts[0])
         ):
             _LOGGER.warning(
                 "[%s] Real MQTT prefix is '%s' (was '%s') — switching now",
@@ -960,14 +1054,12 @@ class DysonMqttClient:
                 self.on_prefix_changed(parts[0])
             self.request_current_state()
             self._preferences_fetched = False
-            for _mid in range(4):
-                delay = _mid * 2.5
-                if delay == 0:
-                    self._probe_map_id(0)
-                else:
-                    threading.Timer(delay, self._probe_map_id, args=(_mid,)).start()
+            self._schedule_map_probes()
 
-        _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
+        # json.dumps of large map/state payloads is costly; skip it unless
+        # debug logging is actually enabled.
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
 
         if topic.endswith("/status/jdm"):
             self._handle_jdm(data)
@@ -998,6 +1090,12 @@ class DysonMqttClient:
                         and str(data.get("msgId")) == self._preference_request_id):
                     self._preference_response = deepcopy(pref) if success else None
                     self._preference_ready.set()
+                if (self._pending_refresh_id is not None
+                        and str(data.get("msgId")) == self._pending_refresh_id):
+                    # The robot has answered our post-save refresh: from now on
+                    # edits build on what it reports, not on what we sent.
+                    self._pending_rooms = None
+                    self._pending_refresh_id = None
             if not success or not isinstance(pref.get("room"), list):
                 return
             n = len(pref.get("room", []))
@@ -1067,6 +1165,22 @@ class DysonMqttClient:
             except Exception:
                 _LOGGER.exception("[%s] Error in state callback", self.serial)
 
+    def _schedule_map_probes(self) -> None:
+        """Probe map IDs 0-3 at staggered intervals (0, 2.5, 5, 7.5 s).
+
+        Rooms then populate even when the robot omits persistentMapId from its
+        idle CURRENT-STATE. Timers are daemon threads so a pending probe never
+        delays Home Assistant shutdown.
+        """
+        for map_id in _PROBE_MAP_IDS:
+            delay = map_id * _PROBE_INTERVAL
+            if delay == 0:
+                self._probe_map_id(map_id)
+                continue
+            timer = threading.Timer(delay, self._probe_map_id, args=(map_id,))
+            timer.daemon = True
+            timer.start()
+
     def _probe_map_id(self, map_id: int) -> None:
         """Send service.get_preference for one map_id.
 
@@ -1086,13 +1200,7 @@ class DysonMqttClient:
             # Current map differs from probe target — cache is stale; fall
             # through to re-fetch so room entities show correct rooms.
         _LOGGER.debug("[%s] Probing map_id=%d for room preferences", self.serial, map_id)
-        self._publish_raw(self._jdm_command_topic, {
-            "msgId":   _rand_msg_id(),
-            "version": "1.0.1",
-            "method":  "service.get_preference",
-            "params":  {"map_id": map_id},
-            "time":    _now_iso(),
-        })
+        self._publish_jdm("service.get_preference", {"map_id": map_id})
 
     def _fetch_room_preferences(self) -> None:
         map_id = self.state.get("persistentMapId")
@@ -1105,8 +1213,9 @@ class DysonMqttClient:
 
     # ── Internal publish ──────────────────────────────────────────────────────
 
-    def _publish_jdm(self, method: str, params: dict) -> None:
-        self._publish_raw(self._jdm_command_topic, {
+    def _publish_jdm(self, method: str, params: dict) -> bool:
+        """Publish a JDM RPC call; True if paho accepted it (not robot confirmation)."""
+        return self._publish_raw(self._jdm_command_topic, {
             "msgId":   _rand_msg_id(),
             "version": "1.0.1",
             "method":  method,
@@ -1128,7 +1237,11 @@ class DysonMqttClient:
         body = json.dumps(payload)
         if self._verbose:
             _LOGGER.debug("[MQTT out] %s: %s", topic, body)
-        result = client.publish(topic, body, qos=0)
+        try:
+            result = client.publish(topic, body, qos=0)
+        except Exception:  # noqa: BLE001 — paho can raise on a closing socket
+            _LOGGER.exception("[%s] Publish raised, topic=%s", self.serial, topic)
+            return False
         if result.rc != 0:
             _LOGGER.warning(
                 "[%s] Publish failed (rc=%d) topic=%s", self.serial, result.rc, topic,
