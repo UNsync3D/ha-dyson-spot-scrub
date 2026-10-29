@@ -44,14 +44,15 @@ _LOGGER = logging.getLogger(__name__)
 
 API_HOST = "appapi.cp.dyson.com"
 
-# Identity: the MyDyson iOS app, exactly as captured with Proxyman (Aug 2026).
+# Identity: the MyDyson iOS app, exactly as captured with Proxyman
+# (27 Oct 2026, app 6.4.26420 - the App Store's current version then).
 # All three values below come from the SAME real request, so they agree with
 # each other: app version, app build (in the User-Agent) and iOS version.
-# Dyson's minimum supported app version was 5.0.21062 at the time, so this
-# older-than-current version is accepted. When refreshing, take all three
-# from one fresh capture - never mix a new version with an old User-Agent.
-MYDYSON_APP_VERSION = "6.4.26340"
-MYDYSON_USER_AGENT = "DysonLink/237306 CFNetwork/3896.100.1.2.1 Darwin/27.0.0"
+# Dyson's minimum supported app version was 5.0.21062. When refreshing, take
+# all three from one fresh capture - never mix a new version with an old
+# User-Agent.
+MYDYSON_APP_VERSION = "6.4.26420"
+MYDYSON_USER_AGENT = "DysonLink/242328 CFNetwork/3896.200.61 Darwin/27.2.0"
 
 _HEADERS = {
     "Content-Type":    "application/json",
