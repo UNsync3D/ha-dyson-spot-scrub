@@ -81,8 +81,8 @@ data:
 
 - Home Assistant **2024.1** or newer
 - The robot already registered in the **Dyson app**
-- A Dyson **bearer token** for your account (see [Getting a bearer token](#getting-a-bearer-token) below)
-- Your robot's **serial number** and **country code** (e.g. `AU`, `GB`, `US`, `DE`)
+- Your **Dyson account email and password**, with access to the email inbox for a one-time code — or, alternatively, a Dyson **bearer token** (see [Getting a bearer token](#getting-a-bearer-token))
+- Your Dyson account **country code** (e.g. `AU`, `GB`, `US`, `DE`); the token method also needs the robot's **serial number**
 
 ---
 
@@ -111,17 +111,36 @@ Restart Home Assistant.
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Dyson Spot+Scrub AI**
-3. Choose **Paste existing token**
-4. Enter your bearer token, robot serial number, and country code
-5. The integration will find your robot and create its entities
+3. Choose how to sign in:
+   - **Log in with Dyson account (email + OTP)** — see [Email login](#email-login) below
+   - **Enter a bearer token directly** — see [Getting a bearer token](#getting-a-bearer-token)
+4. The integration finds the robot(s) on your account and creates their entities
 
 > **Country code must match your Dyson account region.** Common codes: `AU`, `GB`, `US`, `DE`, `FR`, `JP`, `NL`.
+
+### Email login
+
+The integration signs in the same way the MyDyson iOS app does:
+
+1. Enter your Dyson account **email**, **password** and **country code**.
+2. The integration checks that your account is active and uses email codes, then Dyson emails you a **6-digit code**. If the account isn't reported as active, it stops here and no code is requested.
+3. Enter the code. Dyson checks your **password and the code together** at this step, then the integration fetches your robots and sets them up.
+
+Your password is only used for this sign-in and is not stored; Home Assistant keeps only the resulting token, as with the token method.
+
+**If the code is rejected:**
+
+- **Check your password first.** Dyson only checks the password at the last step, after the code has been emailed, and it gives the same rejection for a wrong password, a wrong code and a locked account.
+- The code screen then shows a **password** field. Correct the password there and resubmit the **same code** — no new email is needed. Leave the field blank to keep the password you entered before.
+- **After two rejections in a row, stop.** The integration pauses sign-in attempts for that email for 15 minutes, because repeated attempts can get a Dyson account temporarily locked. If codes keep being rejected with the right password, wait several hours or contact Dyson support rather than retrying.
+
+Logging in here doesn't sign you out of the MyDyson app: each login gets its own token. Questions and reports: [issue #25](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/25).
 
 ---
 
 ## Getting a bearer token
 
-The easiest way to get your Dyson bearer token is to intercept the Dyson app's network traffic using **Proxyman** on a Mac with your iPhone on the same Wi-Fi network. This takes about 5 minutes.
+Only needed if you choose the token method instead of [Email login](#email-login). The easiest way to get your Dyson bearer token is to intercept the Dyson app's network traffic using **Proxyman** on a Mac with your iPhone on the same Wi-Fi network. This takes about 5 minutes.
 
 ### Step 1 — Install Proxyman on your Mac
 
@@ -155,7 +174,7 @@ Download and install [Proxyman](https://proxyman.io) (free tier is sufficient). 
 
 ### Step 5 — Paste into Home Assistant
 
-Use this token in the **Paste existing token** step of the integration setup. Tokens are long-lived — you should only need to do this once.
+Use this token in the **Enter a bearer token directly** step of the integration setup. Tokens are long-lived — you should only need to do this once.
 
 > **After setup:** Remove the proxy from your iPhone's Wi-Fi settings so normal traffic isn't routed through your Mac.
 
@@ -163,7 +182,7 @@ Use this token in the **Paste existing token** step of the integration setup. To
 
 ## How it works
 
-1. **Authenticate**: your bearer token is stored in HA's config entry — your Dyson password is never stored.
+1. **Authenticate**: email login or a pasted token gives a bearer token, which is stored in HA's config entry — your Dyson password is never stored.
 2. **IoT credentials**: on each HA start the integration fetches short-lived MQTT credentials from Dyson's cloud for your specific device.
 3. **MQTT**: the robot is then controlled entirely over a direct MQTT-over-WebSocket connection. No further cloud calls are made during normal operation.
 4. **Auto-recovery**: if the MQTT connection drops, the integration automatically fetches fresh credentials and reconnects with exponential backoff (15 s → 30 s → 60 s → 120 s).
@@ -177,7 +196,7 @@ Make sure the folder is named exactly `dyson_spot_scrub` inside `custom_componen
 
 ### Bearer token is rejected
 - Make sure you copied the full token value — it should be 65+ characters ending in `-1` or similar
-- Tokens can expire if Dyson forces a re-login. Repeat the Proxyman steps to capture a fresh token, then re-enter it in the integration options
+- If a token stops working, sign in again with [Email login](#email-login), or capture a fresh token with Proxyman
 
 ### Floor map is blank or shows an error
 - The map is only populated after the robot has completed at least one cleaning session with room mapping enabled in the Dyson app
@@ -185,6 +204,9 @@ Make sure the folder is named exactly `dyson_spot_scrub` inside `custom_componen
 
 ### Robot shows as Unavailable
 The MQTT connection to Dyson's IoT backend dropped. The integration will reconnect automatically. If it stays unavailable, try reloading the integration from **Settings → Devices & Services**.
+
+### Email login code is rejected
+See [Email login](#email-login): check the password first, correct it on the code screen and resubmit the same code, and stop after two rejections.
 
 ### "Cannot connect" during setup
 Dyson's cloud API may be temporarily unavailable. Wait a few minutes and try again.
