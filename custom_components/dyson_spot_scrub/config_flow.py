@@ -1,8 +1,10 @@
 """Config flow for Dyson Spot+Scrub AI — v1.2."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+import time
 from typing import Any
 
 import voluptuous as vol
@@ -32,8 +34,11 @@ from .const import (
 )
 from .map_options import map_options
 from .dyson_api import (
-    authenticate_v1,
+    MYDYSON_APP_VERSION,
+    get_minimum_app_version,
+    get_user_status,
     initiate_v3_auth,
+    version_tuple,
     verify_v3_auth,
     get_devices,
     DysonAuthError,
@@ -41,6 +46,50 @@ from .dyson_api import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# The iOS app requests the code ~1.5-2 s after its user-status check.
+_USER_STATUS_PAUSE = 1.5
+
+# Login cool-down. verify answers HTTP 401 (empty HTML body) for a wrong code,
+# a wrong password AND a locked account, so a lock can't be detected, and every
+# further attempt while locked risks extending it. So after this many rejected
+# attempts in a row (or a 429), refuse to contact Dyson for this email for a while.
+# Module level so it survives closing and reopening the config flow; it resets
+# when Home Assistant restarts.
+_MAX_REJECTED_CODES = 2
+_LOCKOUT_SECONDS = 15 * 60
+_login_failures: dict[str, tuple[int, float]] = {}   # email -> (rejections, locked until)
+
+
+def _email_key(email: str) -> str:
+    return email.strip().lower()
+
+
+def _login_paused(email: str) -> bool:
+    """True while this email is in its cool-down."""
+    _, until = _login_failures.get(_email_key(email), (0, 0.0))
+    return time.monotonic() < until
+
+
+def _record_login_failure(email: str, error: str) -> str:
+    """Count a rejected code; returns the form error to show."""
+    key = _email_key(email)
+    count, _ = _login_failures.get(key, (0, 0.0))
+    if error == "rate_limited":
+        count = _MAX_REJECTED_CODES      # Dyson itself asked us to slow down
+    elif error == "invalid_otp":
+        count += 1
+    else:
+        return error                     # network/server errors don't count
+    if count >= _MAX_REJECTED_CODES:
+        _login_failures[key] = (0, time.monotonic() + _LOCKOUT_SECONDS)
+        return "too_many_attempts"
+    _login_failures[key] = (count, 0.0)
+    return error
+
+
+def _clear_login_failures(email: str) -> None:
+    _login_failures.pop(_email_key(email), None)
 
 
 # ── Schema helpers ─────────────────────────────────────────────────────────────
@@ -55,8 +104,19 @@ def _login_schema(default_country: str) -> vol.Schema:
     )
 
 
-def _otp_schema() -> vol.Schema:
-    return vol.Schema({vol.Required("otp_code"): str})
+def _otp_schema(ask_password: bool = False) -> vol.Schema:
+    """The code form; after a rejection it also offers the password.
+
+    Dyson only checks the password at verify (the earlier steps send just the
+    email), and a wrong password gets the same 401 as a wrong code. The iOS app
+    lets the user correct the password and retry with the same challenge, so
+    no new code is emailed; this does the same. Left blank, the password from
+    the first step is kept.
+    """
+    fields: dict = {vol.Required("otp_code"): str}
+    if ask_password:
+        fields[vol.Optional("password")] = str
+    return vol.Schema(fields)
 
 
 def _token_schema(default_country: str) -> vol.Schema:
@@ -111,6 +171,7 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._email:        str = ""
         self._password:     str = ""
         self._challenge_id: str = ""
+        self._verify_rejected: bool = False   # show the password field again
         self._robots:       list[dict] = []
         self._selected_device: dict = {}
 
@@ -119,30 +180,47 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Route directly to token entry.
+        """Choose between email + OTP login and pasting a bearer token.
 
-        NOTE: Email/password login is temporarily disabled — the OTP auth flow
-        has not yet been confirmed working end-to-end. Enabling it prematurely
-        risks rate-limiting users' Dyson accounts. Re-enable the menu below
-        once a successful curl test has been completed.
+        TEST BRANCH: email login re-enabled for a single supervised attempt.
+        It has not yet been confirmed end to end. Repeated failed attempts can
+        get a Dyson account rate-limited, so the flow makes one request per
+        step and reports 429 explicitly.
         """
-        return await self.async_step_token()
-
-        # Disabled until OTP flow is confirmed working:
-        # return self.async_show_menu(
-        #     step_id="user",
-        #     menu_options={
-        #         "login": "Log in with Dyson account (email + OTP)",
-        #         "token": "Enter a bearer token directly",
-        #     },
-        # )
+        return self.async_show_menu(
+            step_id="user",
+            menu_options={
+                "login": "Log in with Dyson account (email + OTP)",
+                "token": "Enter a bearer token directly",
+            },
+        )
 
     # ── Step 1a: email + password login ───────────────────────────────────────
+
+    @staticmethod
+    def _auth_error(exc: Exception, rejected: str) -> str:
+        """Map a login failure to a form error using its HTTP status."""
+        status = getattr(exc, "status", None)
+        if status in (400, 401, 403):
+            return rejected
+        if status == 429:
+            return "rate_limited"
+        return "cannot_connect"
 
     async def async_step_login(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Accept email and password, try v1 then v3 OTP."""
+        """Accept email, password and country, then request an emailed OTP.
+
+        Mirrors the MyDyson iOS app's captured sequence (Aug 2026):
+          1. GET  provisioningservice/application/ios/version (minimum version)
+          2. POST userregistration/email/userstatus  {"email"}
+          3. POST userregistration/email/auth        {"email"}  -> challengeId
+          4. POST userregistration/email/verify      (async_step_otp)
+        Steps 1-2 send no password and trigger no email. If step 2 shows the
+        account isn't ACTIVE or doesn't use EMAIL_PWD_2FA, we stop BEFORE
+        requesting a code. The legacy v1 password login is not attempted.
+        """
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -154,35 +232,74 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._password = password
             self._country  = country
 
-            try:
-                token = await authenticate_v1(email, password, country)
-                self._token = token
-                return await self._fetch_robots()
-            except DysonAuthError:
-                pass
-            except Exception as exc:
-                _LOGGER.warning("v1 auth error: %s", exc)
-
-            try:
-                challenge_id = await initiate_v3_auth(email, country)
-                self._challenge_id = challenge_id
-                return await self.async_step_otp()
-            except DysonAuthError as exc:
-                _LOGGER.warning("v3 auth initiation failed: %s", exc)
-                msg = str(exc).lower()
-                if "401" in msg or "unauthori" in msg:
-                    errors["base"] = "invalid_auth"
-                else:
+            if not _valid_country(country):
+                errors["base"] = "invalid_country"
+            elif _login_paused(email):
+                # Don't request another code (or check status) mid cool-down.
+                errors["base"] = "too_many_attempts"
+            else:
+                errors = await self._pre_login_checks(email, country)
+            if not errors:
+                try:
+                    self._challenge_id = await initiate_v3_auth(email, country)
+                    _LOGGER.debug("OTP requested; waiting for the emailed code")
+                    return await self.async_step_otp()
+                except (DysonAuthError, DysonApiError) as exc:
+                    errors["base"] = self._auth_error(exc, "invalid_auth")
+                    _LOGGER.warning("OTP request failed (HTTP %s)",
+                                    getattr(exc, "status", None))
+                except Exception as exc:  # noqa: BLE001 — network etc.
+                    _LOGGER.warning("OTP request failed: %s", type(exc).__name__)
                     errors["base"] = "cannot_connect"
-            except Exception as exc:
-                _LOGGER.exception("Unexpected login error: %s", exc)
-                errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="login",
             data_schema=_login_schema(_ha_country(self.hass)),
             errors=errors,
         )
+
+    async def _pre_login_checks(self, email: str, country: str) -> dict[str, str]:
+        """The app's version and user-status checks; errors stop the login.
+
+        A failed version check is not fatal (the app treats it as a startup
+        check). A failed or unexpected user status IS: requesting a code for
+        an account Dyson doesn't report as ACTIVE + EMAIL_PWD_2FA risks the
+        same kind of block the maintainer's account suffered.
+        """
+        try:
+            minimum = await get_minimum_app_version()
+            _LOGGER.debug("Dyson minimum app version %s (we report %s)",
+                          minimum, MYDYSON_APP_VERSION)
+            if version_tuple(minimum) > version_tuple(MYDYSON_APP_VERSION):
+                _LOGGER.warning("Dyson now requires app version %s; integration "
+                                "reports %s - not requesting a code", minimum,
+                                MYDYSON_APP_VERSION)
+                return {"base": "app_version_unsupported"}
+        except Exception as exc:  # noqa: BLE001 — informational check only
+            _LOGGER.debug("App version check failed (HTTP %s); continuing",
+                          getattr(exc, "status", type(exc).__name__))
+
+        try:
+            status = await get_user_status(email, country)
+        except (DysonAuthError, DysonApiError) as exc:
+            _LOGGER.warning("User status check failed (HTTP %s)",
+                            getattr(exc, "status", None))
+            return {"base": self._auth_error(exc, "invalid_auth")}
+        except Exception as exc:  # noqa: BLE001 — network etc.
+            _LOGGER.warning("User status check failed: %s", type(exc).__name__)
+            return {"base": "cannot_connect"}
+
+        account, method = status.get("accountStatus"), status.get("authenticationMethod")
+        _LOGGER.debug("Dyson account status %s, method %s", account, method)
+        if account != "ACTIVE":
+            _LOGGER.warning("Dyson reports account status %r - not requesting a code", account)
+            return {"base": "account_not_active"}
+        if method != "EMAIL_PWD_2FA":
+            _LOGGER.warning("Dyson reports sign-in method %r - not requesting a code", method)
+            return {"base": "unsupported_auth_method"}
+
+        await asyncio.sleep(_USER_STATUS_PAUSE)
+        return {}
 
     # ── Step 1b: OTP verification ─────────────────────────────────────────────
 
@@ -192,31 +309,39 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Accept the 6-digit OTP code and verify it."""
         errors: dict[str, str] = {}
 
-        if user_input is not None:
-            otp_code = user_input["otp_code"].strip()
+        if user_input is not None and _login_paused(self._email):
+            errors["base"] = "too_many_attempts"
+        elif user_input is not None:
+            otp_code = re.sub(r"\s+", "", user_input["otp_code"])
+            if user_input.get("password"):
+                self._password = user_input["password"]   # corrected password
             try:
+                # Same country as the OTP request (it previously defaulted to GB).
                 token = await verify_v3_auth(
                     self._email,
                     self._password,
                     self._challenge_id,
                     otp_code,
+                    country=self._country,
                 )
                 self._token = token
+                self._password = ""   # no longer needed; don't keep it in memory
+                _clear_login_failures(self._email)
                 return await self._fetch_robots()
-            except DysonAuthError as exc:
-                _LOGGER.warning("OTP verification failed: %s", exc)
-                msg = str(exc).lower()
-                if "401" in msg or "unauthori" in msg:
-                    errors["base"] = "invalid_otp"
-                else:
-                    errors["base"] = "cannot_connect"
-            except Exception as exc:
-                _LOGGER.exception("Unexpected OTP error: %s", exc)
+            except (DysonAuthError, DysonApiError) as exc:
+                errors["base"] = _record_login_failure(
+                    self._email, self._auth_error(exc, "invalid_otp"))
+                if errors["base"] in ("invalid_otp", "too_many_attempts"):
+                    self._verify_rejected = True
+                _LOGGER.warning("OTP verification failed (HTTP %s)",
+                                getattr(exc, "status", None))
+            except Exception as exc:  # noqa: BLE001 — network etc.
+                _LOGGER.warning("OTP verification failed: %s", type(exc).__name__)
                 errors["base"] = "cannot_connect"
 
         return self.async_show_form(
             step_id="otp",
-            data_schema=_otp_schema(),
+            data_schema=_otp_schema(ask_password=self._verify_rejected),
             errors=errors,
             description_placeholders={"email": self._email},
         )

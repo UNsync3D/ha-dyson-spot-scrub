@@ -245,6 +245,8 @@ class ConfigFlowValidationTests(unittest.TestCase):
             "homeassistant.helpers": module("homeassistant.helpers", selector=selectors),
             "sec_flow.dyson_api": module("sec_flow.dyson_api",
                 authenticate_v1=None, initiate_v3_auth=None, verify_v3_auth=None,
+                MYDYSON_APP_VERSION="0", get_minimum_app_version=None,
+                get_user_status=None, version_tuple=None,
                 get_devices=self.get_devices, DysonAuthError=Exception, DysonApiError=ApiError),
         }))
         self.flow = importlib.import_module("sec_flow.config_flow")

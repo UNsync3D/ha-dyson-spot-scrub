@@ -44,16 +44,29 @@ _LOGGER = logging.getLogger(__name__)
 
 API_HOST = "appapi.cp.dyson.com"
 
-# Mimic the MyDyson mobile app; Dyson's API rejects unknown clients.
+# Identity: the MyDyson iOS app, exactly as captured with Proxyman
+# (27 Oct 2026, app 6.4.26420 - the App Store's current version then).
+# All three values below come from the SAME real request, so they agree with
+# each other: app version, app build (in the User-Agent) and iOS version.
+# Dyson's minimum supported app version was 5.0.21062. When refreshing, take
+# all three from one fresh capture - never mix a new version with an old
+# User-Agent.
+MYDYSON_APP_VERSION = "6.4.26420"
+MYDYSON_USER_AGENT = "DysonLink/242328 CFNetwork/3896.200.61 Darwin/27.2.0"
+
 _HEADERS = {
-    "Content-Type":            "application/json",
-    "User-Agent":              "Dalvik/2.1.0 (Linux; U; Android 11; Build/RQ3A.210905.001)",
-    "Accept":                  "application/json, text/plain, */*",
-    "Accept-Language":         "en-AU,en;q=0.9",
-    "X-App-Version":           "6.4.26341",
-    "X-Platform":              "ios",
-    "X-Dyson-LinkApp-Version": "6.4.26340",
+    "Content-Type":    "application/json",
+    "User-Agent":      MYDYSON_USER_AGENT,
+    "Accept":          "application/json",
+    "Accept-Language": "en-AU,en;q=0.9",
+    "X-App-Version":   MYDYSON_APP_VERSION,
+    "X-Platform":      "ios",
 }
+# The app's login requests (userstatus captured) also send this.
+_LOGIN_HEADERS = {**_HEADERS, "Cache-Control": "no-cache"}
+
+# Platform segment of the app's startup version check (iOS app: lowercase).
+_APP_PLATFORM = "ios"
 
 # Response bodies are echoed into exception messages (and therefore HA logs).
 #
@@ -103,7 +116,16 @@ def _scrub_text(text: str) -> str:
 
 
 class DysonAuthError(Exception):
-    """Raised when authentication with Dyson's API fails."""
+    """Raised when authentication with Dyson's API fails.
+
+    ``status`` is the HTTP status (None for non-HTTP failures such as an
+    unparseable 200 reply), so the login flow can tell a wrong password or
+    OTP (401/403) from rate limiting (429) or an outage.
+    """
+
+    def __init__(self, message: str, status: int | None = None) -> None:
+        super().__init__(message)
+        self.status = status
 
 
 class DysonApiError(Exception):
@@ -221,10 +243,11 @@ async def _json(resp: aiohttp.ClientResponse) -> Any:
     """Parse JSON from a response, raising DysonAuthError on empty/invalid body."""
     try:
         return await resp.json(content_type=None)
-    except (json.JSONDecodeError, aiohttp.ContentTypeError) as exc:
+    except (ValueError, aiohttp.ContentTypeError) as exc:  # JSONDecodeError is a ValueError
         body = await resp.text()
         raise DysonAuthError(
-            f"Non-JSON response (HTTP {resp.status}): {_snippet(body)}"
+            f"Non-JSON response (HTTP {resp.status}): {_snippet(body)}",
+            status=resp.status,
         ) from exc
 
 
@@ -263,6 +286,7 @@ async def _request(
     required_key: str | None = None,
     rate_limited: bool = False,
     error: type[Exception] = DysonApiError,
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, Any]:
     """Perform one API call and return (status, parsed JSON).
 
@@ -276,7 +300,8 @@ async def _request(
     error:        exception class raised on failure.
     """
     url = f"https://{API_HOST}{path}"
-    headers = _auth_headers(token) if token else _HEADERS
+    if headers is None:
+        headers = _auth_headers(token) if token else _HEADERS
     kwargs: dict[str, Any] = {"headers": headers}
     if params:
         kwargs["params"] = params
@@ -286,6 +311,10 @@ async def _request(
         # getattr keeps the call shape (session.get / .post / .put) that the
         # offline tests mock.
         async with getattr(http, method.lower())(url, **kwargs) as resp:
+            # Status and content type only - never the body, query or headers,
+            # which can carry credentials. Enough to diagnose login problems.
+            _LOGGER.debug("%s: HTTP %s (%s)", label, resp.status,
+                          resp.headers.get("Content-Type", "no content type"))
             if rate_limited and resp.status == 429:
                 retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
                 raise DysonRateLimitError(
@@ -306,9 +335,7 @@ async def _request(
                 # status-carrying error below is always the one raised.
                 data = await _error_body(resp)
             message = f"{label} failed (HTTP {resp.status}): {_snippet(data)}"
-            if issubclass(error, DysonApiError):
-                raise error(message, status=resp.status)
-            raise error(message)
+            raise error(message, status=resp.status)
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -327,6 +354,43 @@ async def authenticate_v1(email: str, password: str, country: str = "GB") -> str
     return _basic_token(data["Account"], data["Password"])
 
 
+def version_tuple(version: str) -> tuple[int, ...]:
+    """'6.4.26420' -> (6, 4, 26420). Non-numeric parts count as 0."""
+    return tuple(int(p) if p.isdigit() else 0 for p in str(version).strip().split("."))
+
+
+async def get_minimum_app_version(platform: str = _APP_PLATFORM) -> str:
+    """The app's startup check: minimum supported MyDyson app version.
+
+    GET /v1/provisioningservice/application/ios/version, unauthenticated
+    here (the captured app call carried a token from a previous session).
+    The iOS app makes it before logging in; it answered "5.0.21062" in
+    Aug 2026, i.e. a minimum, not the latest version.
+    """
+    _, data = await _request(
+        "GET", f"/v1/provisioningservice/application/{_seg(platform)}/version",
+        headers=_LOGIN_HEADERS, label="App version check", expect=str,
+    )
+    return data
+
+
+async def get_user_status(email: str, country: str = "GB") -> dict[str, Any]:
+    """Account status check the app makes immediately before requesting a code.
+
+    POST /v3/userregistration/email/userstatus?country=XX  {"email": ...}
+    Captured reply: {"accountStatus": "ACTIVE",
+                     "authenticationMethod": "EMAIL_PWD_2FA"}
+    Sends no OTP and no password.
+    """
+    _, data = await _request(
+        "POST", "/v3/userregistration/email/userstatus",
+        params={"country": country}, json_body={"email": email},
+        headers=_LOGIN_HEADERS, label="User status check",
+        required_key="accountStatus", error=DysonAuthError,
+    )
+    return data
+
+
 async def initiate_v3_auth(email: str, country: str = "GB") -> str:
     """Start v3 OTP flow. Returns challengeId (OTP email sent to user).
 
@@ -336,7 +400,7 @@ async def initiate_v3_auth(email: str, country: str = "GB") -> str:
     _, data = await _request(
         "POST", "/v3/userregistration/email/auth",
         params={"country": country, "culture": f"en-{country}"},
-        json_body={"email": email},
+        json_body={"email": email}, headers=_LOGIN_HEADERS,
         label="v3 auth initiation", required_key="challengeId",
         error=DysonAuthError,
     )
@@ -357,7 +421,7 @@ async def verify_v3_auth(
             "challengeId": challenge_id,
             "otpCode": otp_code,
         },
-        label="v3 OTP verification", error=DysonAuthError,
+        headers=_LOGIN_HEADERS, label="v3 OTP verification", error=DysonAuthError,
     )
     if data.get("token"):
         return data["token"]

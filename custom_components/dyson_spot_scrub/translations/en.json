@@ -22,7 +22,8 @@
         "title": "One-Time Passcode",
         "description": "A 6-digit code was sent to **{email}**. Enter it below.",
         "data": {
-          "otp_code": "OTP code"
+          "otp_code": "OTP code",
+          "password": "Password (only if correcting it)"
         }
       },
       "token": {
@@ -51,10 +52,15 @@
     "error": {
       "cannot_connect":  "Could not reach Dyson's servers. Check your internet connection.",
       "invalid_auth":    "Invalid email or password. Please check your credentials.",
-      "invalid_otp":     "The OTP code was incorrect or has expired. Please try again.",
+      "invalid_otp":     "Dyson rejected the code or password. Check both (you can correct the password below without requesting a new code) and try once more. If it is rejected again, stop: Dyson gives the same answer for a locked account, and repeated attempts can extend a lock.",
       "serial_not_found": "That serial number was not found in your Dyson account.",
       "invalid_serial":   "The serial number contains invalid characters. Use letters, digits and hyphens only.",
-      "invalid_country":  "Enter a two-letter country code, e.g. GB or AU."
+      "invalid_country":  "Enter a two-letter country code, e.g. GB or AU.",
+      "rate_limited":     "Dyson is limiting login attempts for this account. Wait a while before trying again rather than retrying straight away.",
+      "account_not_active": "Dyson reports this account is not active, so no login code was requested. Check the account in the MyDyson app.",
+      "unsupported_auth_method": "This Dyson account uses a sign-in method the integration doesn't support yet. No login code was requested; use a bearer token instead.",
+      "app_version_unsupported": "Dyson now requires a newer MyDyson app version than this integration reports. No login code was requested; the integration needs updating.",
+      "too_many_attempts": "Login is paused for 15 minutes after two rejected attempts, to protect your Dyson account. If attempts keep being rejected with the right code and password, Dyson may have locked the account: stop and wait several hours, or contact Dyson support, rather than retrying."
     }
   },
   "services": {
