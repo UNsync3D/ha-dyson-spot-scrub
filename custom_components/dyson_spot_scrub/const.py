@@ -13,20 +13,21 @@ MAP_APPEARANCE_DEFAULTS = {
     "map_combined_color": [192, 132, 252],
     "map_path_width": 3,
     "map_glow_width": 6,
-    # Off = monochrome (white walls, grey floor outlines, white labels).
-    # On = each room's floor outline, label and legend swatch get a colour,
-    # fixed by room ID. Walls stay white; path colours are unaffected.
+    # Off = monochrome. On = each room's floor, outline, label and legend
+    # swatch get a colour, fixed by map ID and room ID. Walls are white with
+    # room colours on; path colours are unaffected.
     "map_room_colors": False,
+    # Like the MyDyson app: reachable floor dark, the rest grey, grey walls.
     "map_floor_fill": True,
 }
 MAP_VISIBILITY_DEFAULTS = {
-    "map_show_furniture": True,
+    "map_show_furniture": False,   # the floor fill shows furniture as grey
     "map_show_room_names": True,
     "map_show_room_areas": True,
     "map_show_legend": False,
     "map_show_status_areas": False,
     "map_show_perimeter": True,
-    "map_show_visited_paths": True,
+    "map_show_visited_paths": False,   # the floor fill shows the same shape
     "map_show_grid": False,
     "map_show_dock": True,
     "map_show_restrictions": True,

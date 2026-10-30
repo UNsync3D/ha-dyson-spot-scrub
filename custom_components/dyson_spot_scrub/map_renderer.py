@@ -246,6 +246,7 @@ def _render(
 
     # ── 4. Floor fill (option map_floor_fill) ─────────────────────────────────
     room_colors = options["map_room_colors"]
+    map_id = map_data.get("id")
     if options["map_floor_fill"]:
         # Like the MyDyson app: the floor the robot can reach dark, the rest
         # of the room lighter, so furniture shows as grey blocks.
@@ -256,7 +257,7 @@ def _render(
         for z in zones:
             visited = [_pt(p) for p in z.get("visited") or []]
             if len(visited) >= 3:
-                fill = (_tint(FLOOR_FILL, _room_color(z.get("id")), 0.22)
+                fill = (_tint(FLOOR_FILL, _room_color(z.get("id"), map_id), 0.22)
                         if room_colors else FLOOR_FILL)
                 _poly_alpha(img, [txy(p) for p in visited], fill, (0, 0, 0, 0))
 
@@ -273,7 +274,7 @@ def _render(
         if options["map_show_visited_paths"] and len(visited) > 1:
             draw = ImageDraw.Draw(img)
             if room_colors:
-                outline_col, outline_w = _room_color(z.get("id")) + (220,), 2
+                outline_col, outline_w = _room_color(z.get("id"), map_id) + (220,), 2
             else:
                 outline_col, outline_w = ZONE_VISITED, 1
             vpts = [_pt(p) for p in visited]
@@ -299,8 +300,10 @@ def _render(
         for z in zones:
             for kind, seg_start, seg_end in _outline_segments(z):
                 (shared if kind == 1 else walls).append((seg_start, seg_end))
-        wall_col, divider_col = ((APP_WALL, APP_DIVIDER) if options["map_floor_fill"]
-                                 else (WALL, DIVIDER))
+        # App grey with the floor fill; white otherwise, and with room
+        # colours on (white walls keep the coloured rooms easy to read).
+        app_grey = options["map_floor_fill"] and not room_colors
+        wall_col, divider_col = (APP_WALL, APP_DIVIDER) if app_grey else (WALL, DIVIDER)
         merged_walls = _merge_segments(walls)
         for seg_start, seg_end in _merge_segments(shared):
             for part in _subtract_segments((seg_start, seg_end), merged_walls):
@@ -381,14 +384,14 @@ def _render(
         name = (z.get("name") or "").upper()
         label_col, area_col = ZONE_LABEL, area_label_col
         if options["map_room_colors"]:
-            label_col = _room_color(z.get("id")) + (255,)
-            area_col = _room_color(z.get("id")) + (190,)
+            label_col = _room_color(z.get("id"), map_id) + (255,)
+            area_col = _room_color(z.get("id"), map_id) + (190,)
         if options["map_show_room_names"]:
             _draw_centered_text(draw, lx, ly - 12, name, font_l, label_col)
         if options["map_show_room_areas"]:
             _draw_area_label(draw, lx, ly + 2, z.get("area", 0), font_s, area_col)
     if options["map_show_legend"]:
-        _draw_legend(img, zones, font_s, options["map_room_colors"])
+        _draw_legend(img, zones, font_s, options["map_room_colors"], map_id)
 
     # ── 11. Serialise ─────────────────────────────────────────────────────────
     buf = io.BytesIO()
@@ -431,7 +434,7 @@ def _draw_grid(img, tx, ty, min_x, max_x, min_y, max_y):
     img.alpha_composite(overlay)
 
 
-def _draw_legend(img, zones, font, room_colors=False):
+def _draw_legend(img, zones, font, room_colors=False, map_id=None):
     """Place labels inside the existing image; never alter overlay alignment."""
     draw = ImageDraw.Draw(img)
     y = 14
@@ -439,7 +442,7 @@ def _draw_legend(img, zones, font, room_colors=False):
         if y + 18 > img.height:
             break
         if room_colors:
-            color = _room_color(zone.get("id"))
+            color = _room_color(zone.get("id"), map_id)
         else:
             color = STATUS_COLORS.get(zone.get("cleanStatus"), ZONE_VISITED)
         draw.rectangle((12, y, 20, y + 8), fill=color[:3] + (255,))
@@ -451,16 +454,20 @@ def _draw_legend(img, zones, font, room_colors=False):
         y += 18
 
 
-def _room_color(room_id: Any) -> tuple[int, int, int]:
-    """A room's colour, fixed by its ID (Dyson numbers rooms 10, 11, 12 ...).
+def _room_color(room_id: Any, map_id: Any = None) -> tuple[int, int, int]:
+    """A room's colour, fixed by its map ID and room ID.
 
-    Consecutive IDs get different colours; non-numeric IDs are hashed.
+    Dyson numbers rooms 10, 11, 12 ... on every map, so the map ID shifts the
+    palette: rooms on one map keep different colours, and two maps don't
+    share the same colour scheme. Non-numeric IDs are hashed.
     """
-    try:
-        index = int(str(room_id))
-    except (TypeError, ValueError):
-        index = sum(ord(c) * 31 ** i for i, c in enumerate(str(room_id)))
-    return ROOM_PALETTE[index % len(ROOM_PALETTE)]
+    def number(value: Any) -> int:
+        try:
+            return int(str(value))
+        except (TypeError, ValueError):
+            return sum(ord(c) * 31 ** i for i, c in enumerate(str(value)))
+    offset = number(map_id) if map_id is not None else 0
+    return ROOM_PALETTE[(number(room_id) + offset) % len(ROOM_PALETTE)]
 
 
 def _merge_segments(segments: list) -> list:

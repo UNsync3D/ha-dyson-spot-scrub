@@ -119,7 +119,7 @@
               "map_path_width": "Line width in source-image pixels. Dashboard scaling affects its displayed size.",
               "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable.",
               "map_floor_fill": "Shade each room like the MyDyson app: the floor the robot can reach is dark, and furniture and other areas it can't reach are grey.",
-              "map_room_colors": "Give each room its own color for its floor outline, name, area and legend entry. Walls stay white and cleaning-path colors are unchanged. Off shows every room in white and grey."
+              "map_room_colors": "Give each room its own color for its floor, outline, name, area and legend entry, fixed by map and room. Walls are white with this on, and cleaning-path colors are unchanged. Off shows every room in grey."
             }
           },
           "visibility_settings_section": {

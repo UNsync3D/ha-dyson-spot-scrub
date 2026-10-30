@@ -142,9 +142,31 @@ class FloorFillTests(unittest.TestCase):
         self.assertNotEqual(floor, renderer.FLOOR_FILL)
         self.assertEqual(floor, renderer._tint(renderer.FLOOR_FILL, renderer._room_color("10"), 0.22))
 
-    def test_room_colour_follows_the_room_id(self):
-        self.assertEqual(renderer._room_color("10"), renderer._room_color(10))
-        self.assertNotEqual(renderer._room_color("10"), renderer._room_color("11"))
+    def test_room_colour_follows_the_map_and_room_id(self):
+        self.assertEqual(renderer._room_color("10", "1792911875"),
+                         renderer._room_color(10, 1792911875))
+        self.assertNotEqual(renderer._room_color("10", "1"), renderer._room_color("11", "1"))
+        self.assertNotEqual(renderer._room_color("10", "1"), renderer._room_color("10", "2"))
+
+    def test_default_is_the_app_look(self):
+        """Fill on; outlines and furniture off (the fill already shows both)."""
+        visibility = constants.MAP_VISIBILITY_DEFAULTS
+        self.assertFalse(visibility["map_show_visited_paths"])
+        self.assertFalse(visibility["map_show_furniture"])
+        data = self.room_with_floor()
+        data["furniture"] = [{"points": [{"x": 1.5, "y": 1.5}, {"x": 2.5, "y": 1.5},
+                                         {"x": 2.5, "y": 2.5}, {"x": 1.5, "y": 2.5}]}]
+        png = renderer.render_map(data, None, options={"map_show_labels": False},
+                                  raise_errors=True)
+        img = Image.open(io.BytesIO(png)).convert("RGBA")
+        self.assertEqual(pixel(img, 2, 2, (0, 4)), renderer.FLOOR_FILL, "no furniture box")
+        self.assertEqual(pixel(img, 2, 1, (0, 4)), renderer.FLOOR_FILL, "no outline")
+        self.assertEqual(pixel(img, 2, 0, (0, 4)), renderer.APP_WALL)
+
+    def test_walls_stay_white_with_room_colours(self):
+        img = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
+                     map_show_labels=False)
+        self.assertEqual(pixel(img, 2, 0, (0, 4)), renderer.WALL)
 
     def test_four_room_capture_like_the_app(self):
         img = render(json.loads(FOUR_ROOMS.read_text()), map_floor_fill=True,
