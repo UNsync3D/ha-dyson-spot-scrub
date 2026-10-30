@@ -87,7 +87,10 @@ DEFAULT_MODE = MODE_VACUUM
 # "804" = Spot+Scrub AI (confirmed from live manifest, Aug 2026)
 # "RB0" = other robot vacuum family
 # "276", "277" = older robot models
-ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804")
+# "914" = Dyson R2 Nurovi Wash+Dry (model RB07-CC, MQTT prefix RB07), from an
+#         owner's manifest in thoukydides/matterbridge-dyson-robot#50. Listed so
+#         setup finds it; R2 support is not confirmed yet (issue #32).
+ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804", "914")
 
 # Dock states during which a new station action (empty bin / wash mop) must
 # not be sent — the dock is already running one.

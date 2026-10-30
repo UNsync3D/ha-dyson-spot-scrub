@@ -332,6 +332,17 @@ class OtpLoginTests(unittest.TestCase):
         self.assertNotIn("654321", text)
         self.assertIn("HTTP 401", text)
 
+    def test_nurovi_r2_is_found_at_setup(self):
+        """Dyson R2 Nurovi Wash+Dry: product type 914, MQTT prefix RB07 (#32)."""
+        r2 = {"Serial": "XXX-XX-XXX0000X", "ProductType": "914", "Name": "R2",
+              "mqttRootTopicLevel": "RB07"}
+        self.assertTrue(self.flow_module._is_robot(r2))
+        self.assertTrue(self.flow_module._is_robot(ROBOT))
+        self.assertFalse(self.flow_module._is_robot({"ProductType": "438"}))  # a purifier
+        result = self.flow._create_entry(r2)
+        self.assertEqual(result["data"]["mqtt_prefix"], "RB07")
+        self.assertEqual(result["data"]["product_type"], "914")
+
 
 if __name__ == "__main__":
     unittest.main()
