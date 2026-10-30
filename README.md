@@ -4,6 +4,20 @@ A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum
 
 ---
 
+## Dashboard card: Dyson Cleaning Planner Card
+
+This integration and **[FutuRazor's Dyson Cleaning Planner Card](https://github.com/FutuRazor/dyson-cleaning-planner-card)** are designed to work together. The integration connects Home Assistant to your robot and provides its entities and actions; the card turns them into one dashboard view built for the Spot+Scrub AI:
+
+- **Plan a clean:** pick rooms, choose each room's settings and start, all in one place.
+- **Follow the session:** see the cleaning status, the selected rooms and the live map.
+- **No YAML needed:** select your Dyson vacuum in the card editor, and its rooms and supported controls are detected automatically.
+
+The card needs **v1.5.0 or newer** of this integration. Install it through HACS as a custom repository (type **Dashboard**); the [card's README](https://github.com/FutuRazor/dyson-cleaning-planner-card#installation) has the steps. You can also [try the interactive preview](https://futurazor.github.io/dyson-cleaning-planner-card/preview/index.html), which uses simulated data.
+
+The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRazor)**, who has also contributed much of this integration: the station controls, consumable sensors, mop drying controls, start readiness checks, map display options and card actions, along with extensive hardware testing, MQTT captures and code reviews. Thank you, FutuRazor! Please report card issues in the [card's repository](https://github.com/FutuRazor/dyson-cleaning-planner-card/issues).
+
+---
+
 ## Features
 
 | Entity | Type | Notes |
