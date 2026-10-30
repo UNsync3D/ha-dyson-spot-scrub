@@ -1,9 +1,12 @@
-"""Walls on the HA map: presentation type 0 is the wall, of any length.
+"""Walls on the HA map: presentation types 0 and 2 are walls, of any length.
 
 Before this change the renderer dropped every presentation segment longer
 than 1.5 m, so most walls never appeared. Type meanings were confirmed by
 splitting a room in the MyDyson app (fixtures/map_downstairs_split.json):
-the split line appears as type 1 in both rooms.
+the split line appears as type 1 in both rooms. A four-room capture
+(fixtures/map_downstairs_4rooms.json) and the MyDyson app's own drawing of it
+showed type 2 is a wall between two rooms and type 1 an open boundary, which
+the app draws dashed.
 Run: python -m unittest discover -s tests -v
 """
 import importlib
@@ -18,10 +21,12 @@ from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1] / "custom_components/dyson_spot_scrub"
 FIXTURE = Path(__file__).resolve().parent / "fixtures/map_downstairs_split.json"
+FOUR_ROOMS = Path(__file__).resolve().parent / "fixtures/map_downstairs_4rooms.json"
 package = ModuleType("walls_integration")
 package.__path__ = [str(ROOT)]
 sys.modules[package.__name__] = package
 renderer = importlib.import_module(package.__name__ + ".map_renderer")
+constants = importlib.import_module(package.__name__ + ".const")
 
 SCALE, PAD, MARGIN = renderer.SCALE, renderer.PAD, 0.3
 
@@ -39,7 +44,8 @@ def square_room(extra=()):
 
 def render(map_data, **options):
     png = renderer.render_map(map_data, None, options={"map_show_dock": False,
-                                                       "map_show_grid": False, **options},
+                                                       "map_show_grid": False,
+                                                       "map_floor_fill": False, **options},
                               raise_errors=True)
     return Image.open(io.BytesIO(png)).convert("RGBA")
 
@@ -96,6 +102,70 @@ class WallTests(unittest.TestCase):
         shared = [renderer._outline_segments(z) for z in data["zones"]]
         split = [[(a, b) for kind, a, b in segs if kind == 1] for segs in shared]
         self.assertEqual({p[0] for pairs in split for a, b in pairs for p in (a, b)}, {0.975})
+
+
+    def test_type_2_is_a_wall(self):
+        img = render(square_room([seg(2, 0, 2, 4, 2)]))
+        self.assertEqual(pixel(img, 2, 2, (0, 4)), renderer.WALL)
+
+    def test_open_boundary_stops_where_a_wall_covers_it(self):
+        walls = [((2, 0), (2, 1.5))]
+        self.assertEqual(renderer._subtract_segments(((2, 0), (2, 4)), walls),
+                         [((2, 1.5), (2, 4))])
+        self.assertEqual(renderer._subtract_segments(((0, 0), (1, 1)), walls),
+                         [((0, 0), (1, 1))])       # diagonal: left alone
+
+
+class FloorFillTests(unittest.TestCase):
+    """Default look, like the MyDyson app: reachable floor dark, the rest grey."""
+
+    def room_with_floor(self):
+        data = square_room()
+        data["zones"][0]["visited"] = [{"x": 1, "y": 1}, {"x": 3, "y": 1},
+                                       {"x": 3, "y": 3}, {"x": 1, "y": 3}]
+        return data
+
+    def test_fill_is_the_default(self):
+        self.assertTrue(constants.MAP_APPEARANCE_DEFAULTS["map_floor_fill"])
+
+    def test_floor_dark_rest_grey_walls_app_grey(self):
+        img = render(self.room_with_floor(), map_floor_fill=True, map_show_labels=False)
+        self.assertEqual(pixel(img, 2, 2, (0, 4)), renderer.FLOOR_FILL)
+        self.assertEqual(pixel(img, 0.5, 2, (0, 4)), renderer.ROOM_FILL)
+        self.assertEqual(pixel(img, 2, 0, (0, 4)), renderer.APP_WALL)
+        self.assertEqual(pixel(img, -0.2, 2, (0, 4)), renderer.BG)
+
+    def test_room_colours_tint_the_floor(self):
+        img = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
+                     map_show_labels=False)
+        floor = pixel(img, 2, 2, (0, 4))
+        self.assertNotEqual(floor, renderer.FLOOR_FILL)
+        self.assertEqual(floor, renderer._tint(renderer.FLOOR_FILL, renderer._room_color("10"), 0.22))
+
+    def test_room_colour_follows_the_room_id(self):
+        self.assertEqual(renderer._room_color("10"), renderer._room_color(10))
+        self.assertNotEqual(renderer._room_color("10"), renderer._room_color("11"))
+
+    def test_four_room_capture_like_the_app(self):
+        img = render(json.loads(FOUR_ROOMS.read_text()), map_floor_fill=True,
+                     map_show_labels=False, map_show_restrictions=False)
+        bounds = (-0.85, 2.525)
+        # Kitchen | Toilet: type 2 in both rooms, solid in the app.
+        wall = [pixel(img, 5.075, y / 20, bounds) for y in range(0, 30)]
+        self.assertEqual(set(wall), {renderer.APP_WALL})
+        # Kitchen | Dining: type 1, dashed in the app.
+        line = [pixel(img, 1.125, y / 20, bounds) for y in range(0, 40)]
+        self.assertIn(renderer.APP_WALL, line)
+        self.assertIn(renderer.FLOOR_FILL, line, "gaps: dashed")
+
+
+class FontTests(unittest.TestCase):
+    def test_bundled_font_is_used(self):
+        self.assertTrue(renderer.FONT_FILE.exists())
+        self.assertTrue((renderer.FONT_FILE.parent / "LICENSE-DejaVu.txt").exists())
+        font, _ = renderer._load_fonts()
+        self.assertIsInstance(font, renderer.ImageFont.FreeTypeFont)
+        self.assertEqual(Path(font.path).name, "DejaVuSans.ttf")
 
 
 class AreaLabelTests(unittest.TestCase):

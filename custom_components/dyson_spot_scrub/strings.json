@@ -110,12 +110,16 @@
               "map_mop_color": "Mop path color",
               "map_combined_color": "Vacuum and mop path color",
               "map_path_width": "Path width",
-              "map_glow_width": "Glow width"
+              "map_glow_width": "Glow width",
+              "map_room_colors": "Room colors",
+              "map_floor_fill": "Fill rooms like the MyDyson app"
             },
             "data_description": {
               "map_combined_color": "Used for simultaneous vacuuming and mopping. Sequential cleaning keeps separate vacuum and mop colors.",
               "map_path_width": "Line width in source-image pixels. Dashboard scaling affects its displayed size.",
-              "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable."
+              "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable.",
+              "map_floor_fill": "Shade each room like the MyDyson app: the floor the robot can reach is dark, and furniture and other areas it can't reach are grey.",
+              "map_room_colors": "Give each room its own color for its floor outline, name, area and legend entry. Walls stay white and cleaning-path colors are unchanged. Off shows every room in white and grey."
             }
           },
           "visibility_settings_section": {
@@ -128,7 +132,7 @@
               "map_show_legend": "Show legend",
               "map_show_status_areas": "Show cleaning status areas",
               "map_show_perimeter": "Show walls and room dividers",
-              "map_show_visited_paths": "Show floor outlines",
+              "map_show_visited_paths": "Show accessible floor outlines",
               "map_show_grid": "Show grid",
               "map_show_dock": "Show charging station",
               "map_show_restrictions": "Show keep-out zones",
@@ -136,7 +140,7 @@
             },
             "data_description": {
               "map_show_status_areas": "Colored room fills indicating cleaning progress.",
-              "map_show_perimeter": "Walls (solid) and boundaries between rooms (dashed), from the Dyson map.",
+              "map_show_perimeter": "Walls, and thinner lines where two rooms meet, from the Dyson map. Where rooms meet can be a real wall or a virtual split; Dyson doesn't say which.",
               "map_show_visited_paths": "Outline of the floor the robot can reach in each room. It goes around furniture.",
               "map_show_grid": "Includes distance labels and the map origin marker.",
               "map_show_waypoints": "Dots along the cleaning path. The robot position remains visible.",

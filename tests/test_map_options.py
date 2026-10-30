@@ -78,7 +78,8 @@ class MapRenderingTests(unittest.TestCase):
                     'restrictions': [{'points': [[.7, .7], [1, .7], [1, 1]]}],
                     'dockLocation': {'x': 0, 'y': 1}}
         self.hidden = {key: False for key in constants.MAP_VISIBILITY_DEFAULTS}
-        self.hidden.update(map_transparent_background=True, map_glow_width=0)
+        self.hidden.update(map_transparent_background=True, map_glow_width=0,
+                           map_floor_fill=False)
 
     def render(self, options=None, live=None):
         result = renderer.render_map(self.map, [], live, options, raise_errors=True)

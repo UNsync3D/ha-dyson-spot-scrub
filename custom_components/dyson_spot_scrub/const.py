@@ -13,6 +13,11 @@ MAP_APPEARANCE_DEFAULTS = {
     "map_combined_color": [192, 132, 252],
     "map_path_width": 3,
     "map_glow_width": 6,
+    # Off = monochrome (white walls, grey floor outlines, white labels).
+    # On = each room's floor outline, label and legend swatch get a colour,
+    # fixed by room ID. Walls stay white; path colours are unaffected.
+    "map_room_colors": False,
+    "map_floor_fill": True,
 }
 MAP_VISIBILITY_DEFAULTS = {
     "map_show_furniture": True,

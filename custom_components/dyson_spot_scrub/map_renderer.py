@@ -12,10 +12,12 @@ Confirmed API structure (from live HA debug logs, Sep 2026):
              presentation [{start:{x,y}, end:{x,y}, type:int}]  ← the room's
                simplified, straight-line outline:
                type 0 = wall edge
-               type 1 = boundary shared with another room (e.g. a split)
+               type 1 = boundary shared with another room - a real interior
+                        wall OR a virtual split; the data doesn't say which
                type 2 = short join between a wall and a shared boundary
-             (Types confirmed by splitting a room in the MyDyson app,
-             28 Oct 2026: the split line appeared as type 1 in both rooms.)
+             (Types from a room split in the MyDyson app, 28 Oct 2026, where
+             the split line appeared as type 1 in both rooms; FutuRazor's map
+             showed type 1 on real interior walls too.)
 
   live_data (from get_live_map, only while robot is cleaning):
     robotLocation {x, y, angle}
@@ -32,6 +34,7 @@ from __future__ import annotations
 import io
 import math
 from functools import lru_cache
+from pathlib import Path
 from typing import Any
 
 from .const import MAP_PATH_ACTIONS
@@ -71,9 +74,33 @@ FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
 
 # Zone colours — single style for all zones (Dyson app aesthetic)
 ZONE_BORDER    = (220, 220, 225, 180)   # soft white outline
-WALL           = (232, 232, 238, 255)   # solid wall (presentation type 0)
-DIVIDER        = (220, 220, 225, 150)   # dashed room boundary (types 1 and 2)
+WALL           = (232, 232, 238, 255)   # solid wall (presentation types 0 and 2)
+DIVIDER        = (200, 200, 208, 170)   # open boundary between rooms (type 1), dashed
+# Option map_floor_fill: colours measured from a MyDyson app screenshot
+ROOM_FILL      = (37,  37,  40,  255)   # room area the robot can't reach
+FLOOR_FILL     = (18,  18,  20,  255)   # floor the robot reaches
+APP_WALL       = (147, 147, 147, 255)   # walls in the app's grey
+APP_DIVIDER    = (147, 147, 147, 210)
 WALL_WIDTH_M   = 0.05                   # drawn wall thickness in metres
+DIVIDER_WIDTH_M = 0.025                 # shared boundaries: half a wall
+MERGE_TOLERANCE_M = 0.08                # same boundary from two rooms: merge
+
+# Room colours (option map_room_colors), chosen to stay distinct from the
+# default path colours (yellow / cyan / purple). Assigned by room ID, so a
+# room keeps its colour when rooms are renamed or reordered.
+ROOM_PALETTE = [
+    (96, 165, 250),    # blue
+    (74, 222, 128),    # green
+    (251, 146, 60),    # orange
+    (244, 114, 182),   # pink
+    (45, 212, 191),    # teal
+    (163, 230, 53),    # lime
+    (248, 113, 113),   # red
+    (129, 140, 248),   # indigo
+    (232, 190, 120),   # sand
+    (148, 163, 184),   # slate
+]
+FONT_FILE = Path(__file__).with_name("fonts") / "DejaVuSans.ttf"
 ZONE_VISITED   = (160, 160, 168, 60)    # subtle grey visited path
 ZONE_LABEL     = (220, 220, 225, 220)   # white label text
 
@@ -217,40 +244,71 @@ def _render(
                 if fill:
                     _poly_alpha(img, txy_list(points), fill, (0, 0, 0, 0))
 
-    # ── 4. Keep-out / restriction zones ───────────────────────────────────────
+    # ── 4. Floor fill (option map_floor_fill) ─────────────────────────────────
+    room_colors = options["map_room_colors"]
+    if options["map_floor_fill"]:
+        # Like the MyDyson app: the floor the robot can reach dark, the rest
+        # of the room lighter, so furniture shows as grey blocks.
+        for z in zones:
+            room = _room_polygon(z)
+            if len(room) >= 3:
+                _poly_alpha(img, txy_list(room), ROOM_FILL, (0, 0, 0, 0))
+        for z in zones:
+            visited = [_pt(p) for p in z.get("visited") or []]
+            if len(visited) >= 3:
+                fill = (_tint(FLOOR_FILL, _room_color(z.get("id")), 0.22)
+                        if room_colors else FLOOR_FILL)
+                _poly_alpha(img, [txy(p) for p in visited], fill, (0, 0, 0, 0))
+
+    # ── 5. Keep-out zones, floor outlines, then walls and room boundaries ──
     draw = ImageDraw.Draw(img)
     for r in (_get_restrictions(map_data, live_data) if options["map_show_restrictions"] else []):
         bnd = r.get("points") or r.get("boundary") or []
         if len(bnd) >= 3:
             _poly_alpha(img, txy_list(bnd), KEEPOUT_FILL, KEEPOUT_STROKE,
                         stroke_width=1, dashed=True)
-
-    # ── 5. Floor outlines, then walls and room dividers ──────────────────────
     for z in zones:
-        # Floor outline ('visited') - skip jumps between separate loops
+        # Accessible-floor outline ('visited') - skip jumps between loops
         visited = z.get("visited", [])
         if options["map_show_visited_paths"] and len(visited) > 1:
             draw = ImageDraw.Draw(img)
+            if room_colors:
+                outline_col, outline_w = _room_color(z.get("id")) + (220,), 2
+            else:
+                outline_col, outline_w = ZONE_VISITED, 1
             vpts = [_pt(p) for p in visited]
             for j in range(len(vpts) - 1):
                 x0, y0 = vpts[j]
                 x1, y1 = vpts[j + 1]
                 if math.hypot(x1 - x0, y1 - y0) > 0.8:
                     continue
-                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=ZONE_VISITED, width=1)
+                draw.line([txy(vpts[j]), txy(vpts[j + 1])], fill=outline_col,
+                          width=outline_w)
 
-    # Walls and dividers are drawn segment by segment - never chained into a
-    # polygon - so separate runs can't produce diagonal artefacts. Walls of
-    # any length are drawn: an earlier 1.5 m cut-off dropped most real walls.
+    # Walls solid: type 0 (outer) and type 2 (a wall between two rooms).
+    # Type 1 is where two rooms' floors meet (open plan, doorway or a split
+    # made in the app): thinner, lighter and dashed, as the MyDyson app
+    # draws it. Each boundary is drawn ONCE: both
+    # neighbouring rooms list it, often a few centimetres apart, and drawing
+    # both looked doubled. Walls of any length are drawn (an earlier 1.5 m
+    # cut-off dropped most real walls).
     if options["map_show_perimeter"]:
         wall_width = max(2, round(WALL_WIDTH_M * scale))
+        divider_width = max(1, round(DIVIDER_WIDTH_M * scale))
+        walls, shared = [], []
         for z in zones:
             for kind, seg_start, seg_end in _outline_segments(z):
-                if kind == 0:
-                    ImageDraw.Draw(img).line([txy(seg_start), txy(seg_end)],
-                                             fill=WALL, width=wall_width)
-                else:
-                    _dashed_seg(img, txy(seg_start), txy(seg_end), DIVIDER, width=2)
+                (shared if kind == 1 else walls).append((seg_start, seg_end))
+        wall_col, divider_col = ((APP_WALL, APP_DIVIDER) if options["map_floor_fill"]
+                                 else (WALL, DIVIDER))
+        merged_walls = _merge_segments(walls)
+        for seg_start, seg_end in _merge_segments(shared):
+            for part in _subtract_segments((seg_start, seg_end), merged_walls):
+                _dashed_seg(img, txy(part[0]), txy(part[1]), divider_col,
+                            divider_width, dash=7, gap=5)
+        draw = ImageDraw.Draw(img)
+        for seg_start, seg_end in merged_walls:
+            draw.line([txy(seg_start), txy(seg_end)], fill=wall_col, width=wall_width)
 
     # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in (_get_furniture(map_data, live_data) if options["map_show_furniture"] else []):
@@ -321,12 +379,16 @@ def _render(
         lx, ly = int(tx(lx_m)), int(ty(ly_m))
         draw = ImageDraw.Draw(img)
         name = (z.get("name") or "").upper()
+        label_col, area_col = ZONE_LABEL, area_label_col
+        if options["map_room_colors"]:
+            label_col = _room_color(z.get("id")) + (255,)
+            area_col = _room_color(z.get("id")) + (190,)
         if options["map_show_room_names"]:
-            _draw_centered_text(draw, lx, ly - 12, name, font_l, ZONE_LABEL)
+            _draw_centered_text(draw, lx, ly - 12, name, font_l, label_col)
         if options["map_show_room_areas"]:
-            _draw_area_label(draw, lx, ly + 2, z.get("area", 0), font_s, area_label_col)
+            _draw_area_label(draw, lx, ly + 2, z.get("area", 0), font_s, area_col)
     if options["map_show_legend"]:
-        _draw_legend(img, zones, font_s)
+        _draw_legend(img, zones, font_s, options["map_room_colors"])
 
     # ── 11. Serialise ─────────────────────────────────────────────────────────
     buf = io.BytesIO()
@@ -369,14 +431,17 @@ def _draw_grid(img, tx, ty, min_x, max_x, min_y, max_y):
     img.alpha_composite(overlay)
 
 
-def _draw_legend(img, zones, font):
+def _draw_legend(img, zones, font, room_colors=False):
     """Place labels inside the existing image; never alter overlay alignment."""
     draw = ImageDraw.Draw(img)
     y = 14
     for zone in zones:
         if y + 18 > img.height:
             break
-        color = STATUS_COLORS.get(zone.get("cleanStatus"), ZONE_VISITED)
+        if room_colors:
+            color = _room_color(zone.get("id"))
+        else:
+            color = STATUS_COLORS.get(zone.get("cleanStatus"), ZONE_VISITED)
         draw.rectangle((12, y, 20, y + 8), fill=color[:3] + (255,))
         name = str(zone.get("name") or zone.get("id") or "Room")
         # Long labels stay within the canvas, rather than changing its extent.
@@ -384,6 +449,59 @@ def _draw_legend(img, zones, font):
             name = name[:-2] + "…"
         draw.text((28, y - 2), name, fill=ZONE_LABEL, font=font)
         y += 18
+
+
+def _room_color(room_id: Any) -> tuple[int, int, int]:
+    """A room's colour, fixed by its ID (Dyson numbers rooms 10, 11, 12 ...).
+
+    Consecutive IDs get different colours; non-numeric IDs are hashed.
+    """
+    try:
+        index = int(str(room_id))
+    except (TypeError, ValueError):
+        index = sum(ord(c) * 31 ** i for i, c in enumerate(str(room_id)))
+    return ROOM_PALETTE[index % len(ROOM_PALETTE)]
+
+
+def _merge_segments(segments: list) -> list:
+    """Draw each boundary once: merge overlapping, near-identical segments.
+
+    Horizontal and vertical segments (all Dyson outlines so far) whose lines
+    lie within MERGE_TOLERANCE_M of each other are grouped, averaged and
+    their overlapping or touching ranges joined. Anything else is returned
+    unchanged.
+    """
+    eps = 1e-6
+    lines: dict[str, list] = {"h": [], "v": []}
+    others = []
+    for (x0, y0), (x1, y1) in segments:
+        if abs(y1 - y0) < eps:
+            lines["h"].append((y0, min(x0, x1), max(x0, x1)))
+        elif abs(x1 - x0) < eps:
+            lines["v"].append((x0, min(y0, y1), max(y0, y1)))
+        else:
+            others.append(((x0, y0), (x1, y1)))
+    out = list(others)
+    for axis, items in lines.items():
+        items.sort()
+        groups: list[list] = []
+        for item in items:
+            if groups and item[0] - groups[-1][-1][0] <= MERGE_TOLERANCE_M:
+                groups[-1].append(item)
+            else:
+                groups.append([item])
+        for group in groups:
+            pos = sum(g[0] for g in group) / len(group)
+            spans = sorted((lo, hi) for _, lo, hi in group)
+            merged = [list(spans[0])]
+            for lo, hi in spans[1:]:
+                if lo <= merged[-1][1] + MERGE_TOLERANCE_M:
+                    merged[-1][1] = max(merged[-1][1], hi)
+                else:
+                    merged.append([lo, hi])
+            for lo, hi in merged:
+                out.append(((lo, pos), (hi, pos)) if axis == "h" else ((pos, lo), (pos, hi)))
+    return out
 
 
 # ── Data extraction helpers ────────────────────────────────────────────────────
@@ -430,6 +548,52 @@ def _perimeter_points(zone: dict) -> list[Any]:
         if not out or p != out[-1]:
             out.append(p)
     return out
+
+
+def _room_polygon(zone: dict) -> list[Any]:
+    """The room's outline as one polygon, from all its presentation segments."""
+    pairs = [(a, b) for _, a, b in _outline_segments(zone)]
+    if not pairs:
+        return []
+    chain = list(pairs[0])
+    remaining = pairs[1:]
+    while remaining:
+        tail = chain[-1]
+        best = min(range(len(remaining)), key=lambda i: min(
+            math.dist(remaining[i][0], tail), math.dist(remaining[i][1], tail)))
+        a, b = remaining.pop(best)
+        chain.append(b if math.dist(a, tail) <= math.dist(b, tail) else a)
+    out: list[Any] = []
+    for p in chain:
+        if not out or p != out[-1]:
+            out.append(p)
+    return out
+
+
+def _subtract_segments(seg, walls) -> list:
+    """Parts of an axis-aligned segment not already covered by a wall."""
+    (x0, y0), (x1, y1) = seg
+    if min(abs(x1 - x0), abs(y1 - y0)) > 0.01:
+        return [seg]                      # not axis-aligned: leave as is
+    horizontal = abs(y1 - y0) < abs(x1 - x0)
+    lo, hi = sorted((x0, x1) if horizontal else (y0, y1))
+    pos = (y0 + y1) / 2 if horizontal else (x0 + x1) / 2
+    spans = [(lo, hi)]
+    for (a0, b0), (a1, b1) in walls:
+        if horizontal != (abs(b1 - b0) < abs(a1 - a0)):
+            continue
+        wpos = (b0 + b1) / 2 if horizontal else (a0 + a1) / 2
+        if abs(wpos - pos) > MERGE_TOLERANCE_M:
+            continue
+        wlo, whi = sorted((a0, a1) if horizontal else (b0, b1))
+        spans = [piece for s0, s1 in spans
+                 for piece in ((s0, min(s1, wlo)), (max(s0, whi), s1)) if piece[1] - piece[0] > 0.01]
+    return [((s0, pos), (s1, pos)) if horizontal else ((pos, s0), (pos, s1)) for s0, s1 in spans]
+
+
+def _tint(base, colour, amount):
+    """Mix a room colour into a base RGBA colour."""
+    return tuple(round(b + (c - b) * amount) for b, c in zip(base[:3], colour)) + (base[3],)
 
 
 def _perimeter_segments(zone: dict) -> list[tuple[Any, Any]]:
@@ -639,6 +803,12 @@ def _pt(pt: Any) -> tuple[float, float]:
 @lru_cache(maxsize=1)
 def _load_fonts() -> tuple[Any, Any]:
     """Return (large, small) fonts; cached because it's called several times per frame."""
+    # Bundled DejaVu Sans first: Pillow's built-in font has no accented
+    # letters, so room names like KÜCHE showed boxes.
+    try:
+        return ImageFont.truetype(str(FONT_FILE), 11), ImageFont.truetype(str(FONT_FILE), 9)
+    except (OSError, ImportError):
+        pass
     try:
         return ImageFont.load_default(size=11), ImageFont.load_default(size=9)
     except TypeError:
@@ -653,6 +823,10 @@ def _load_fonts() -> tuple[Any, Any]:
 @lru_cache(maxsize=1)
 def _load_superscript_font() -> Any:
     """A smaller font for the '2' of m², or None if sizes aren't supported."""
+    try:
+        return ImageFont.truetype(str(FONT_FILE), 7)
+    except (OSError, ImportError):
+        pass
     try:
         return ImageFont.load_default(size=7)
     except (TypeError, OSError):
