@@ -67,8 +67,7 @@ ROBOT          = (245, 158, 11,  255)   # #f59e0b amber
 ROBOT_HALO     = (245, 158, 11,  50)
 PATH_MAIN      = (34,  211, 238, 255)   # #22d3ee cyan
 PATH_UNKNOWN   = (160, 160, 168, 255)
-KEEPOUT_FILL   = (245, 158, 11,  35)    # amber tint
-KEEPOUT_STROKE = (245, 158, 11,  220)   # amber
+KEEPOUT_FILL   = (245, 158, 11,  35)    # default tint; alpha used with map_keepout_color
 FURN_FILL      = (55,  60,  70,  255)   # dark grey
 FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
 
@@ -265,11 +264,15 @@ def _render(
 
     # ── 5. Keep-out zones, floor outlines, then walls and room boundaries ──
     draw = ImageDraw.Draw(img)
+    keepout = tuple(options["map_keepout_color"])
+    keepout_width = max(1, round(options["map_keepout_thickness_cm"] / 100 * scale))
+    keepout_edges = []      # outlines are drawn over the walls, as in the app
     for r in (_get_restrictions(map_data, live_data) if options["map_show_restrictions"] else []):
         bnd = r.get("points") or r.get("boundary") or []
         if len(bnd) >= 3:
-            _poly_alpha(img, txy_list(bnd), KEEPOUT_FILL, KEEPOUT_STROKE,
-                        stroke_width=1, dashed=True)
+            pts = txy_list(bnd)
+            _poly_alpha(img, pts, keepout + (KEEPOUT_FILL[3],), (0, 0, 0, 0))
+            keepout_edges += zip(pts, pts[1:] + pts[:1])
     for z in zones:
         # Accessible-floor outline ('visited') - skip jumps between loops
         visited = z.get("visited", [])
@@ -323,6 +326,8 @@ def _render(
             _draw_lines(img, [(txy(a), txy(b)) for a, b in lines],
                         _line_color(options, colour_key, auto_colour, auto_white),
                         width(width_key), options[style_key])
+    _draw_lines(img, keepout_edges, keepout + (255,), keepout_width,
+                options["map_keepout_style"])
 
     # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in (_get_furniture(map_data, live_data) if options["map_show_furniture"] else []):

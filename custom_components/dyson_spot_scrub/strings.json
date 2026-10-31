@@ -136,7 +136,10 @@
               "map_door_thickness_cm": "Door and opening thickness",
               "map_door_color": "Door and opening color",
               "map_floor_color": "Reachable floor color",
-              "map_room_fill_color": "Rest of room color"
+              "map_room_fill_color": "Rest of room color",
+              "map_keepout_style": "Keep-out zone style",
+              "map_keepout_thickness_cm": "Keep-out zone thickness",
+              "map_keepout_color": "Keep-out zone color"
             },
             "data_description": {
               "map_wall_thickness_cm": "In centimetres on the real floor, so walls scale with the map. Default 5 cm.",
@@ -145,7 +148,9 @@
               "map_wall_color": "The default grey switches to white when Room colors is on or the floor fill is off. Any other color is used as chosen.",
               "map_door_color": "The default grey switches to light grey when Room colors is on or the floor fill is off. Any other color is used as chosen.",
               "map_floor_color": "Used when the floor fill is on: the floor the robot can reach.",
-              "map_room_fill_color": "Used when the floor fill is on: furniture and other parts of the room the robot can't reach."
+              "map_room_fill_color": "Used when the floor fill is on: furniture and other parts of the room the robot can't reach.",
+              "map_keepout_thickness_cm": "Outline thickness in centimetres on the real floor. Default 1 cm.",
+              "map_keepout_color": "Outline color; the zone is filled with a faint tint of it. Show or hide keep-out zones under Visible elements."
             }
           },
           "visibility_settings_section": {

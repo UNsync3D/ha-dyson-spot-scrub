@@ -35,11 +35,17 @@ MAP_WALL_DEFAULTS = {
     "map_door_color": [147, 147, 147],
     "map_floor_color": [18, 18, 20],     # floor the robot can reach
     "map_room_fill_color": [37, 37, 40], # rest of each room (furniture etc.)
+    # Keep-out zones: outline style/thickness/colour; the fill is a faint
+    # tint of the same colour. Shown or hidden by map_show_restrictions.
+    "map_keepout_style": "dashed",
+    "map_keepout_thickness_cm": 1,
+    "map_keepout_color": [245, 158, 11],
 }
 MAP_LINE_STYLES = ("solid", "dashed")
 MAP_CHOICES = {
     "map_wall_style": MAP_LINE_STYLES,
     "map_inner_wall_style": MAP_LINE_STYLES,
+    "map_keepout_style": MAP_LINE_STYLES,
     "map_door_style": MAP_LINE_STYLES,
 }
 MAP_VISIBILITY_DEFAULTS = {
@@ -68,6 +74,7 @@ MAP_NUMBER_RANGES = {
     "map_glow_width": (0, 25),
     "map_wall_thickness_cm": (1, 30),
     "map_inner_wall_thickness_cm": (1, 30),
+    "map_keepout_thickness_cm": (1, 30),
     "map_door_thickness_cm": (1, 30),
 }
 MAP_PATH_ACTIONS = {

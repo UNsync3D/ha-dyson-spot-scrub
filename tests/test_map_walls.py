@@ -251,6 +251,26 @@ class WallOptionTests(unittest.TestCase):
         self.assertGreater(len(set(inner)), 1, "type 2 dashed: gaps")
         self.assertEqual(set(outer), {renderer.APP_WALL}, "type 0 still solid")
 
+    def test_keep_out_zone_options(self):
+        data = self.room()
+        data["restrictions"] = [{"behavior": "keepOut", "points": [
+            {"x": 2.5, "y": 1}, {"x": 3.5, "y": 1}, {"x": 3.5, "y": 3}, {"x": 2.5, "y": 3}]}]
+        img = render(data, map_floor_fill=True, map_show_labels=False,
+                     map_keepout_color=[255, 0, 255], map_keepout_style="solid",
+                     map_keepout_thickness_cm=10)
+        edge = [pixel(img, 2.5, i / 20, (0, 4)) for i in range(22, 58)]
+        self.assertEqual(set(edge), {(255, 0, 255, 255)}, "solid, chosen colour")
+        self.assertEqual(pixel(img, 2.53, 2, (0, 4)), (255, 0, 255, 255), "10 cm wide")
+        inside = pixel(img, 3, 2, (0, 4))
+        self.assertNotEqual(inside, renderer.ROOM_FILL, "tinted")
+        self.assertGreater(inside[0], inside[1], "tinted magenta")
+        dashed = render(data, map_floor_fill=True, map_show_labels=False)
+        edge = [pixel(dashed, 2.5, i / 20, (0, 4)) for i in range(22, 58)]
+        self.assertIn((245, 158, 11, 255), edge, "default amber")
+        self.assertGreater(len(set(edge)), 1, "default dashed")
+        hidden = render(data, map_floor_fill=True, map_show_restrictions=False)
+        self.assertEqual(pixel(hidden, 2.5, 2, (0, 4)), renderer.ROOM_FILL)
+
     def test_labels_turn_dark_on_a_light_floor(self):
         drawn = []
         original = renderer._draw_centered_text
