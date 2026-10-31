@@ -29,6 +29,8 @@ _LOGGER = logging.getLogger(__name__)
 
 # Reconnect backoff schedule (seconds): 15 s, 30 s, 60 s, then 120 s forever
 _RECONNECT_DELAYS = [15, 30, 60, 120]
+# How long Dyson's broker has to accept a connection before we give up on it.
+_CONNECT_CONFIRM_TIMEOUT = 20.0
 
 # Robot states that indicate a clean cycle has genuinely completed.
 # Deliberately excludes FULL_CLEAN_CHARGING (mid-clean recharge) and
@@ -93,6 +95,8 @@ class DysonCoordinator:
         self._reconnect_task: asyncio.Task | None = None
         self._inventory_task: asyncio.Task | None = None
         self._reconnect_attempt: int = 0
+        # Last known robot reachability, kept across reconnect attempts.
+        self._robot_online: bool = True
 
         # Live-map fetch: shared across all camera viewers (deduplication + 429 backoff)
         self._live_map_cache: dict | None = None
@@ -125,12 +129,13 @@ class DysonCoordinator:
                 "reconnect will retry automatically",
                 self.serial, exc,
             )
-            if not self._shutting_down:
+            if not self._shutting_down and (
+                    self._reconnect_task is None or self._reconnect_task.done()):
                 self._reconnect_task = self.hass.async_create_task(
                     self._async_reconnect()
                 )
 
-    async def _async_connect_cloud(self) -> None:
+    async def _async_connect_cloud(self, robot_online: bool = True) -> None:
         """Fetch fresh IoT credentials and connect to the cloud MQTT broker."""
         _LOGGER.debug("[%s] Fetching IoT credentials from Dyson API", self.serial)
         iot = await get_iot_credentials(self._token, self.serial, session=self.http_session)
@@ -150,14 +155,33 @@ class DysonCoordinator:
         new_client.on_prefix_changed = self._on_mqtt_prefix_changed
         new_client.on_map_changed    = self._on_mqtt_map_changed
         new_client.register_callback(self._on_state_change)
+        # Carry a GONE-AWAY over a reconnect: a new broker connection doesn't
+        # mean the robot came back.
+        new_client.robot_online = robot_online
 
         # P1 #5: Assign before connecting so async_shutdown can disconnect
         # the client if it is called while connect() is blocking in the executor.
         self.mqtt = new_client
         try:
             await self.hass.async_add_executor_job(new_client.connect)
+            # connect() only sends the request; wait for the broker to accept it.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + _CONNECT_CONFIRM_TIMEOUT
+            while not new_client.connected:
+                if self._shutting_down:
+                    raise ConnectionError("shutting down")
+                if loop.time() >= deadline:
+                    raise ConnectionError(
+                        f"Dyson's broker did not accept the connection within "
+                        f"{_CONNECT_CONFIRM_TIMEOUT:.0f} s")
+                await asyncio.sleep(0.25)
         except Exception:
-            self.mqtt = None
+            if self.mqtt is new_client:
+                self.mqtt = None
+            try:
+                await self.hass.async_add_executor_job(new_client.disconnect)
+            except Exception:
+                pass
             raise
 
     async def async_shutdown(self) -> None:
@@ -200,23 +224,34 @@ class DysonCoordinator:
             if self._shutting_down:
                 return
 
-            # Tear down the old client cleanly (stop its loop thread)
+            # Tear down the old client cleanly (stop its loop thread). This
+            # is a deliberate close, so it doesn't log as a disconnect.
             old_mqtt = self.mqtt
             self.mqtt = None
+            if old_mqtt:
+                self._robot_online = old_mqtt.robot_online
+            robot_online = self._robot_online
             if old_mqtt:
                 try:
                     await self.hass.async_add_executor_job(old_mqtt.disconnect)
                 except Exception:
                     pass
 
+            _LOGGER.debug("[%s] Reconnect attempt %d: connecting",
+                          self.serial, self._reconnect_attempt)
             try:
-                await self._async_connect_cloud()
-                self._reconnect_attempt = 0  # Reset backoff on success
-                _LOGGER.info("[%s] Reconnected to cloud broker successfully", self.serial)
+                await self._async_connect_cloud(robot_online)
+                attempts, self._reconnect_attempt = self._reconnect_attempt, 0
+                _LOGGER.info("[%s] Reconnected to Dyson's broker (attempt %d)%s",
+                             self.serial, attempts,
+                             "" if robot_online else "; robot still offline")
                 return  # Done — exit the loop
-            except Exception:
-                _LOGGER.exception(
-                    "[%s] Reconnect failed — retrying", self.serial
+            except Exception as exc:
+                if self._shutting_down:
+                    return
+                _LOGGER.warning(
+                    "[%s] Reconnect attempt %d failed: %s: %s — retrying",
+                    self.serial, self._reconnect_attempt, type(exc).__name__, exc,
                 )
                 # Loop continues to next iteration with updated backoff
 
@@ -444,13 +479,13 @@ class DysonCoordinator:
     async def async_stop(self) -> None:
         """Stop cleaning and cancel any sequential room task (P1 #2)."""
         await self._async_cancel_cleaning_task()
-        if self.mqtt and self.mqtt.connected:
+        if self.mqtt and self.mqtt.available:
             await self.hass.async_add_executor_job(self.mqtt.stop)
 
     async def async_return_to_base(self) -> None:
         """Return to base and cancel any sequential room task (P1 #2)."""
         await self._async_cancel_cleaning_task()
-        if self.mqtt and self.mqtt.connected:
+        if self.mqtt and self.mqtt.available:
             await self.hass.async_add_executor_job(self.mqtt.return_to_base)
 
     @property
@@ -468,7 +503,7 @@ class DysonCoordinator:
         """Clean a list of rooms one at a time, waiting for docking between each."""
         if not room_names:
             return
-        reason = start_block_reason(self.mqtt.state if self.mqtt else {}, bool(self.mqtt and self.mqtt.connected))
+        reason = start_block_reason(self.mqtt.state if self.mqtt else {}, bool(self.mqtt and self.mqtt.available))
         if reason:
             _LOGGER.warning("Sequential clean blocked: %s", reason)
             return
@@ -477,8 +512,8 @@ class DysonCoordinator:
         try:
             _LOGGER.info("[%s] Sequential clean starting — rooms: %s", self.serial, room_names)
             for room in room_names:
-                if not self.mqtt or not self.mqtt.connected:
-                    _LOGGER.warning("[%s] MQTT not connected — aborting sequential clean", self.serial)
+                if not self.mqtt or not self.mqtt.available:
+                    _LOGGER.warning("[%s] robot not reachable — aborting sequential clean", self.serial)
                     return
                 _LOGGER.info("[%s] Sequential clean → '%s'", self.serial, room)
                 mode_int = MODE_TO_INT.get(self.current_mode, 0)
@@ -522,7 +557,7 @@ class DysonCoordinator:
             if is_any_cleaning(state):
                 cleaning_started = True
             elif (cleaning_started and state.get("state") in _CLEAN_COMPLETE_ROBOT_STATES
-                  and start_block_reason(state, self.mqtt.connected) is None):
+                  and start_block_reason(state, self.mqtt.available) is None):
                 done_event.set()
 
         class _Watcher:

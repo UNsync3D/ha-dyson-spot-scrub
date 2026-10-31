@@ -43,6 +43,11 @@ _PREFERENCE_TIMEOUT = 10.0
 # Map IDs probed on connect (and their stagger) before persistentMapId is known.
 _PROBE_MAP_IDS = range(4)
 _PROBE_INTERVAL = 2.5
+# While Dyson reports the robot gone (GONE-AWAY), ask for its state this often
+# until it answers. One small request a minute; nothing else is resent.
+_OFFLINE_POLL_INTERVAL = 60.0
+# Robot telemetry that proves the robot itself is reachable again.
+_ROBOT_TELEMETRY = {"CURRENT-STATE", "STATE-CHANGE"}
 # How many outstanding get_preference msgId -> map_id mappings to remember.
 _MAX_TRACKED_REQUESTS = 64
 # A room-preference row must reach index [10] (roomOrder) to be usable.
@@ -337,7 +342,12 @@ class DysonMqttClient:
 
         self._client:    mqtt.Client | None = None
         self._lock       = threading.Lock()
-        self.connected   = False
+        self.connected   = False      # connected to Dyson's cloud broker
+        # The robot itself: False after Dyson reports GONE-AWAY, until the robot
+        # sends fresh telemetry. The broker can be up while the robot is not.
+        self.robot_online = True
+        self._offline_timer: threading.Timer | None = None
+        self._closing = False          # disconnect() in progress: not a failure
         self.state: dict = {}
 
         # ── Room preference store (see _cached_preference) ─────────────────
@@ -473,8 +483,16 @@ class DysonMqttClient:
 
         client.loop_start()
 
+    @property
+    def available(self) -> bool:
+        """Connected to Dyson's broker AND the robot is reachable."""
+        return self.connected and self.robot_online
+
     def disconnect(self) -> None:
+        """Close this connection on purpose (reconnect, reload or shutdown)."""
+        self._closing = True
         self._cancel_pending_start()
+        self._stop_offline_poll()
         with self._lock:
             c = self._client
             self._client = None
@@ -493,7 +511,7 @@ class DysonMqttClient:
         No automatic retries: a partial send may already have changed the robot.
         """
         state_fields, props = setting_payloads(key, value)
-        if not self.connected or current_setting(self.state, key) is None:
+        if not self.available or current_setting(self.state, key) is None:
             return False
         if current_setting(self.state, key) == value:
             return True
@@ -512,7 +530,7 @@ class DysonMqttClient:
         return self._start_cleaning(mode)
 
     def _can_start_new_clean(self) -> bool:
-        reason = start_block_reason(self.state, self.connected)
+        reason = start_block_reason(self.state, self.available)
         if reason:
             _LOGGER.warning("[%s] New cleaning start blocked: %s", self.serial, reason)
         return reason is None
@@ -569,7 +587,7 @@ class DysonMqttClient:
 
     def cancel_drying(self) -> bool:
         """Cancel only roller drying; telemetry confirms completion."""
-        if not self.connected or self.state.get("dockState") != "DRYING_MOP":
+        if not self.available or self.state.get("dockState") != "DRYING_MOP":
             return False
         return self._abort_dock_action()
 
@@ -605,8 +623,8 @@ class DysonMqttClient:
         changing anything.
         """
         dock = self.state.get("dockState")
-        if not self.connected:
-            _LOGGER.warning("[%s] %s: not connected", self.serial, action)
+        if not self.available:
+            _LOGGER.warning("[%s] %s: robot not reachable", self.serial, action)
             return False
         if dock in DOCK_BUSY_STATES:
             _LOGGER.warning("[%s] %s: dock already busy (%s)", self.serial, action, dock)
@@ -876,8 +894,8 @@ class DysonMqttClient:
         except (TypeError, ValueError):
             _LOGGER.warning("[%s] set_room_preferences: no map ID available", self.serial)
             return False
-        if not self.connected:
-            _LOGGER.warning("[%s] set_room_preferences: not connected", self.serial)
+        if not self.available:
+            _LOGGER.warning("[%s] set_room_preferences: robot not reachable", self.serial)
             return False
         uv_switch: list = []
         if self._cached_preference:
@@ -1010,8 +1028,8 @@ class DysonMqttClient:
                 self._start_cancelled = False
                 if not self._can_start_new_clean():
                     return False
-                if not self.connected:
-                    _LOGGER.warning("[%s] Cannot start: MQTT disconnected", self.serial)
+                if not self.available:
+                    _LOGGER.warning("[%s] Cannot start: robot not reachable", self.serial)
                     return False
                 try:
                     map_id = int(self.state["persistentMapId"])
@@ -1040,7 +1058,7 @@ class DysonMqttClient:
                 # A Dyson-app command may have changed readiness while we waited.
                 if not self._can_start_new_clean():
                     return False
-                if self._start_cancelled or not self.connected:
+                if self._start_cancelled or not self.available:
                     _LOGGER.info("[%s] Pending cleaning start cancelled", self.serial)
                     return False
                 if str(self.state.get("persistentMapId")) != str(map_id):
@@ -1181,6 +1199,10 @@ class DysonMqttClient:
         client.subscribe(f"+/{self.serial}/#", qos=0)
         self.request_current_state()
         self._schedule_map_probes()
+        if not self.robot_online:
+            # The robot was gone before this connection; keep asking until it
+            # answers rather than assuming it came back with the broker.
+            self._schedule_offline_poll()
         if self.on_connected:
             self.on_connected()
 
@@ -1191,6 +1213,15 @@ class DysonMqttClient:
             )
             return
         self._disconnected_handled = True
+        self._stop_offline_poll()
+        if self._closing:
+            # Our own disconnect(): the coordinator is replacing or closing
+            # this connection, so it is neither a failure nor a reason to
+            # reconnect.
+            _LOGGER.debug("[%s] MQTT connection closed (rc=%s)", self.serial, rc)
+            self.connected = False
+            self._notify_state_change()
+            return
         _LOGGER.warning("[%s] MQTT disconnected (rc=%s)", self.serial, rc)
         self.connected = False
         self._clear_drying_time()
@@ -1313,6 +1344,11 @@ class DysonMqttClient:
 
     def _handle_status(self, data: dict) -> None:
         msg_type = data.get("msg") or data.get("method")
+        if msg_type == "GONE-AWAY":
+            self._mark_robot_offline()
+            return
+        if msg_type in _ROBOT_TELEMETRY and not self.robot_online:
+            self._mark_robot_online()
         if msg_type in {"CURRENT-STATE", "STATE-CHANGE", "PRODUCT_INFO", "INITIAL_STATE"}:
             self.state = {**self.state, **data}
             if "dockState" in data and data["dockState"] != "DRYING_MOP":
@@ -1334,6 +1370,52 @@ class DysonMqttClient:
                 "[%s] Fault %s — status: %s", self.serial,
                 _fault_code(data), data.get("status")
             )
+
+    # ── Robot reachability (GONE-AWAY) ────────────────────────────────────────
+
+    def _mark_robot_offline(self) -> None:
+        """Dyson says the robot left: block commands, keep rooms and settings."""
+        if not self.robot_online:
+            return
+        _LOGGER.warning("[%s] Robot offline (Dyson reported GONE-AWAY); "
+                        "waiting for it to come back", self.serial)
+        self.robot_online = False
+        self._cancel_pending_start()
+        # Same as a reconnect: never authorize a new job from telemetry that
+        # predates the outage. Rooms, settings and the map are kept.
+        for key in ("state", "dockState", "workMode", "jdmStatus", *STATE_FIELDS):
+            self.state.pop(key, None)
+        self._clear_drying_time()
+        self._notify_state_change()
+        self._schedule_offline_poll()
+
+    def _mark_robot_online(self) -> None:
+        """Fresh telemetry after GONE-AWAY: the robot is reachable again."""
+        _LOGGER.info("[%s] Robot back online", self.serial)
+        self.robot_online = True
+        self._stop_offline_poll()
+        # Refresh room settings once: they may have changed in the app while
+        # the robot was away. Interrupted commands are NOT replayed.
+        self._prefs_map_id = None
+
+    def _schedule_offline_poll(self) -> None:
+        self._stop_offline_poll()
+        timer = threading.Timer(_OFFLINE_POLL_INTERVAL, self._offline_poll)
+        timer.daemon = True
+        self._offline_timer = timer
+        timer.start()
+
+    def _stop_offline_poll(self) -> None:
+        timer, self._offline_timer = self._offline_timer, None
+        if timer:
+            timer.cancel()
+
+    def _offline_poll(self) -> None:
+        if self.robot_online or not self.connected or self._closing:
+            return
+        _LOGGER.debug("[%s] Robot still offline; requesting its state", self.serial)
+        self.request_current_state()
+        self._schedule_offline_poll()
 
     def _merge_jdm_props(self, props: dict) -> None:
         updates: dict = reported_properties(props)

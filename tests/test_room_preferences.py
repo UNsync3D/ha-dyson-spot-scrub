@@ -246,7 +246,7 @@ class RoomSettingsTests(unittest.TestCase):
         hass = SimpleNamespace(async_add_executor_job=AsyncMock(return_value=False))
         coordinator = coordinator_module.DysonCoordinator(
             hass, "token", "serial", "RB05", SimpleNamespace(data={}))
-        coordinator.mqtt = SimpleNamespace(connected=True, start_room=Mock(), state=dict(self.client.state))
+        coordinator.mqtt = SimpleNamespace(connected=True, available=True, start_room=Mock(), state=dict(self.client.state))
         with patch.object(coordinator, "_async_wait_for_clean_complete", AsyncMock()) as wait:
             asyncio.run(coordinator.async_clean_rooms_sequential(["Flur", "Schlafzimmer"]))
             wait.assert_not_awaited()
