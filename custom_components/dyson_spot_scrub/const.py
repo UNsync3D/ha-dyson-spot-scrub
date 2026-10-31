@@ -20,6 +20,24 @@ MAP_APPEARANCE_DEFAULTS = {
     # Like the MyDyson app: reachable floor dark, the rest grey, grey walls.
     "map_floor_fill": True,
 }
+# Walls, doors and floor shading (section "Walls and floors"). Defaults are
+# the MyDyson app's look. The default grey wall and door colours switch to
+# white when Room colors is on or the floor fill is off, so they stay readable.
+MAP_WALL_DEFAULTS = {
+    "map_wall_style": "solid",
+    "map_wall_thickness_cm": 5,
+    "map_wall_color": [147, 147, 147],
+    "map_door_style": "dashed",          # doors and other openings (type 1)
+    "map_door_thickness_cm": 3,
+    "map_door_color": [147, 147, 147],
+    "map_floor_color": [18, 18, 20],     # floor the robot can reach
+    "map_room_fill_color": [37, 37, 40], # rest of each room (furniture etc.)
+}
+MAP_LINE_STYLES = ("solid", "dashed")
+MAP_CHOICES = {
+    "map_wall_style": MAP_LINE_STYLES,
+    "map_door_style": MAP_LINE_STYLES,
+}
 MAP_VISIBILITY_DEFAULTS = {
     "map_show_furniture": False,   # the floor fill shows furniture as grey
     "map_show_room_names": True,
@@ -37,12 +55,15 @@ MAP_DEFAULTS = {
     **MAP_RETENTION_DEFAULTS,
     "map_transparent_background": False,
     **MAP_APPEARANCE_DEFAULTS,
+    **MAP_WALL_DEFAULTS,
     **MAP_VISIBILITY_DEFAULTS,
 }
 MAP_NUMBER_RANGES = {
     "map_retention_minutes": (0, 60),
     "map_path_width": (1, 15),
     "map_glow_width": (0, 25),
+    "map_wall_thickness_cm": (1, 30),
+    "map_door_thickness_cm": (1, 30),
 }
 MAP_PATH_ACTIONS = {
     "VACUUMING": "map_vacuum_color",

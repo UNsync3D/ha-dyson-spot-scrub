@@ -37,7 +37,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .const import MAP_PATH_ACTIONS
+from .const import MAP_PATH_ACTIONS, MAP_WALL_DEFAULTS
 from .map_options import map_options
 
 try:
@@ -80,9 +80,8 @@ DIVIDER        = (200, 200, 208, 170)   # open boundary between rooms (type 1), 
 ROOM_FILL      = (37,  37,  40,  255)   # room area the robot can't reach
 FLOOR_FILL     = (18,  18,  20,  255)   # floor the robot reaches
 APP_WALL       = (147, 147, 147, 255)   # walls in the app's grey
-APP_DIVIDER    = (147, 147, 147, 210)
-WALL_WIDTH_M   = 0.05                   # drawn wall thickness in metres
-DIVIDER_WIDTH_M = 0.025                 # shared boundaries: half a wall
+# Wall / door thickness, style and colours come from the "Walls and floors"
+# options (map_wall_* / map_door_*); defaults in const.MAP_WALL_DEFAULTS.
 MERGE_TOLERANCE_M = 0.08                # same boundary from two rooms: merge
 
 # Room colours (option map_room_colors), chosen to stay distinct from the
@@ -103,6 +102,7 @@ ROOM_PALETTE = [
 FONT_FILE = Path(__file__).with_name("fonts") / "DejaVuSans.ttf"
 ZONE_VISITED   = (160, 160, 168, 60)    # subtle grey visited path
 ZONE_LABEL     = (220, 220, 225, 220)   # white label text
+DARK_LABEL     = (30,  30,  34,  230)   # label text on a light floor colour
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -247,18 +247,20 @@ def _render(
     # ── 4. Floor fill (option map_floor_fill) ─────────────────────────────────
     room_colors = options["map_room_colors"]
     map_id = map_data.get("id")
+    floor_fill = tuple(options["map_floor_color"]) + (255,)
+    room_fill = tuple(options["map_room_fill_color"]) + (255,)
     if options["map_floor_fill"]:
         # Like the MyDyson app: the floor the robot can reach dark, the rest
         # of the room lighter, so furniture shows as grey blocks.
         for z in zones:
             room = _room_polygon(z)
             if len(room) >= 3:
-                _poly_alpha(img, txy_list(room), ROOM_FILL, (0, 0, 0, 0))
+                _poly_alpha(img, txy_list(room), room_fill, (0, 0, 0, 0))
         for z in zones:
             visited = [_pt(p) for p in z.get("visited") or []]
             if len(visited) >= 3:
-                fill = (_tint(FLOOR_FILL, _room_color(z.get("id"), map_id), 0.22)
-                        if room_colors else FLOOR_FILL)
+                fill = (_tint(floor_fill, _room_color(z.get("id"), map_id), 0.22)
+                        if room_colors else floor_fill)
                 _poly_alpha(img, [txy(p) for p in visited], fill, (0, 0, 0, 0))
 
     # ── 5. Keep-out zones, floor outlines, then walls and room boundaries ──
@@ -294,24 +296,26 @@ def _render(
     # both looked doubled. Walls of any length are drawn (an earlier 1.5 m
     # cut-off dropped most real walls).
     if options["map_show_perimeter"]:
-        wall_width = max(2, round(WALL_WIDTH_M * scale))
-        divider_width = max(1, round(DIVIDER_WIDTH_M * scale))
+        # Thickness is in real centimetres, so lines scale with the map.
+        wall_width = max(1, round(options["map_wall_thickness_cm"] / 100 * scale))
+        door_width = max(1, round(options["map_door_thickness_cm"] / 100 * scale))
         walls, shared = [], []
         for z in zones:
             for kind, seg_start, seg_end in _outline_segments(z):
                 (shared if kind == 1 else walls).append((seg_start, seg_end))
-        # App grey with the floor fill; white otherwise, and with room
-        # colours on (white walls keep the coloured rooms easy to read).
-        app_grey = options["map_floor_fill"] and not room_colors
-        wall_col, divider_col = (APP_WALL, APP_DIVIDER) if app_grey else (WALL, DIVIDER)
+        # The default grey (the app's) switches to white when room colours
+        # are on or the fill is off, where grey would be hard to read. A
+        # colour the user picked is always used as chosen.
+        auto_white = room_colors or not options["map_floor_fill"]
+        wall_col = _line_color(options, "map_wall_color", WALL, auto_white)
+        door_col = _line_color(options, "map_door_color", DIVIDER, auto_white)
         merged_walls = _merge_segments(walls)
-        for seg_start, seg_end in _merge_segments(shared):
-            for part in _subtract_segments((seg_start, seg_end), merged_walls):
-                _dashed_seg(img, txy(part[0]), txy(part[1]), divider_col,
-                            divider_width, dash=7, gap=5)
-        draw = ImageDraw.Draw(img)
-        for seg_start, seg_end in merged_walls:
-            draw.line([txy(seg_start), txy(seg_end)], fill=wall_col, width=wall_width)
+        doors = [part for seg in _merge_segments(shared)
+                 for part in _subtract_segments(seg, merged_walls)]
+        _draw_lines(img, [(txy(a), txy(b)) for a, b in doors], door_col, door_width,
+                    options["map_door_style"])
+        _draw_lines(img, [(txy(a), txy(b)) for a, b in merged_walls], wall_col, wall_width,
+                    options["map_wall_style"])
 
     # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in (_get_furniture(map_data, live_data) if options["map_show_furniture"] else []):
@@ -372,7 +376,11 @@ def _render(
     # ── 10. Zone labels ───────────────────────────────────────────────────────
     font_l, font_s = _load_fonts()
     draw = ImageDraw.Draw(img)
-    area_label_col = (ZONE_LABEL[0], ZONE_LABEL[1], ZONE_LABEL[2], 130)
+    zone_label = ZONE_LABEL
+    r, g, b = options["map_floor_color"]
+    if options["map_floor_fill"] and 0.299 * r + 0.587 * g + 0.114 * b > 140:
+        zone_label = DARK_LABEL        # light floor colour: dark text stays readable
+    area_label_col = zone_label[:3] + (130,)
     for z in zones:
         loc = z.get("nameLocation") or {}
         lx_m = loc.get("x", 0.0)
@@ -382,7 +390,7 @@ def _render(
         lx, ly = int(tx(lx_m)), int(ty(ly_m))
         draw = ImageDraw.Draw(img)
         name = (z.get("name") or "").upper()
-        label_col, area_col = ZONE_LABEL, area_label_col
+        label_col, area_col = zone_label, area_label_col
         if options["map_room_colors"]:
             label_col = _room_color(z.get("id"), map_id) + (255,)
             area_col = _room_color(z.get("id"), map_id) + (190,)
@@ -596,6 +604,31 @@ def _subtract_segments(seg, walls) -> list:
         spans = [piece for s0, s1 in spans
                  for piece in ((s0, min(s1, wlo)), (max(s0, whi), s1)) if piece[1] - piece[0] > 0.01]
     return [((s0, pos), (s1, pos)) if horizontal else ((pos, s0), (pos, s1)) for s0, s1 in spans]
+
+
+def _line_color(options, key, auto_colour, auto_white):
+    """A wall/door colour option; the untouched default may switch to white."""
+    colour = list(options[key])
+    if auto_white and colour == MAP_WALL_DEFAULTS[key]:
+        return auto_colour
+    return tuple(colour) + (255,)
+
+
+def _draw_lines(img, lines, colour, width, style):
+    """Draw pixel-space line segments solid or dashed, with square corners."""
+    if style == "dashed":
+        dash, gap = max(7, 3 * width), max(5, 2 * width)
+        for start, end in lines:
+            _dashed_seg(img, start, end, colour, width, dash=dash, gap=gap)
+        return
+    draw = ImageDraw.Draw(img)
+    half = width / 2
+    for start, end in lines:
+        draw.line([start, end], fill=colour, width=width)
+        if width >= 3:
+            # Square ends, so thick walls meet at corners without notches.
+            for x, y in (start, end):
+                draw.rectangle([x - half, y - half, x + half - 1, y + half - 1], fill=colour)
 
 
 def _tint(base, colour, amount):

@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from copy import deepcopy
 import math
 
-from .const import MAP_DEFAULTS, MAP_NUMBER_RANGES
+from .const import MAP_CHOICES, MAP_DEFAULTS, MAP_NUMBER_RANGES
 
 
 def map_options(options: Mapping | None = None) -> dict:
@@ -14,7 +14,10 @@ def map_options(options: Mapping | None = None) -> dict:
     for key, value in (options or {}).items():
         if key not in result:
             continue
-        if isinstance(result[key], bool):
+        if key in MAP_CHOICES:
+            if isinstance(value, str) and value in MAP_CHOICES[key]:
+                result[key] = value
+        elif isinstance(result[key], bool):
             if isinstance(value, bool):
                 result[key] = value
         elif key in MAP_NUMBER_RANGES:

@@ -122,6 +122,27 @@
               "map_room_colors": "Give each room its own color for its floor, outline, name, area and legend entry, fixed by map and room. Walls are white with this on, and cleaning-path colors are unchanged. Off shows every room in grey."
             }
           },
+          "walls_settings_section": {
+            "name": "Walls and floors",
+            "description": "Walls are solid edges in the Dyson map; doors are openings between rooms that the robot can pass through. The defaults match the MyDyson app.",
+            "data": {
+              "map_wall_style": "Wall style",
+              "map_wall_thickness_cm": "Wall thickness",
+              "map_wall_color": "Wall color",
+              "map_door_style": "Door and opening style",
+              "map_door_thickness_cm": "Door and opening thickness",
+              "map_door_color": "Door and opening color",
+              "map_floor_color": "Reachable floor color",
+              "map_room_fill_color": "Rest of room color"
+            },
+            "data_description": {
+              "map_wall_thickness_cm": "In centimetres on the real floor, so walls scale with the map. Default 5 cm.",
+              "map_wall_color": "The default grey switches to white when Room colors is on or the floor fill is off. Any other color is used as chosen.",
+              "map_door_color": "The default grey switches to light grey when Room colors is on or the floor fill is off. Any other color is used as chosen.",
+              "map_floor_color": "Used when the floor fill is on: the floor the robot can reach.",
+              "map_room_fill_color": "Used when the floor fill is on: furniture and other parts of the room the robot can't reach."
+            }
+          },
           "visibility_settings_section": {
             "name": "Visible elements",
             "description": "Enabled elements are visible. Hidden elements still contribute to image bounds, preserving the overlay alignment.",
@@ -152,6 +173,14 @@
     },
     "error": {
       "invalid_map_option": "Enter a valid value within the allowed range."
+    }
+  },
+  "selector": {
+    "line_style": {
+      "options": {
+        "solid": "Solid",
+        "dashed": "Dashed"
+      }
     }
   }
 }

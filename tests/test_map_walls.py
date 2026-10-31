@@ -16,6 +16,7 @@ from pathlib import Path
 import sys
 from types import ModuleType
 import unittest
+import unittest.mock
 
 from PIL import Image
 
@@ -179,6 +180,73 @@ class FloorFillTests(unittest.TestCase):
         line = [pixel(img, 1.125, y / 20, bounds) for y in range(0, 40)]
         self.assertIn(renderer.APP_WALL, line)
         self.assertIn(renderer.FLOOR_FILL, line, "gaps: dashed")
+
+
+class WallOptionTests(unittest.TestCase):
+    """Walls and floors options: style, thickness in cm, line and region colours."""
+
+    def room(self):
+        data = square_room([seg(2, 0, 2, 4, 1)])          # a door line down the middle
+        data["zones"][0]["visited"] = [{"x": 0.5, "y": 0.5}, {"x": 1.5, "y": 0.5},
+                                       {"x": 1.5, "y": 3.5}, {"x": 0.5, "y": 3.5}]
+        data["zones"][0].update(name="Küche", nameLocation={"x": 1, "y": 2})
+        return data
+
+    def draw(self, **options):
+        return render(self.room(), map_floor_fill=True, map_show_labels=False, **options)
+
+    def wall_pixels(self, img, colour):
+        """How many pixels thick the left wall (x = 0) is, sampled at y = 2."""
+        min_x, max_y = 0, 4
+        y = int(((max_y + MARGIN) - 2) * SCALE + PAD)
+        return sum(1 for x in range(0, int(1 * SCALE + PAD + MARGIN * SCALE))
+                   if img.getpixel((x, y)) == colour)
+
+    def test_thickness_is_in_real_centimetres(self):
+        thin = self.wall_pixels(self.draw(map_wall_thickness_cm=5), renderer.APP_WALL)
+        thick = self.wall_pixels(self.draw(map_wall_thickness_cm=20), renderer.APP_WALL)
+        self.assertEqual(thin, max(1, round(0.05 * SCALE)))
+        self.assertEqual(thick, round(0.20 * SCALE))
+
+    def test_dashed_walls_have_gaps(self):
+        line = [pixel(self.draw(map_wall_style="dashed"), 4, i / 20, (0, 4)) for i in range(5, 75)]
+        self.assertIn(renderer.APP_WALL, line)
+        self.assertIn(renderer.ROOM_FILL, line, "gaps")
+        solid = [pixel(self.draw(), 4, i / 20, (0, 4)) for i in range(5, 75)]
+        self.assertEqual(set(solid), {renderer.APP_WALL})
+
+    def test_solid_doors(self):
+        line = [pixel(self.draw(map_door_style="solid"), 2, i / 20, (0, 4)) for i in range(5, 75)]
+        self.assertEqual(set(line), {renderer.APP_WALL})
+
+    def test_line_and_region_colours(self):
+        img = self.draw(map_wall_color=[255, 0, 0], map_door_color=[0, 0, 255],
+                        map_floor_color=[0, 80, 0], map_room_fill_color=[60, 60, 0])
+        self.assertEqual(pixel(img, 0, 2, (0, 4)), (255, 0, 0, 255))
+        self.assertIn((0, 0, 255, 255), [pixel(img, 2, i / 20, (0, 4)) for i in range(5, 75)])
+        self.assertEqual(pixel(img, 1, 2, (0, 4)), (0, 80, 0, 255))
+        self.assertEqual(pixel(img, 3, 2, (0, 4)), (60, 60, 0, 255))
+
+    def test_default_grey_turns_white_but_a_chosen_colour_stays(self):
+        self.assertEqual(pixel(self.draw(map_room_colors=True), 0, 2, (0, 4)), renderer.WALL)
+        chosen = self.draw(map_room_colors=True, map_wall_color=[255, 0, 0])
+        self.assertEqual(pixel(chosen, 0, 2, (0, 4)), (255, 0, 0, 255))
+
+    def test_labels_turn_dark_on_a_light_floor(self):
+        drawn = []
+        original = renderer._draw_centered_text
+        def record(draw, x, y, text, font, colour):
+            drawn.append((text, colour))
+            return original(draw, x, y, text, font, colour)
+        with unittest.mock.patch.object(renderer, "_draw_centered_text", record):
+            render(self.room(), map_floor_fill=True, map_floor_color=[245, 245, 240])
+            render(self.room(), map_floor_fill=True)
+        self.assertEqual(drawn[0][1], renderer.DARK_LABEL)
+        self.assertEqual(drawn[1][1], renderer.ZONE_LABEL)
+
+    def test_thick_walls_meet_at_square_corners(self):
+        img = self.draw(map_wall_thickness_cm=20)
+        self.assertEqual(pixel(img, -0.08, -0.08, (0, 4)), renderer.APP_WALL)
 
 
 class FontTests(unittest.TestCase):

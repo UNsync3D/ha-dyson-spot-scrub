@@ -53,7 +53,9 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         entries = module('homeassistant.config_entries', ConfigFlow=Flow, OptionsFlow=Flow)
         selectors = SimpleNamespace(BooleanSelector=Selector, ColorRGBSelector=Selector,
                                     NumberSelector=Selector, NumberSelectorConfig=dict,
-                                    NumberSelectorMode=SimpleNamespace(SLIDER='slider'))
+                                    NumberSelectorMode=SimpleNamespace(SLIDER='slider'),
+                                    SelectSelector=Selector, SelectSelectorConfig=dict,
+                                    SelectSelectorMode=SimpleNamespace(DROPDOWN='dropdown'))
         modules = {
             'map_flow_integration': package,
             'homeassistant': module('homeassistant', config_entries=entries),
@@ -114,6 +116,31 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result['errors']['base'], 'invalid_map_option')
         result = await self.flow.async_step_init({'visibility_settings_section': 'invalid'})
         self.assertEqual(result['errors']['base'], 'invalid_map_option')
+
+
+    async def test_walls_and_floors_section(self):
+        result = await self.flow.async_step_init()
+        schema = result['data_schema']
+        walls = schema({})['walls_settings_section']
+        self.assertEqual(walls['map_wall_style'], 'solid')
+        self.assertEqual(walls['map_wall_thickness_cm'], 5)
+        self.assertEqual(walls['map_door_style'], 'dashed')
+        fields = {str(k): v for marker, section in schema.schema.items()
+                  if isinstance(section, Section) for k, v in section.schema.schema.items()}
+        self.assertEqual(fields['map_wall_style'].config['options'], ['solid', 'dashed'])
+        self.assertEqual(fields['map_wall_thickness_cm'].config['unit_of_measurement'], 'cm')
+        saved = await self.flow.async_step_init({'walls_settings_section': {
+            'map_wall_style': 'dashed', 'map_wall_thickness_cm': 8,
+            'map_wall_color': [255, 0, 0], 'map_room_fill_color': [10, 20, 30]}})
+        self.assertEqual(saved['type'], 'create_entry')
+        self.assertEqual(saved['data']['map_wall_style'], 'dashed')
+        self.assertEqual(saved['data']['map_wall_thickness_cm'], 8)
+        self.assertEqual(saved['data']['map_room_fill_color'], [10, 20, 30])
+        self.assertNotIn('walls_settings_section', saved['data'])
+        for bad in ({'map_wall_style': 'dotted'}, {'map_door_thickness_cm': 0},
+                    {'map_wall_thickness_cm': 31}, {'map_floor_color': [300, 0, 0]}):
+            result = await self.flow.async_step_init({'walls_settings_section': bad})
+            self.assertEqual(result['errors']['base'], 'invalid_map_option', bad)
 
 
 if __name__ == '__main__':
