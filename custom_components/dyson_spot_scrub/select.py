@@ -6,13 +6,13 @@ Provides:
       - Room <name> Cleaning Mode
       - Room <name> Cleaning Strategy
       - Room <name> Water Level
-      - Room <name> Mop Repetitions
+      - Room <name> Clean Repetitions  (unique ID suffix still mop_repetitions)
 
 Per-room array-index mapping (confirmed from FutuRazor MQTT captures, Oct 2026):
   [3]  cleaningMode      0=Vacuum  1=Vacuum+Mop  2=Mop  3=Vacuum then Mop
   [4]  cleaningStrategy  0=Auto  1=Boost  2=Quiet  3=Quick
   [5]  waterLevel        99=Very Low  0=Low  1=Medium  2=High
-  [6]  mopRepetitions    0=One pass  1=Two passes
+  [6]  repetitions       0=One pass  1=Two passes (applies to vacuum-only too)
 """
 from __future__ import annotations
 
@@ -87,7 +87,11 @@ _ROOM_SELECT_DESCRIPTORS = [
         5, _WATER_LEVEL_OPTIONS, _INV_WATER_LEVEL,
     ),
     (
-        "mop_repetitions", "Mop Repetitions", "mdi:repeat",
+        # Shown as "Clean Repetitions", matching the planner card: two passes
+        # also apply to vacuum-only cleans (#35). The select_type stays
+        # "mop_repetitions" so unique IDs, entity IDs and the card's lookup
+        # (by unique ID) are unchanged.
+        "mop_repetitions", "Clean Repetitions", "mdi:repeat",
         6, _MOP_REPETITIONS_OPTIONS, _INV_MOP_REPETITIONS,
     ),
 ]
