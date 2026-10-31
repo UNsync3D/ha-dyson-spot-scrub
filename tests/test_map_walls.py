@@ -232,6 +232,25 @@ class WallOptionTests(unittest.TestCase):
         chosen = self.draw(map_room_colors=True, map_wall_color=[255, 0, 0])
         self.assertEqual(pixel(chosen, 0, 2, (0, 4)), (255, 0, 0, 255))
 
+    def test_each_wall_type_has_its_own_options(self):
+        """Type 0 outside walls, type 2 walls between rooms, type 1 openings."""
+        data = square_room([seg(1, 0, 1, 4, 2), seg(3, 0, 3, 4, 1)])
+        img = render(data, map_floor_fill=True, map_show_labels=False,
+                     map_wall_color=[255, 0, 0], map_inner_wall_color=[0, 255, 0],
+                     map_door_color=[0, 0, 255], map_door_style="solid",
+                     map_inner_wall_thickness_cm=15)
+        self.assertEqual(pixel(img, 0, 2, (0, 4)), (255, 0, 0, 255))     # type 0
+        self.assertEqual(pixel(img, 1, 2, (0, 4)), (0, 255, 0, 255))     # type 2
+        self.assertEqual(pixel(img, 3, 2, (0, 4)), (0, 0, 255, 255))     # type 1
+        self.assertEqual(pixel(img, 1.06, 2, (0, 4)), (0, 255, 0, 255), "15 cm wide")
+        self.assertNotEqual(pixel(img, 0.06, 2, (0, 4)), (255, 0, 0, 255), "still 5 cm")
+        dashed = render(data, map_floor_fill=True, map_inner_wall_style="dashed")
+        inner = [pixel(dashed, 1, i / 20, (0, 4)) for i in range(5, 75)]
+        outer = [pixel(dashed, 4, i / 20, (0, 4)) for i in range(5, 75)]
+        self.assertIn(renderer.APP_WALL, inner)
+        self.assertGreater(len(set(inner)), 1, "type 2 dashed: gaps")
+        self.assertEqual(set(outer), {renderer.APP_WALL}, "type 0 still solid")
+
     def test_labels_turn_dark_on_a_light_floor(self):
         drawn = []
         original = renderer._draw_centered_text

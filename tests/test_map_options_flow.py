@@ -125,6 +125,8 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(walls['map_wall_style'], 'solid')
         self.assertEqual(walls['map_wall_thickness_cm'], 5)
         self.assertEqual(walls['map_door_style'], 'dashed')
+        self.assertEqual(walls['map_inner_wall_style'], 'solid')
+        self.assertEqual(walls['map_inner_wall_thickness_cm'], 5)
         fields = {str(k): v for marker, section in schema.schema.items()
                   if isinstance(section, Section) for k, v in section.schema.schema.items()}
         self.assertEqual(fields['map_wall_style'].config['options'], ['solid', 'dashed'])

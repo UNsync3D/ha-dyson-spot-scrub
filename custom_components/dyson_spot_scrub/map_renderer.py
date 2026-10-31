@@ -297,25 +297,32 @@ def _render(
     # cut-off dropped most real walls).
     if options["map_show_perimeter"]:
         # Thickness is in real centimetres, so lines scale with the map.
-        wall_width = max(1, round(options["map_wall_thickness_cm"] / 100 * scale))
-        door_width = max(1, round(options["map_door_thickness_cm"] / 100 * scale))
-        walls, shared = [], []
+        def width(key):
+            return max(1, round(options[key] / 100 * scale))
+        segments = {0: [], 1: [], 2: []}
         for z in zones:
             for kind, seg_start, seg_end in _outline_segments(z):
-                (shared if kind == 1 else walls).append((seg_start, seg_end))
+                segments[kind].append((seg_start, seg_end))
         # The default grey (the app's) switches to white when room colours
         # are on or the fill is off, where grey would be hard to read. A
         # colour the user picked is always used as chosen.
         auto_white = room_colors or not options["map_floor_fill"]
-        wall_col = _line_color(options, "map_wall_color", WALL, auto_white)
-        door_col = _line_color(options, "map_door_color", DIVIDER, auto_white)
-        merged_walls = _merge_segments(walls)
-        doors = [part for seg in _merge_segments(shared)
-                 for part in _subtract_segments(seg, merged_walls)]
-        _draw_lines(img, [(txy(a), txy(b)) for a, b in doors], door_col, door_width,
-                    options["map_door_style"])
-        _draw_lines(img, [(txy(a), txy(b)) for a, b in merged_walls], wall_col, wall_width,
-                    options["map_wall_style"])
+        # Type 0: outside walls. Type 2: walls between rooms (both rooms list
+        # them). Type 1: openings, minus any part a wall already covers.
+        outer = _merge_segments(segments[0])
+        inner = _merge_segments(segments[2])
+        doors = [part for seg in _merge_segments(segments[1])
+                 for part in _subtract_segments(seg, outer + inner)]
+        layers = [
+            (doors, "map_door_color", DIVIDER, "map_door_thickness_cm", "map_door_style"),
+            (inner, "map_inner_wall_color", WALL, "map_inner_wall_thickness_cm",
+             "map_inner_wall_style"),
+            (outer, "map_wall_color", WALL, "map_wall_thickness_cm", "map_wall_style"),
+        ]
+        for lines, colour_key, auto_colour, width_key, style_key in layers:
+            _draw_lines(img, [(txy(a), txy(b)) for a, b in lines],
+                        _line_color(options, colour_key, auto_colour, auto_white),
+                        width(width_key), options[style_key])
 
     # ── 6. Furniture ──────────────────────────────────────────────────────────
     for f in (_get_furniture(map_data, live_data) if options["map_show_furniture"] else []):

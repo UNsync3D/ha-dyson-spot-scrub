@@ -24,9 +24,12 @@ MAP_APPEARANCE_DEFAULTS = {
 # the MyDyson app's look. The default grey wall and door colours switch to
 # white when Room colors is on or the floor fill is off, so they stay readable.
 MAP_WALL_DEFAULTS = {
-    "map_wall_style": "solid",
+    "map_wall_style": "solid",           # outside walls (presentation type 0)
     "map_wall_thickness_cm": 5,
     "map_wall_color": [147, 147, 147],
+    "map_inner_wall_style": "solid",     # walls between rooms (type 2)
+    "map_inner_wall_thickness_cm": 5,
+    "map_inner_wall_color": [147, 147, 147],
     "map_door_style": "dashed",          # doors and other openings (type 1)
     "map_door_thickness_cm": 3,
     "map_door_color": [147, 147, 147],
@@ -36,6 +39,7 @@ MAP_WALL_DEFAULTS = {
 MAP_LINE_STYLES = ("solid", "dashed")
 MAP_CHOICES = {
     "map_wall_style": MAP_LINE_STYLES,
+    "map_inner_wall_style": MAP_LINE_STYLES,
     "map_door_style": MAP_LINE_STYLES,
 }
 MAP_VISIBILITY_DEFAULTS = {
@@ -63,6 +67,7 @@ MAP_NUMBER_RANGES = {
     "map_path_width": (1, 15),
     "map_glow_width": (0, 25),
     "map_wall_thickness_cm": (1, 30),
+    "map_inner_wall_thickness_cm": (1, 30),
     "map_door_thickness_cm": (1, 30),
 }
 MAP_PATH_ACTIONS = {

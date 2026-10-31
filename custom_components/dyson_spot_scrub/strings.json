@@ -124,11 +124,14 @@
           },
           "walls_settings_section": {
             "name": "Walls and floors",
-            "description": "Walls are solid edges in the Dyson map; doors are openings between rooms that the robot can pass through. The defaults match the MyDyson app.",
+            "description": "Dyson's map has three kinds of line: outside walls (a room's edge not shared with another room), walls between rooms, and doors or openings the robot can pass through (also open-plan splits). The defaults match the MyDyson app.",
             "data": {
-              "map_wall_style": "Wall style",
-              "map_wall_thickness_cm": "Wall thickness",
-              "map_wall_color": "Wall color",
+              "map_wall_style": "Outside wall style",
+              "map_wall_thickness_cm": "Outside wall thickness",
+              "map_wall_color": "Outside wall color",
+              "map_inner_wall_style": "Wall between rooms style",
+              "map_inner_wall_thickness_cm": "Wall between rooms thickness",
+              "map_inner_wall_color": "Wall between rooms color",
               "map_door_style": "Door and opening style",
               "map_door_thickness_cm": "Door and opening thickness",
               "map_door_color": "Door and opening color",
@@ -137,6 +140,8 @@
             },
             "data_description": {
               "map_wall_thickness_cm": "In centimetres on the real floor, so walls scale with the map. Default 5 cm.",
+              "map_inner_wall_thickness_cm": "In centimetres on the real floor. Default 5 cm.",
+              "map_inner_wall_color": "The default grey switches to white when Room colors is on or the floor fill is off. Any other color is used as chosen.",
               "map_wall_color": "The default grey switches to white when Room colors is on or the floor fill is off. Any other color is used as chosen.",
               "map_door_color": "The default grey switches to light grey when Room colors is on or the floor fill is off. Any other color is used as chosen.",
               "map_floor_color": "Used when the floor fill is on: the floor the robot can reach.",
