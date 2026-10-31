@@ -256,6 +256,7 @@ class WallOptionTests(unittest.TestCase):
         data["restrictions"] = [{"behavior": "keepOut", "points": [
             {"x": 2.5, "y": 1}, {"x": 3.5, "y": 1}, {"x": 3.5, "y": 3}, {"x": 2.5, "y": 3}]}]
         img = render(data, map_floor_fill=True, map_show_labels=False,
+                     map_show_restrictions=True,
                      map_keepout_color=[255, 0, 255], map_keepout_style="solid",
                      map_keepout_thickness_cm=10)
         edge = [pixel(img, 2.5, i / 20, (0, 4)) for i in range(22, 58)]
@@ -264,12 +265,15 @@ class WallOptionTests(unittest.TestCase):
         inside = pixel(img, 3, 2, (0, 4))
         self.assertNotEqual(inside, renderer.ROOM_FILL, "tinted")
         self.assertGreater(inside[0], inside[1], "tinted magenta")
-        dashed = render(data, map_floor_fill=True, map_show_labels=False)
+        dashed = render(data, map_floor_fill=True, map_show_labels=False,
+                        map_show_restrictions=True)
         edge = [pixel(dashed, 2.5, i / 20, (0, 4)) for i in range(22, 58)]
         self.assertIn((245, 158, 11, 255), edge, "default amber")
         self.assertGreater(len(set(edge)), 1, "default dashed")
         hidden = render(data, map_floor_fill=True, map_show_restrictions=False)
         self.assertEqual(pixel(hidden, 2.5, 2, (0, 4)), renderer.ROOM_FILL)
+        self.assertFalse(constants.MAP_VISIBILITY_DEFAULTS["map_show_restrictions"],
+                         "hidden by default")
 
     def test_labels_turn_dark_on_a_light_floor(self):
         drawn = []
