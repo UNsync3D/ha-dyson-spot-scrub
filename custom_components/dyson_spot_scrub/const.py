@@ -17,30 +17,46 @@ MAP_APPEARANCE_DEFAULTS = {
     # swatch get a colour, fixed by map ID and room ID. Walls are white with
     # room colours on; path colours are unaffected.
     "map_room_colors": False,
-    # Like the MyDyson app: reachable floor dark, the rest grey, grey walls.
-    "map_floor_fill": True,
 }
 # Walls, doors and floor shading (section "Walls and floors"). Defaults are
 # the MyDyson app's look. The default grey wall and door colours switch to
 # white when Room colors is on or the floor fill is off, so they stay readable.
-MAP_WALL_DEFAULTS = {
-    "map_wall_style": "solid",           # outside walls (presentation type 0)
-    "map_wall_thickness_cm": 5,
-    "map_wall_color": [147, 147, 147],
-    "map_inner_wall_style": "solid",     # walls between rooms (type 2)
-    "map_inner_wall_thickness_cm": 5,
-    "map_inner_wall_color": [147, 147, 147],
-    "map_door_style": "dashed",          # doors and other openings (type 1)
-    "map_door_thickness_cm": 3,
-    "map_door_color": [147, 147, 147],
-    "map_floor_color": [18, 18, 20],     # floor the robot can reach
-    "map_room_fill_color": [37, 37, 40], # rest of each room (furniture etc.)
-    # Keep-out zones: outline style/thickness/colour; the fill is a faint
-    # tint of the same colour. Shown or hidden by map_show_restrictions.
-    "map_keepout_style": "dashed",
-    "map_keepout_thickness_cm": 1,
-    "map_keepout_color": [245, 158, 11],
+# Walls, doors, floor shading and keep-out zones: one options section per
+# map element. Defaults are the MyDyson app's look. The default grey wall and
+# door colours switch to white when Room colors is on or the floor fill is
+# off, so they stay readable.
+MAP_WALL_SECTIONS = {
+    "outside_walls_section": {           # presentation type 0
+        "map_wall_style": "solid",
+        "map_wall_thickness_cm": 5,
+        "map_wall_color": [147, 147, 147],
+    },
+    "inner_walls_section": {             # type 2: walls between rooms
+        "map_inner_wall_style": "solid",
+        "map_inner_wall_thickness_cm": 5,
+        "map_inner_wall_color": [147, 147, 147],
+    },
+    "doors_section": {                   # type 1: doors and other openings
+        "map_door_style": "dashed",
+        "map_door_thickness_cm": 3,
+        "map_door_color": [147, 147, 147],
+    },
+    "floor_section": {
+        # Like the MyDyson app: reachable floor dark, the rest grey.
+        "map_floor_fill": True,
+        "map_floor_color": [18, 18, 20],     # used only with Room colors off
+        "map_room_fill_color": [37, 37, 40], # furniture and unreachable areas
+    },
+    "keepout_section": {
+        # Outline style/thickness/colour; the fill is a faint tint of the
+        # same colour. Shown or hidden by map_show_restrictions.
+        "map_keepout_style": "dashed",
+        "map_keepout_thickness_cm": 1,
+        "map_keepout_color": [245, 158, 11],
+    },
 }
+MAP_WALL_DEFAULTS = {key: value for section in MAP_WALL_SECTIONS.values()
+                     for key, value in section.items()}
 MAP_LINE_STYLES = ("solid", "dashed")
 MAP_CHOICES = {
     "map_wall_style": MAP_LINE_STYLES,

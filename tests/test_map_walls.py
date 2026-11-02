@@ -127,7 +127,7 @@ class FloorFillTests(unittest.TestCase):
         return data
 
     def test_fill_is_the_default(self):
-        self.assertTrue(constants.MAP_APPEARANCE_DEFAULTS["map_floor_fill"])
+        self.assertTrue(constants.MAP_DEFAULTS["map_floor_fill"])
 
     def test_floor_dark_rest_grey_walls_app_grey(self):
         img = render(self.room_with_floor(), map_floor_fill=True, map_show_labels=False)
@@ -142,6 +142,18 @@ class FloorFillTests(unittest.TestCase):
         floor = pixel(img, 2, 2, (0, 4))
         self.assertNotEqual(floor, renderer.FLOOR_FILL)
         self.assertEqual(floor, renderer._tint(renderer.FLOOR_FILL, renderer._room_color("10"), 0.22))
+
+    def test_a_custom_floor_colour_cannot_wash_out_room_colours(self):
+        """FutuRazor's report: with Room colors on, a strong Reachable floor
+        color used to dominate. The room colour now decides the floor."""
+        plain = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
+                       map_show_labels=False)
+        custom = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
+                        map_show_labels=False, map_floor_color=[255, 255, 255])
+        self.assertEqual(pixel(custom, 2, 2, (0, 4)), pixel(plain, 2, 2, (0, 4)))
+        off = render(self.room_with_floor(), map_floor_fill=True, map_show_labels=False,
+                     map_floor_color=[255, 255, 255])
+        self.assertEqual(pixel(off, 2, 2, (0, 4)), (255, 255, 255, 255), "used with Room colors off")
 
     def test_room_colour_follows_the_map_and_room_id(self):
         self.assertEqual(renderer._room_color("10", "1792911875"),

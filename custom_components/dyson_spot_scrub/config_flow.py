@@ -28,7 +28,7 @@ from .const import (
     MAP_RETENTION_DEFAULTS,
     MAP_APPEARANCE_DEFAULTS,
     MAP_CHOICES,
-    MAP_WALL_DEFAULTS,
+    MAP_WALL_SECTIONS,
     MAP_VISIBILITY_DEFAULTS,
     MAP_NUMBER_RANGES,
 )
@@ -391,7 +391,7 @@ class DysonOptionsFlow(config_entries.OptionsFlow):
         }
         groups = {
             "line_settings_section": MAP_APPEARANCE_DEFAULTS,
-            "walls_settings_section": MAP_WALL_DEFAULTS,
+            **MAP_WALL_SECTIONS,
             "visibility_settings_section": {
                 key: value for key, value in MAP_VISIBILITY_DEFAULTS.items()
                 if key != "map_transparent_background"

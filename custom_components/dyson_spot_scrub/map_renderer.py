@@ -78,6 +78,7 @@ DIVIDER        = (200, 200, 208, 170)   # open boundary between rooms (type 1), 
 # Option map_floor_fill: colours measured from a MyDyson app screenshot
 ROOM_FILL      = (37,  37,  40,  255)   # room area the robot can't reach
 FLOOR_FILL     = (18,  18,  20,  255)   # floor the robot reaches
+ROOM_COLOR_BASE = FLOOR_FILL            # Room colors: tinted over this, always
 APP_WALL       = (147, 147, 147, 255)   # walls in the app's grey
 # Wall / door thickness, style and colours come from the "Walls and floors"
 # options (map_wall_* / map_door_*); defaults in const.MAP_WALL_DEFAULTS.
@@ -258,7 +259,10 @@ def _render(
         for z in zones:
             visited = [_pt(p) for p in z.get("visited") or []]
             if len(visited) >= 3:
-                fill = (_tint(floor_fill, _room_color(z.get("id"), map_id), 0.22)
+                # With Room colors on, the room's colour decides its floor at a
+                # fixed strength (over the app's dark floor), so a custom
+                # "Reachable floor color" can't wash the room colours out.
+                fill = (_tint(ROOM_COLOR_BASE, _room_color(z.get("id"), map_id), 0.22)
                         if room_colors else floor_fill)
                 _poly_alpha(img, [txy(p) for p in visited], fill, (0, 0, 0, 0))
 
