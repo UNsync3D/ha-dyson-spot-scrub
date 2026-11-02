@@ -1,6 +1,9 @@
 {
   "domain": "dyson_spot_scrub",
   "name": "Dyson Spot+Scrub AI",
+  "categories": [
+    "appliances_cleaning.cleaning"
+  ],
   "codeowners": [
     "@UNsync3D"
   ],
