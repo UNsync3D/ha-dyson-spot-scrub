@@ -80,7 +80,6 @@ MAP_VISIBILITY_DEFAULTS = {
     "map_show_grid": False,
     "map_show_dock": True,
     "map_show_restrictions": False,   # keep-out zones hidden unless switched on
-    "map_show_waypoints": True,
 }
 MAP_DEFAULTS = {
     **MAP_RETENTION_DEFAULTS,

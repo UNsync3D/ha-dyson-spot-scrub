@@ -136,6 +136,7 @@ class DysonMapCamera(Camera):
         self._last_source: tuple | None = None
         self._last_image_options: dict | None = None
         self._path_history = PathHistory()
+        self._path_format_logged = False
         self._observed_action: str | None = None
         self._action_changed_at = 0.0
 
@@ -153,6 +154,7 @@ class DysonMapCamera(Camera):
         self._last_source = None
         self._last_image_options = None
         self._path_history = PathHistory()
+        self._path_format_logged = False
         self._cleaning_finished_at = None
         _LOGGER.debug("[%s] Cleaning image reset: %s", self._serial, reason)
 
@@ -382,6 +384,15 @@ class DysonMapCamera(Camera):
                     or self._coordinator._live_map_fetched_at < self._action_changed_at):
                 action = None
             live_data = self._path_history.annotate(live_data, action)
+            if not self._path_format_logged:
+                # Once per clean: does Dyson's live map carry per-point
+                # "update" codes (travel/vacuum/mop)? Decides whether travel
+                # can be hidden exactly.
+                path = live_data.get("cleanPath") or []
+                coded = sum(1 for p in path if isinstance(p, dict) and "update" in p)
+                _LOGGER.debug("[%s] Clean path: %d points, %d with update codes",
+                              self._serial, len(path), coded)
+                self._path_format_logged = True
 
         # ── Update presentation cache from fresh zone data ────────────────────
         # Prefer live_data (most up-to-date), fall back to static map.

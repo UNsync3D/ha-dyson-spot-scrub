@@ -340,31 +340,31 @@ def _render(
             _poly_alpha(img, txy_list(bnd), FURN_FILL, FURN_STROKE)
 
     # ── 7. Live clean path ────────────────────────────────────────────────────
+    # Drawn like the MyDyson app: travel (update 0) is not shown, cleaning
+    # runs are smooth curves with round ends, no nodes at the joins.
     draw = ImageDraw.Draw(img)
     if live_data:
         cp = live_data.get("cleanPath", [])
         if len(cp) > 1:
-            pts2 = [txy(p) for p in cp]
+            pts2 = [(tx(_pt(p)[0]), ty(_pt(p)[1])) for p in cp]
             modes = live_data.get("_pathModes", [None] * (len(pts2) - 1))
-            colors = [tuple(options[MAP_PATH_ACTIONS[mode]]) + (255,)
-                      if mode in MAP_PATH_ACTIONS else PATH_UNKNOWN for mode in modes]
-            if len(colors) != len(pts2) - 1:
-                colors = [PATH_UNKNOWN] * (len(pts2) - 1)
+            if len(modes) != len(pts2) - 1:
+                modes = [None] * (len(pts2) - 1)
+            runs = _path_runs(cp, pts2, modes)
+            colors = {mode: (tuple(options[MAP_PATH_ACTIONS[mode]]) + (255,)
+                             if mode in MAP_PATH_ACTIONS else PATH_UNKNOWN)
+                      for mode, _ in runs}
+            width = options["map_path_width"]
             if options["map_glow_width"] > 0:
                 glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
                 glow_draw = ImageDraw.Draw(glow)
-                for j, color in enumerate(colors):
-                    glow_draw.line([pts2[j], pts2[j + 1]], fill=color[:3] + (50,),
-                                   width=options["map_glow_width"])
+                for mode, run in runs:
+                    _draw_smooth(glow_draw, run, colors[mode][:3] + (50,),
+                                 options["map_glow_width"])
                 img.alpha_composite(glow)
             draw = ImageDraw.Draw(img)
-            for j, color in enumerate(colors):
-                draw.line([pts2[j], pts2[j + 1]], fill=color,
-                          width=options["map_path_width"])
-            if options["map_show_waypoints"]:
-                for j in range(4, len(pts2), 5):
-                    x, y = pts2[j]
-                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=colors[j - 1])
+            for mode, run in runs:
+                _draw_smooth(draw, run, colors[mode], width)
 
     # ── 8. Dock ───────────────────────────────────────────────────────────────
     dock = _get_dock(map_data, live_data)
@@ -947,3 +947,75 @@ def _error_image(msg: str) -> bytes:
         return buf.getvalue()
     except Exception:
         return b""
+
+
+# ── Clean path helpers ────────────────────────────────────────────────────────
+# Per-point "update" in the robot's path stream (logs, 3 Nov 2026): 0 while
+# travelling (leaving the dock, returning, moving between rooms), 1 vacuuming,
+# 2 mopping; 3 vacuuming and mopping (seen by others).
+PATH_UPDATE_MODES = {1: "VACUUMING", 2: "MOPPING", 3: "VACUUMING_AND_MOPPING"}
+PATH_TRAVEL = 0
+
+
+def _point_update(p: Any) -> int | None:
+    """The point's "update" code, if Dyson sent one."""
+    if isinstance(p, dict):
+        value = p.get("update")
+        return value if type(value) is int else None
+    return None
+
+
+def _path_runs(cp: list, pts: list, modes: list) -> list:
+    """Split the path into same-mode runs, leaving travel out.
+
+    A segment takes its mode from the point it ends on when Dyson sent
+    per-point codes; otherwise from the observed robot activity (modes).
+    """
+    runs: list = []
+    current_mode = object()
+    current: list = []
+    for j in range(len(pts) - 1):
+        update = _point_update(cp[j + 1])
+        if update == PATH_TRAVEL:
+            mode = PATH_TRAVEL
+        elif update in PATH_UPDATE_MODES:
+            mode = PATH_UPDATE_MODES[update]
+        else:
+            mode = modes[j]
+        if mode == PATH_TRAVEL:
+            if len(current) > 1:
+                runs.append((current_mode, current))
+            current_mode, current = object(), []
+            continue
+        if mode != current_mode:
+            if len(current) > 1:
+                runs.append((current_mode, current))
+            current_mode, current = mode, [pts[j]]
+        current.append(pts[j + 1])
+    if len(current) > 1:
+        runs.append((current_mode, current))
+    return runs
+
+
+def _smooth(points: list, iterations: int = 2) -> list:
+    """Chaikin corner cutting: rounds the corners, keeps both end points."""
+    for _ in range(iterations):
+        if len(points) < 3:
+            return points
+        out = [points[0]]
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            out.append((0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1))
+            out.append((0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1))
+        out.append(points[-1])
+        points = out
+    return points
+
+
+def _draw_smooth(draw, points: list, color: tuple, width: int) -> None:
+    """One continuous rounded line: curved joins and round ends, no nodes."""
+    pts = _smooth(points)
+    draw.line(pts, fill=color, width=width, joint="curve")
+    if width > 2:
+        r = width / 2
+        for x, y in (pts[0], pts[-1]):
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=color)

@@ -174,8 +174,7 @@ class FloorFillTests(unittest.TestCase):
             "map_show_room_areas": False, "map_show_legend": False,
             "map_show_status_areas": False, "map_show_perimeter": True,
             "map_show_visited_paths": True, "map_show_grid": False,
-            "map_show_dock": True, "map_show_restrictions": False,
-            "map_show_waypoints": True})
+            "map_show_dock": True, "map_show_restrictions": False})
         self.assertTrue(constants.MAP_DEFAULTS["map_floor_fill"])
         self.assertFalse(constants.MAP_DEFAULTS["map_room_colors"])
         data = self.room_with_floor()
