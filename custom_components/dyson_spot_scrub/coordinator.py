@@ -21,6 +21,7 @@ from .dyson_api import (
     DysonRateLimitError,
     get_iot_credentials,
     get_live_map,
+    get_map_metadata,
 )
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
 
@@ -90,6 +91,7 @@ class DysonCoordinator:
         # Reconnect state
         self._shutting_down: bool = False
         self._reconnect_task: asyncio.Task | None = None
+        self._inventory_task: asyncio.Task | None = None
         self._reconnect_attempt: int = 0
 
         # Live-map fetch: shared across all camera viewers (deduplication + 429 backoff)
@@ -146,6 +148,7 @@ class DysonCoordinator:
         new_client.on_connected      = self._on_mqtt_connected
         new_client.on_disconnected   = self._on_mqtt_disconnected
         new_client.on_prefix_changed = self._on_mqtt_prefix_changed
+        new_client.on_map_changed    = self._on_mqtt_map_changed
         new_client.register_callback(self._on_state_change)
 
         # P1 #5: Assign before connecting so async_shutdown can disconnect
@@ -160,6 +163,8 @@ class DysonCoordinator:
     async def async_shutdown(self) -> None:
         self._shutting_down = True
         await self._async_cancel_cleaning_task()
+        if self._inventory_task and not self._inventory_task.done():
+            self._inventory_task.cancel()
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
             try:
@@ -314,6 +319,46 @@ class DysonCoordinator:
 
     def _on_mqtt_connected(self) -> None:
         self.hass.loop.call_soon_threadsafe(self._async_update_rooms_and_notify)
+
+    def _on_mqtt_map_changed(self, map_id: str) -> None:
+        """paho thread → refresh the room inventory for the (new) current map."""
+        self.hass.loop.call_soon_threadsafe(self._async_schedule_inventory_refresh)
+
+    @callback
+    def _async_schedule_inventory_refresh(self) -> None:
+        if self._shutting_down:
+            return
+        task = self._inventory_task
+        if task is None or task.done():
+            self._inventory_task = self.hass.async_create_task(
+                self.async_refresh_map_inventory())
+
+    async def async_refresh_map_inventory(self) -> None:
+        """Feed the REST map metadata (authoritative room list) to the MQTT client.
+
+        get_preference replies can be partial, so they never remove rooms; this
+        is what does. Called on map change (including the first report after
+        connecting); the camera also passes on metadata it fetches. A failure
+        only means removed rooms linger until the next successful refresh.
+        """
+        mqtt = self.mqtt
+        if mqtt is None:
+            return
+        try:
+            maps = await get_map_metadata(self._token, self.serial, session=self.http_session)
+        except Exception as exc:  # noqa: BLE001 — best effort
+            _LOGGER.debug("[%s] Map metadata refresh failed: %s", self.serial, exc)
+            return
+        self.apply_map_inventory(maps)
+
+    def apply_map_inventory(self, maps) -> None:
+        """Pass a get_map_metadata() result to the MQTT client's room store."""
+        mqtt = self.mqtt
+        if not isinstance(maps, list) or mqtt is None or not hasattr(mqtt, "set_map_inventory"):
+            return
+        for entry in maps:
+            if isinstance(entry, dict) and entry.get("id") is not None:
+                mqtt.set_map_inventory(entry["id"], entry.get("zones") or [])
 
     def _on_mqtt_disconnected(self) -> None:
         _LOGGER.warning("[%s] MQTT disconnected — will reconnect", self.serial)

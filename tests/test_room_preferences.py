@@ -45,7 +45,8 @@ class RoomSettingsTests(unittest.TestCase):
             "room_test_integration.dyson_api": module(
                 "room_test_integration.dyson_api", DysonApiError=Exception,
                 DysonRateLimitError=Exception,
-                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock()),
+                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock(),
+                get_map_metadata=AsyncMock(return_value=[])),
         }))
         self.mqtt = importlib.import_module("room_test_integration.dyson_mqtt")
         self.client = self.mqtt.DysonMqttClient(
@@ -69,6 +70,9 @@ class RoomSettingsTests(unittest.TestCase):
     def publish(self, topic, payload):
         self.sent.append((topic, deepcopy(payload)))
         if payload.get("method") == "service.get_preference":
+            # As the real _publish_raw does: remember which map we asked about.
+            self.client._track_preference_request(
+                payload.get("msgId"), payload["params"].get("map_id"))
             self.on_request(payload)
         return True  # Match the transport's successful-publication contract.
 
