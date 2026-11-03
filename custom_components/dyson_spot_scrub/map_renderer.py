@@ -63,8 +63,13 @@ MAX_CANVAS = 4096
 
 BG             = (6,   6,   8,   255)   # near-black
 DOCK           = (52,  211, 153, 255)   # #34d399 emerald green
-ROBOT          = (245, 158, 11,  255)   # #f59e0b amber
-ROBOT_HALO     = (245, 158, 11,  50)
+ROBOT_BODY     = (58,  58,  64,  255)   # charcoal top
+ROBOT_RIM      = (255, 255, 255, 230)
+ROBOT_SHADOW   = (0,   0,   0,   110)
+ROBOT_BUMPER   = (225, 29,  42,  255)   # #e11d2a red front bumper
+ROBOT_TURRET   = (200, 200, 205, 255)
+ROBOT_SENSOR   = (57,  255, 20,  255)   # #39ff14 fluorescent green
+ROBOT_BEAM     = (57,  255, 20)         # heading beam, alpha fades outwards
 PATH_MAIN      = (34,  211, 238, 255)   # #22d3ee cyan
 PATH_UNKNOWN   = (160, 160, 168, 255)
 KEEPOUT_FILL   = (245, 158, 11,  35)    # default tint; alpha used with map_keepout_color
@@ -379,15 +384,8 @@ def _render(
     if live_data:
         robot = live_data.get("robotLocation")
         if robot:
-            rx, ry = int(tx(robot["x"])), int(ty(robot["y"]))
             angle  = float(robot.get("angle", 0.0))
-            _ellipse_alpha(img, rx, ry, 20, ROBOT_HALO)
-            draw = ImageDraw.Draw(img)
-            draw.ellipse([rx - 9, ry - 9, rx + 9, ry + 9], fill=ROBOT)
-            # Heading arrow
-            ax = rx + int(16 * math.cos(angle))
-            ay = ry - int(16 * math.sin(angle))
-            draw.line([(rx, ry), (ax, ay)], fill=BG, width=2)
+            _draw_robot(img, tx(robot["x"]), ty(robot["y"]), angle)
 
     # ── 10. Zone labels ───────────────────────────────────────────────────────
     font_l, font_s = _load_fonts()
@@ -1019,3 +1017,57 @@ def _draw_smooth(draw, points: list, color: tuple, width: int) -> None:
         r = width / 2
         for x, y in (pts[0], pts[-1]):
             draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
+
+
+# ── Robot marker ───────────────────────────────────────────────────────────────
+
+ROBOT_RADIUS = 11.5     # body radius in map pixels
+BEAM_LENGTH = 25.0      # heading beam reach from the centre
+BEAM_HALF_ANGLE = 30.0  # degrees either side of the heading
+_SS = 4                 # supersampling for smooth edges
+
+
+def _draw_robot(img, cx: float, cy: float, angle: float) -> None:
+    """Robot seen from above: charcoal body, white rim, red front bumper,
+    sensor turret with a green dot, and a green beam that fades outwards."""
+    reach = int(math.ceil(BEAM_LENGTH)) + 3
+    box = _overlay_box(img, [int(cx) - reach, int(cx) + reach], [int(cy) - reach, int(cy) + reach])
+    if box is None:
+        return
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    layer = Image.new("RGBA", (w * _SS, h * _SS), (0, 0, 0, 0))
+    ox, oy = (cx - x0) * _SS, (cy - y0) * _SS
+    heading = -math.degrees(angle)          # PIL angles run clockwise
+
+    def disc(draw, r, **kw):
+        r *= _SS
+        draw.ellipse([ox - r, oy - r, ox + r, oy + r], **kw)
+
+    # Beam: concentric wedges from the outside in, each a little stronger.
+    mask = Image.new("L", layer.size, 0)
+    md = ImageDraw.Draw(mask)
+    steps = 24
+    for i in range(steps, -1, -1):
+        r = ROBOT_RADIUS + (BEAM_LENGTH - ROBOT_RADIUS) * i / steps
+        a = int(245 * (1 - i / steps) ** 1.3)
+        rr = r * _SS
+        md.pieslice([ox - rr, oy - rr, ox + rr, oy + rr],
+                    heading - BEAM_HALF_ANGLE, heading + BEAM_HALF_ANGLE, fill=a)
+    beam = Image.new("RGBA", layer.size, ROBOT_BEAM + (0,))
+    beam.putalpha(mask)
+    layer.alpha_composite(beam)
+
+    draw = ImageDraw.Draw(layer)
+    disc(draw, ROBOT_RADIUS + 1.5, fill=ROBOT_SHADOW)
+    disc(draw, ROBOT_RADIUS, fill=ROBOT_BODY, outline=ROBOT_RIM, width=int(1.5 * _SS))
+    r = ROBOT_RADIUS * _SS
+    draw.arc([ox - r, oy - r, ox + r, oy + r], heading - 60, heading + 60,
+             fill=ROBOT_BUMPER, width=int(3.2 * _SS))
+    fx = ox + 4.5 * _SS * math.cos(angle)
+    fy = oy - 4.5 * _SS * math.sin(angle)
+    for rad, col in ((3.2, ROBOT_TURRET), (1.4, ROBOT_SENSOR)):
+        rad *= _SS
+        draw.ellipse([fx - rad, fy - rad, fx + rad, fy + rad], fill=col)
+
+    img.alpha_composite(layer.resize((w, h), Image.LANCZOS), dest=(x0, y0))
