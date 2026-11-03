@@ -72,6 +72,8 @@ ROBOT_SENSOR   = (57,  255, 20,  255)   # #39ff14 fluorescent green
 ROBOT_BEAM     = (57,  255, 20)         # heading beam, alpha fades outwards
 PATH_MAIN      = (34,  211, 238, 255)   # #22d3ee cyan
 PATH_UNKNOWN   = (160, 160, 168, 255)
+GLOW_MODES     = {"MOPPING", "VACUUMING_AND_MOPPING"}
+GLOW_ALPHA     = 90
 KEEPOUT_FILL   = (245, 158, 11,  35)    # default tint; alpha used with map_keepout_color
 FURN_FILL      = (55,  60,  70,  255)   # dark grey
 FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
@@ -360,11 +362,13 @@ def _render(
                              if mode in MAP_PATH_ACTIONS else PATH_UNKNOWN)
                       for mode, _ in runs}
             width = options["map_path_width"]
-            if options["map_glow_width"] > 0:
+            # Like the app, only wash runs (mop, vacuum+mop) get a glow.
+            glowing = [(m, r) for m, r in runs if m in GLOW_MODES]
+            if options["map_glow_width"] > 0 and glowing:
                 glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
                 glow_draw = ImageDraw.Draw(glow)
-                for mode, run in runs:
-                    _draw_smooth(glow_draw, run, colors[mode][:3] + (50,),
+                for mode, run in glowing:
+                    _draw_smooth(glow_draw, run, colors[mode][:3] + (GLOW_ALPHA,),
                                  options["map_glow_width"])
                 img.alpha_composite(glow)
             draw = ImageDraw.Draw(img)

@@ -8,11 +8,13 @@ MAP_RETENTION_DEFAULTS = {
     "map_keep_last": False,
 }
 MAP_APPEARANCE_DEFAULTS = {
-    "map_vacuum_color": [250, 204, 21],
-    "map_mop_color": [34, 211, 238],
-    "map_combined_color": [192, 132, 252],
+    # MyDyson app colours: vacuum purple, wash blue. The app's legend has no
+    # separate vacuum+mop colour, so it defaults to wash blue.
+    "map_vacuum_color": [130, 95, 200],
+    "map_mop_color": [72, 128, 214],
+    "map_combined_color": [72, 128, 214],
     "map_path_width": 3,
-    "map_glow_width": 6,
+    "map_glow_width": 10,
     # Off = monochrome. On = each room's floor, outline, label and legend
     # swatch get a colour, fixed by map ID and room ID. Walls are white with
     # room colours on; path colours are unaffected.

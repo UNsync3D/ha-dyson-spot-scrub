@@ -97,14 +97,17 @@ class MapRenderingTests(unittest.TestCase):
 
     def test_mode_colors_and_glow_total_width(self):
         # Transform for this fixture: x=64+80*x, y=144-80*y.
-        live = {'cleanPath': [[0, .5], [1, .5]], '_pathModes': ['VACUUMING']}
+        live = {'cleanPath': [[0, .5], [1, .5]], '_pathModes': ['MOPPING']}
         before = copy.deepcopy((self.map, live))
-        image = self.render({**self.hidden, 'map_vacuum_color': [255, 0, 0],
+        image = self.render({**self.hidden, 'map_mop_color': [255, 0, 0],
                              'map_path_width': 3, 'map_glow_width': 9}, live)
         self.assertEqual(image.getpixel((104, 104)), (255, 0, 0, 255))
-        self.assertEqual(image.getpixel((104, 108)), (255, 0, 0, 50))
+        self.assertEqual(image.getpixel((104, 108)), (255, 0, 0, 90))
         self.assertEqual(image.getpixel((104, 109))[3], 0)
-        no_glow = self.render({**self.hidden, 'map_path_width': 3}, live)
+        vacuum = self.render({**self.hidden, 'map_path_width': 3, 'map_glow_width': 9},
+                             {**live, '_pathModes': ['VACUUMING']})
+        self.assertEqual(vacuum.getpixel((104, 108))[3], 0)   # no glow on vacuum
+        no_glow = self.render({**self.hidden, 'map_path_width': 3, 'map_glow_width': 0}, live)
         self.assertEqual(no_glow.getpixel((104, 108))[3], 0)
         smaller = self.render({**self.hidden, 'map_path_width': 15, 'map_glow_width': 1}, live)
         self.assertEqual(smaller.getpixel((104, 112))[3], 0)

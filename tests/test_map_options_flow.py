@@ -82,7 +82,7 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         values = schema({})
         self.assertEqual(values['map_retention_minutes'], 5)
         self.assertFalse(values['map_keep_last'])
-        self.assertEqual(values['line_settings_section']['map_glow_width'], 6)
+        self.assertEqual(values['line_settings_section']['map_glow_width'], 10)
         self.assertTrue(values['visibility_settings_section']['map_show_dock'])
         for marker, section in schema.schema.items():
             if isinstance(section, Section):

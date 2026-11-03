@@ -122,7 +122,7 @@
             "data_description": {
               "map_combined_color": "Used for simultaneous vacuuming and mopping. Sequential cleaning keeps separate vacuum and mop colors.",
               "map_path_width": "Line width in source-image pixels. Dashboard scaling affects its displayed size.",
-              "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable.",
+              "map_glow_width": "Total width of the translucent band behind mop and vacuum-and-mop paths, like the MyDyson app. Vacuum-only paths have no glow. Set a value greater than Path width for a visible glow. Set 0 to disable.",
               "map_room_colors": "Give each room its own color for its floor, outline, name, area and legend entry, fixed by map and room. Walls turn white, and cleaning-path colors are unchanged."
             }
           },

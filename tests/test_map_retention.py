@@ -379,7 +379,7 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
     async def test_repaint_during_api_error_uses_cached_source(self):
         with patch.object(camera_module, 'render_map',
                           side_effect=lambda m, md, live, opts, **kw: str(opts['map_glow_width']).encode()):
-            self.assertEqual(await self.start(), b'6')
+            self.assertEqual(await self.start(), b'10')
             self.now += 5
             self.fetch.side_effect = RateLimitError(30)
             await self.options(map_glow_width=0)
