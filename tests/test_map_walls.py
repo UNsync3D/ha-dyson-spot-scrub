@@ -28,6 +28,10 @@ package.__path__ = [str(ROOT)]
 sys.modules[package.__name__] = package
 renderer = importlib.import_module(package.__name__ + ".map_renderer")
 constants = importlib.import_module(package.__name__ + ".const")
+options_module = importlib.import_module(package.__name__ + ".map_options")
+# Most tests here exercise the (currently hidden) styling options, so they
+# run with styling switched on; StylingSwitchedOffTests covers the release.
+options_module.MAP_STYLING_ENABLED = True
 
 SCALE, PAD, MARGIN = renderer.SCALE, renderer.PAD, 0.3
 
@@ -302,6 +306,27 @@ class WallOptionTests(unittest.TestCase):
     def test_thick_walls_meet_at_square_corners(self):
         img = self.draw(map_wall_thickness_cm=20)
         self.assertEqual(pixel(img, -0.08, -0.08, (0, 4)), renderer.APP_WALL)
+
+
+class StylingSwitchedOffTests(unittest.TestCase):
+    """v2.0.0 ships with MAP_STYLING_ENABLED = False: one agreed look."""
+
+    def test_release_has_styling_switched_off(self):
+        self.assertFalse(constants.MAP_STYLING_ENABLED)
+
+    def test_saved_styling_is_ignored(self):
+        saved = {"map_wall_color": [255, 0, 0], "map_wall_thickness_cm": 20,
+                 "map_wall_style": "dashed", "map_floor_fill": False,
+                 "map_floor_color": [255, 255, 255], "map_keepout_color": [0, 0, 255],
+                 "map_room_colors": True}
+        with unittest.mock.patch.object(options_module, "MAP_STYLING_ENABLED", False):
+            result = options_module.map_options(saved)
+            custom = render(square_room(), map_show_labels=False, **saved)
+            default = render(square_room(), map_show_labels=False, map_room_colors=True)
+        for key in constants.MAP_WALL_DEFAULTS:
+            self.assertEqual(result[key], constants.MAP_WALL_DEFAULTS[key], key)
+        self.assertTrue(result["map_room_colors"], "Room colors still works")
+        self.assertEqual(custom.tobytes(), default.tobytes())
 
 
 class FontTests(unittest.TestCase):

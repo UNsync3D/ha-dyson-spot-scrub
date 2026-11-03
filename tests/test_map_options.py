@@ -16,6 +16,7 @@ package.__path__ = [str(ROOT / 'custom_components/dyson_spot_scrub')]
 sys.modules[package.__name__] = package
 constants = importlib.import_module(package.__name__ + '.const')
 options_module = importlib.import_module(package.__name__ + '.map_options')
+options_module.MAP_STYLING_ENABLED = True   # these tests switch the fill off
 renderer = importlib.import_module(package.__name__ + '.map_renderer')
 PathHistory = importlib.import_module(package.__name__ + '.map_path').PathHistory
 

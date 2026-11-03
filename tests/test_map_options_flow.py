@@ -119,9 +119,22 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['errors']['base'], 'invalid_map_option')
 
 
+    async def test_styling_sections_are_hidden_for_the_release(self):
+        """v2.0.0: only Appearance and Visible elements; styling is fixed."""
+        result = await self.flow.async_step_init()
+        names = [str(marker) for marker in result['data_schema'].schema]
+        self.assertEqual([n for n in names if n.endswith('_section')],
+                         ['line_settings_section', 'visibility_settings_section'])
+        saved = await self.flow.async_step_init({'outside_walls_section': {
+            'map_wall_color': [255, 0, 0]}})
+        self.assertNotIn('map_wall_color', saved.get('data', {}))
+
     async def test_one_section_per_map_element(self):
-        """Outside walls, walls between rooms, doors, floor and keep-out zones
-        each get their own section; values are still stored flat."""
+        """With styling switched on: outside walls, walls between rooms, doors,
+        floor and keep-out zones each get their own section, stored flat."""
+        options = sys.modules['map_flow_integration.map_options']
+        self.enterContext(patch.object(self.flow_module, 'MAP_STYLING_ENABLED', True))
+        self.enterContext(patch.object(options, 'MAP_STYLING_ENABLED', True))
         result = await self.flow.async_step_init()
         schema = result['data_schema']
         values = schema({})

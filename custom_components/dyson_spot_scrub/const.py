@@ -57,6 +57,11 @@ MAP_WALL_SECTIONS = {
 }
 MAP_WALL_DEFAULTS = {key: value for section in MAP_WALL_SECTIONS.values()
                      for key, value in section.items()}
+# Map styling options are switched off for v2.0.0: the map always uses the
+# defaults above (the MyDyson-app look agreed with FutuRazor on #28), the
+# sections are hidden from the options screen, and any previously saved
+# styling values are ignored. Set to True to bring the options back.
+MAP_STYLING_ENABLED = False
 MAP_LINE_STYLES = ("solid", "dashed")
 MAP_CHOICES = {
     "map_wall_style": MAP_LINE_STYLES,
