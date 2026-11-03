@@ -43,6 +43,9 @@ _PREFERENCE_TIMEOUT = 10.0
 # Map IDs probed on connect (and their stagger) before persistentMapId is known.
 _PROBE_MAP_IDS = range(4)
 _PROBE_INTERVAL = 2.5
+# How long a start waits for the robot to confirm the room settings before
+# sending START (the app waits for this reply too; it usually takes <1 s).
+_SETTINGS_CONFIRM_TIMEOUT = 5.0
 # How many outstanding get_preference msgId -> map_id mappings to remember.
 _MAX_TRACKED_REQUESTS = 64
 # A room-preference row must reach index [10] (roomOrder) to be usable.
@@ -387,6 +390,9 @@ class DysonMqttClient:
         # Called (paho thread) when the robot reports a different current map.
         self.on_map_changed: Callable[[str], None] | None = None
         self._preference_ready = threading.Event()
+        # Replies awaited by msgId (e.g. the set_preference before a START).
+        self._reply_lock = threading.Lock()
+        self._reply_waiters: dict[str, dict] = {}
         self._preference_request_id: str | None = None
         self._preference_response: dict | None = None
         self._start_cancelled = False
@@ -522,23 +528,38 @@ class DysonMqttClient:
         with self._preference_lock:
             self._start_cancelled = True
             self._preference_ready.set()
+        with self._reply_lock:
+            for waiter in self._reply_waiters.values():
+                waiter["event"].set()
+
+    def _expect_reply(self, msg_id: str) -> dict:
+        """Register interest in the JDM reply with this msgId (before sending)."""
+        waiter = {"event": threading.Event(), "code": None}
+        with self._reply_lock:
+            self._reply_waiters[msg_id] = waiter
+        return waiter
+
+    def _await_reply(self, msg_id: str, waiter: dict, timeout: float):
+        """Wait for a registered reply; returns its code, or None on timeout."""
+        try:
+            waiter["event"].wait(timeout)
+            return waiter["code"]
+        finally:
+            with self._reply_lock:
+                self._reply_waiters.pop(msg_id, None)
 
     def pause(self) -> None:
-        """Pause an active clean.
+        """Pause an active clean: legacy PAUSE only.
 
-        Mirrors the Dyson app sequence (captured Oct 2026):
-        1. PAUSE on the command channel
-        2. service.set_room_clean with ctrl_value: 2 (pause signal) on JDM
+        Dyson's cloud adds service.set_room_clean (ctrl_value 2) itself; the
+        HA test on 3 Nov 2026 showed that request twice when we sent it too.
         Any in-flight start is cancelled first so the preference lock is
-        released and the PAUSE messages are sent immediately.
+        released and PAUSE is sent immediately.
         """
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → PAUSE", self.serial)
             self._publish({"msg": "PAUSE", "mode-reason": "RAPP", "time": _now_iso()})
-            self._publish_jdm("service.set_room_clean", {
-                "ctrl_value": 2, "clean_type": 0, "room_ids": [],
-            })
 
     def resume(self) -> None:
         """Resume a paused clean.
@@ -594,15 +615,13 @@ class DysonMqttClient:
         return self._start_dock_action("WASH_MOP", 1)
 
     def _start_dock_action(self, action: str, station_act: int) -> bool:
-        """Send one station action on both command channels, if the dock is free.
+        """Send one station action, legacy command only, if the dock is free.
 
-        OPEN QUESTION (FutuRazor testing, Oct 2026): HA-triggered actions show
-        TWO service.start_station_act requests with different msgIds, while
-        app-triggered actions show one. This method publishes the JDM call
-        exactly once, so the extra request is probably generated upstream
-        (robot/cloud translating the legacy START-DOCK-ACTION into JDM). Under
-        investigation: compare a legacy-only publish against this pair before
-        changing anything.
+        Dyson's cloud translates legacy commands into JDM itself (capture,
+        3 Nov 2026: the translated JDM requests carry no "time" field). The
+        app sends only START-DOCK-ACTION; sending the JDM request as well made
+        the dock receive the action twice (FutuRazor, #22). station_act is
+        kept for the log: 3 = empty bin, 1 = wash mop.
         """
         dock = self.state.get("dockState")
         if not self.connected:
@@ -612,17 +631,12 @@ class DysonMqttClient:
             _LOGGER.warning("[%s] %s: dock already busy (%s)", self.serial, action, dock)
             return False
         _LOGGER.info("[%s] → %s (station_act=%d)", self.serial, action, station_act)
-        self._publish({
+        return self._publish({
             "msg":         "START-DOCK-ACTION",
             "action":      action,
             "mode-reason": "RAPP",
             "time":        _now_iso(),
         })
-        self._publish_jdm("service.start_station_act", {
-            "station_act": station_act,
-            "ctrl_value":  1,
-        })
-        return True
 
     def _clear_drying_time(self) -> None:
         """Never carry a previous cycle's times into a new dock cycle."""
@@ -639,8 +653,8 @@ class DysonMqttClient:
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → RETURN_TO_BASE", self.serial)
+            # Legacy only: Dyson's cloud adds service.start_recharge itself.
             self._publish({"msg": "ABORT", "mode-reason": "RAPP", "time": _now_iso()})
-            self._publish_jdm("service.start_recharge", {})
 
     # ── Room listing ──────────────────────────────────────────────────────────
 
@@ -990,8 +1004,9 @@ class DysonMqttClient:
         """Read current preferences before editing mode and room selection.
 
         Called from an executor, never the MQTT callback or HA event-loop thread.
-        Keep the existing four-command start sequence; only its room payload is
-        corrected here. A failed refresh must not fall back to stale preferences.
+        Sends what the app sends: set_preference, wait for its reply, then the
+        legacy START (Dyson's cloud adds the JDM start requests itself). A
+        failed refresh must not fall back to stale preferences.
         """
         if mode is not None and mode not in (0, 1, 2, 3):
             _LOGGER.warning("[%s] Cannot start: invalid cleaning mode %r", self.serial, mode)
@@ -1126,13 +1141,50 @@ class DysonMqttClient:
                 if room_ids is not None:
                     # Pre-existing optimistic update of the card start path.
                     self._merge_preference(self._map_key(map_id), {"room": updated_rooms})
-                self._publish_jdm("service.set_preference", {
-                    "map_id": map_id,
-                    "prefer_type": 1,
-                    "room_preference": updated_rooms,
-                    "uv_switch": deepcopy(merged.get("uv_switch", [])),
+                # As the app does (capture, 3 Nov 2026): save the settings,
+                # wait for the robot to confirm them, then send only the
+                # legacy START. Dyson's cloud adds set_cur_map and
+                # set_room_clean itself; sending them too made the robot start,
+                # stop and start again ("starting, charging, starting", #24).
+                settings_id = _rand_msg_id()
+                waiter = self._expect_reply(settings_id)
+                settings_sent = self._publish_raw(self._jdm_command_topic, {
+                    "msgId": settings_id,
+                    "version": "1.0.1",
+                    "method": "service.set_preference",
+                    "params": {
+                        "map_id": map_id,
+                        "prefer_type": 1,
+                        "room_preference": updated_rooms,
+                        "uv_switch": deepcopy(merged.get("uv_switch", [])),
+                    },
+                    "time": _now_iso(),
                 })
-                self._abort_dock_action()
+                if not settings_sent:
+                    self._await_reply(settings_id, waiter, 0)
+                    _LOGGER.warning("[%s] Cannot start: room settings not sent", self.serial)
+                    return False
+                # The reply arrives on paho's thread, which also needs this
+                # lock for other messages: don't hold it while waiting. The
+                # room-edit lock stays held, so no edit can slip in.
+                self._preference_lock.release()
+                try:
+                    code = self._await_reply(settings_id, waiter, _SETTINGS_CONFIRM_TIMEOUT)
+                finally:
+                    self._preference_lock.acquire()
+                if self._start_cancelled or not self.connected:
+                    _LOGGER.info("[%s] Pending cleaning start cancelled", self.serial)
+                    return False
+                if code != 0:
+                    _LOGGER.warning(
+                        "[%s] Cannot start: the robot did not confirm the room "
+                        "settings (%s)", self.serial,
+                        "no reply" if code is None else f"code {code}")
+                    return False
+                if self.state.get("dockState") == "DRYING_MOP":
+                    # The app stops roller drying before a clean; only needed
+                    # while it is actually drying.
+                    self._abort_dock_action()
                 published = self._publish({
                     "msg": "START",
                     "mode-reason": "RAPP",
@@ -1149,10 +1201,6 @@ class DysonMqttClient:
                         self.serial,
                     )
                     return False
-                self._publish_jdm("service.set_cur_map", {"map_id": map_id})
-                self._publish_jdm("service.set_room_clean", {
-                    "ctrl_value": 1, "clean_type": 0, "room_ids": ordered_room_ids,
-                })
                 return True
         finally:
             with self._preference_lock:
@@ -1255,6 +1303,12 @@ class DysonMqttClient:
 
     def _handle_jdm(self, data: dict) -> None:
         method = data.get("method")
+        if "code" in data:
+            with self._reply_lock:
+                waiter = self._reply_waiters.get(str(data.get("msgId")))
+            if waiter is not None:
+                waiter["code"] = data.get("code")
+                waiter["event"].set()
 
         if method == "prop.post" and data.get("params"):
             self._merge_jdm_props(data["params"])

@@ -107,7 +107,7 @@ class MqttHardeningTests(unittest.TestCase):
         legacy = [p["action"] for t, p in sent if t.endswith("/command")]
         jdm = [p["params"]["station_act"] for t, p in sent if t.endswith("/command/jdm")]
         self.assertEqual(legacy, ["COLLECT_DUST", "WASH_MOP"])
-        self.assertEqual(jdm, [3, 1])
+        self.assertEqual(jdm, [], "legacy only: Dyson's cloud adds start_station_act")
 
     def test_fault_helpers_agree(self):
         state = {"activeFaults": [
