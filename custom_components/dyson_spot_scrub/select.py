@@ -61,6 +61,8 @@ _WATER_LEVEL_OPTIONS: dict[int, str] = {
     1:  "Medium",
     2:  "High",
 }
+# The R2 Nurovi app offers Low, Medium and High only (no Very Low).
+_R2_WATER_LEVEL_OPTIONS = {k: v for k, v in _WATER_LEVEL_OPTIONS.items() if k != 99}
 _MOP_REPETITIONS_OPTIONS: dict[int, str] = {
     0: "One Pass",
     1: "Two Passes",
@@ -71,6 +73,7 @@ _INV_CLEANING_MODE     = {v: k for k, v in _CLEANING_MODE_OPTIONS.items()}
 _INV_CLEANING_STRATEGY = {v: k for k, v in _CLEANING_STRATEGY_OPTIONS.items()}
 _INV_WATER_LEVEL       = {v: k for k, v in _WATER_LEVEL_OPTIONS.items()}
 _INV_MOP_REPETITIONS   = {v: k for k, v in _MOP_REPETITIONS_OPTIONS.items()}
+_INV_R2_WATER_LEVEL    = {v: k for k, v in _R2_WATER_LEVEL_OPTIONS.items()}
 
 # Descriptor tuples: (select_type, label, icon, array_index, options_map, inverse_map)
 _ROOM_SELECT_DESCRIPTORS = [
@@ -128,6 +131,8 @@ async def async_setup_entry(
         entities: list[SelectEntity] = []
         for room_name in new_rooms:
             for select_type, label, icon, array_index, options_map, inverse_map in _ROOM_SELECT_DESCRIPTORS:
+                if r2 and select_type == "water_level":
+                    options_map, inverse_map = _R2_WATER_LEVEL_OPTIONS, _INV_R2_WATER_LEVEL
                 entities.append(
                     DysonRoomSelectEntity(
                         coordinator=coordinator,

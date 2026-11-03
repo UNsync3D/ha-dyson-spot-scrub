@@ -88,6 +88,23 @@ class R2EntityTests(unittest.TestCase):
         self.client.state['airDryFrequency'] = 4
         self.assertEqual(spot_drying.options, ['3 hours', '4 hours', '5 hours'])
 
+    def test_r2_water_level_has_no_very_low(self):
+        r2, spot = self.entries()
+        with self.platforms():
+            self.coord.async_add_listener = Mock()
+            r2_entities, spot_entities = [], []
+            platform = importlib.import_module('drying_test_integration.select')
+            self.coord.serial = 'test'
+            for entry, out in ((r2, r2_entities), (spot, spot_entities)):
+                self.coord.room_names = ['Room 1']
+                self.coord.enabled_rooms = set()
+                self.coord.current_mode = None
+                asyncio.run(platform.async_setup_entry(self.hass, entry, out.extend))
+        r2_water = next(e for e in r2_entities if getattr(e, '_select_type', None) == 'water_level')
+        spot_water = next(e for e in spot_entities if getattr(e, '_select_type', None) == 'water_level')
+        self.assertEqual(r2_water._attr_options, ['Low', 'Medium', 'High'])
+        self.assertEqual(spot_water._attr_options, ['Very Low', 'Low', 'Medium', 'High'])
+
     def test_r2_reported_properties_include_two_hours(self):
         p = importlib.import_module('drying_test_integration.station_settings')
         self.assertEqual(p.reported_properties({'airdry_frequency': 2}), {'airDryFrequency': 2})
