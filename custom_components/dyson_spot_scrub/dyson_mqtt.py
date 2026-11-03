@@ -193,6 +193,25 @@ def is_docked(state: dict) -> bool:
     )
 
 
+# On the dock with no clean in progress. Excludes FULL_CLEAN_CHARGING (a
+# mid-clean recharge) and FULL_CLEAN_FINISHED (also reported on the way back).
+IDLE_ON_DOCK_STATES = {"INACTIVE_CHARGING", "INACTIVE_CHARGED", "CHARGING"}
+
+
+def dock_action_blocker(state: dict) -> str | None:
+    """Why a dock action (empty bin, wash, dry) can't start now, or None.
+
+    Like FutuRazor's dry-only test (#32): only while the robot sits on the
+    dock between cleans and the dock itself is idle.
+    """
+    dock = state.get("dockState")
+    if dock in DOCK_BUSY_STATES:
+        return f"dock already busy ({dock})"
+    if state.get("state") not in IDLE_ON_DOCK_STATES:
+        return f"robot not docked ({state.get('state') or 'unknown'})"
+    return None
+
+
 def is_charging(state: dict) -> bool:
     return state.get("state") in CHARGING_STATES and is_docked(state)
 
@@ -630,7 +649,7 @@ class DysonMqttClient:
 
         legacy: START-DOCK-ACTION / action=COLLECT_DUST (confirmed, app captures)
         JDM:    service.start_station_act / station_act=3
-        Returns False if not connected or a dock action is already running.
+        Returns False if not connected, not docked, or the dock is busy.
         """
         return self._start_dock_action("COLLECT_DUST", 3)
 
@@ -641,7 +660,7 @@ class DysonMqttClient:
         JDM:    service.start_station_act / station_act=1
         The dock auto-transitions to DRYING_MOP after washing (station_act=2)
         — no separate dry command is needed.
-        Returns False if not connected or a dock action is already running.
+        Returns False if not connected, not docked, or the dock is busy.
         """
         return self._start_dock_action("WASH_MOP", 1)
 
@@ -654,7 +673,7 @@ class DysonMqttClient:
         adds the JDM request, the dock reports DRYING_MOP at once, and
         ABORT-DOCK-ACTION / DRY_MOP cancels it. The R2 app has the same
         "dry only" button.
-        Returns False if not connected or a dock action is already running.
+        Returns False if not connected, not docked, or the dock is busy.
         """
         return self._start_dock_action("DRY_MOP", 2)
 
@@ -667,12 +686,12 @@ class DysonMqttClient:
         the dock receive the action twice (FutuRazor, #22). station_act is
         kept for the log: 3 = empty bin, 1 = wash mop, 2 = dry mop.
         """
-        dock = self.state.get("dockState")
         if not self.available:
             _LOGGER.warning("[%s] %s: robot not reachable", self.serial, action)
             return False
-        if dock in DOCK_BUSY_STATES:
-            _LOGGER.warning("[%s] %s: dock already busy (%s)", self.serial, action, dock)
+        blocker = dock_action_blocker(self.state)
+        if blocker:
+            _LOGGER.warning("[%s] %s: %s", self.serial, action, blocker)
             return False
         _LOGGER.info("[%s] → %s (station_act=%d)", self.serial, action, station_act)
         return self._publish({
