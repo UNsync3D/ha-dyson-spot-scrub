@@ -645,6 +645,19 @@ class DysonMqttClient:
         """
         return self._start_dock_action("WASH_MOP", 1)
 
+    def dry_mop(self) -> bool:
+        """Dry the mop roller only, without washing it first.
+
+        legacy: START-DOCK-ACTION / action=DRY_MOP
+        JDM:    service.start_station_act / station_act=2, ctrl_value=1
+        Confirmed on a Spot+Scrub AI (FutuRazor, #32, 3 Nov 2026): the cloud
+        adds the JDM request, the dock reports DRYING_MOP at once, and
+        ABORT-DOCK-ACTION / DRY_MOP cancels it. The R2 app has the same
+        "dry only" button.
+        Returns False if not connected or a dock action is already running.
+        """
+        return self._start_dock_action("DRY_MOP", 2)
+
     def _start_dock_action(self, action: str, station_act: int) -> bool:
         """Send one station action, legacy command only, if the dock is free.
 
@@ -652,7 +665,7 @@ class DysonMqttClient:
         3 Nov 2026: the translated JDM requests carry no "time" field). The
         app sends only START-DOCK-ACTION; sending the JDM request as well made
         the dock receive the action twice (FutuRazor, #22). station_act is
-        kept for the log: 3 = empty bin, 1 = wash mop.
+        kept for the log: 3 = empty bin, 1 = wash mop, 2 = dry mop.
         """
         dock = self.state.get("dockState")
         if not self.available:

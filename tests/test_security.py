@@ -101,12 +101,14 @@ class MqttHardeningTests(unittest.TestCase):
             client.state = {"dockState": "IDLE"}
             self.assertTrue(client.empty_bin())
             self.assertTrue(client.wash_mop())
+            self.assertTrue(client.dry_mop())
             client.state = {"dockState": "DRYING_MOP"}
             self.assertFalse(client.empty_bin())
             self.assertFalse(client.wash_mop())
+            self.assertFalse(client.dry_mop())
         legacy = [p["action"] for t, p in sent if t.endswith("/command")]
         jdm = [p["params"]["station_act"] for t, p in sent if t.endswith("/command/jdm")]
-        self.assertEqual(legacy, ["COLLECT_DUST", "WASH_MOP"])
+        self.assertEqual(legacy, ["COLLECT_DUST", "WASH_MOP", "DRY_MOP"])
         self.assertEqual(jdm, [], "legacy only: Dyson's cloud adds start_station_act")
 
     def test_fault_helpers_agree(self):

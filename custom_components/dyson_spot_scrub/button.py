@@ -27,6 +27,7 @@ async def async_setup_entry(
         DysonStartButton(coordinator, entry),
         DysonEmptyBinButton(coordinator, entry),
         DysonWashMopButton(coordinator, entry),
+        DysonDryMopButton(coordinator, entry),
     ])
 
 
@@ -92,7 +93,7 @@ class DysonStartButton(ButtonEntity):
 
 
 class DysonDockActionButton(ButtonEntity):
-    """Base class for dock station-action buttons (empty bin, wash mop)."""
+    """Base class for dock station-action buttons (empty bin, wash mop, dry mop)."""
 
     _attr_has_entity_name = True
     _attr_should_poll     = False
@@ -161,3 +162,24 @@ class DysonWashMopButton(DysonDockActionButton):
         )
         if not success:
             raise HomeAssistantError("Cannot wash mop: dock is already busy")
+
+
+class DysonDryMopButton(DysonDockActionButton):
+    """Dry the mop roller without washing it first ("dry only" in the app)."""
+
+    _attr_name = "Dry Mop"
+    _attr_icon = "mdi:weather-windy"
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_dry_mop"
+
+    async def async_press(self) -> None:
+        if not (self._coordinator.mqtt and self._coordinator.mqtt.available):
+            _LOGGER.warning("Cannot dry mop — robot not reachable")
+            return
+        success = await self.hass.async_add_executor_job(
+            self._coordinator.mqtt.dry_mop
+        )
+        if not success:
+            raise HomeAssistantError("Cannot dry mop: dock is already busy")
