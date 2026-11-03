@@ -16,6 +16,7 @@ package.__path__ = [str(ROOT / 'custom_components/dyson_spot_scrub')]
 sys.modules[package.__name__] = package
 constants = importlib.import_module(package.__name__ + '.const')
 options_module = importlib.import_module(package.__name__ + '.map_options')
+options_module.MAP_STYLING_ENABLED = True   # these tests switch the fill off
 renderer = importlib.import_module(package.__name__ + '.map_renderer')
 PathHistory = importlib.import_module(package.__name__ + '.map_path').PathHistory
 
@@ -78,7 +79,8 @@ class MapRenderingTests(unittest.TestCase):
                     'restrictions': [{'points': [[.7, .7], [1, .7], [1, 1]]}],
                     'dockLocation': {'x': 0, 'y': 1}}
         self.hidden = {key: False for key in constants.MAP_VISIBILITY_DEFAULTS}
-        self.hidden.update(map_transparent_background=True, map_glow_width=0)
+        self.hidden.update(map_transparent_background=True, map_glow_width=0,
+                           map_floor_fill=False)
 
     def render(self, options=None, live=None):
         result = renderer.render_map(self.map, [], live, options, raise_errors=True)

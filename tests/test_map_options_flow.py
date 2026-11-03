@@ -3,6 +3,7 @@
 The frontend selectors/section serializer still need a Home Assistant smoke test.
 """
 import importlib
+import json
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
@@ -53,7 +54,9 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         entries = module('homeassistant.config_entries', ConfigFlow=Flow, OptionsFlow=Flow)
         selectors = SimpleNamespace(BooleanSelector=Selector, ColorRGBSelector=Selector,
                                     NumberSelector=Selector, NumberSelectorConfig=dict,
-                                    NumberSelectorMode=SimpleNamespace(SLIDER='slider'))
+                                    NumberSelectorMode=SimpleNamespace(SLIDER='slider'),
+                                    SelectSelector=Selector, SelectSelectorConfig=dict,
+                                    SelectSelectorMode=SimpleNamespace(DROPDOWN='dropdown'))
         modules = {
             'map_flow_integration': package,
             'homeassistant': module('homeassistant', config_entries=entries),
@@ -117,6 +120,72 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         result = await self.flow.async_step_init({'visibility_settings_section': 'invalid'})
         self.assertEqual(result['errors']['base'], 'invalid_map_option')
 
+
+    async def test_styling_sections_are_hidden_for_the_release(self):
+        """v2.0.0: only Appearance and Visible elements; styling is fixed."""
+        result = await self.flow.async_step_init()
+        names = [str(marker) for marker in result['data_schema'].schema]
+        self.assertEqual([n for n in names if n.endswith('_section')],
+                         ['line_settings_section', 'visibility_settings_section'])
+        saved = await self.flow.async_step_init({'outside_walls_section': {
+            'map_wall_color': [255, 0, 0]}})
+        self.assertNotIn('map_wall_color', saved.get('data', {}))
+
+    async def test_one_section_per_map_element(self):
+        """With styling switched on: outside walls, walls between rooms, doors,
+        floor and keep-out zones each get their own section, stored flat."""
+        options = sys.modules['map_flow_integration.map_options']
+        self.enterContext(patch.object(self.flow_module, 'MAP_STYLING_ENABLED', True))
+        self.enterContext(patch.object(options, 'MAP_STYLING_ENABLED', True))
+        result = await self.flow.async_step_init()
+        schema = result['data_schema']
+        values = schema({})
+        expected = {
+            'outside_walls_section': {'map_wall_style': 'solid', 'map_wall_thickness_cm': 5},
+            'inner_walls_section': {'map_inner_wall_style': 'solid',
+                                    'map_inner_wall_thickness_cm': 5},
+            'doors_section': {'map_door_style': 'dashed', 'map_door_thickness_cm': 3},
+            'floor_section': {'map_floor_fill': True, 'map_floor_color': [18, 18, 20]},
+            'keepout_section': {'map_keepout_style': 'dashed',
+                                'map_keepout_color': [245, 158, 11]},
+        }
+        for section, fields in expected.items():
+            for key, value in fields.items():
+                self.assertEqual(values[section][key], value, (section, key))
+        self.assertNotIn('map_floor_fill', values['line_settings_section'])
+        names = [str(marker) for marker in schema.schema]
+        self.assertEqual(names[names.index('line_settings_section') + 1:
+                               names.index('visibility_settings_section')], list(expected))
+        for marker, section in schema.schema.items():
+            if isinstance(section, Section):
+                self.assertTrue(section.options['collapsed'], str(marker))
+        fields = {str(k): v for marker, section in schema.schema.items()
+                  if isinstance(section, Section) for k, v in section.schema.schema.items()}
+        self.assertEqual(fields['map_wall_style'].config['options'], ['solid', 'dashed'])
+        self.assertEqual(fields['map_wall_thickness_cm'].config['unit_of_measurement'], 'cm')
+        saved = await self.flow.async_step_init({
+            'outside_walls_section': {'map_wall_style': 'dashed', 'map_wall_thickness_cm': 8,
+                                      'map_wall_color': [255, 0, 0]},
+            'floor_section': {'map_floor_fill': False, 'map_room_fill_color': [10, 20, 30]}})
+        self.assertEqual(saved['type'], 'create_entry')
+        self.assertEqual(saved['data']['map_wall_style'], 'dashed')
+        self.assertEqual(saved['data']['map_wall_thickness_cm'], 8)
+        self.assertFalse(saved['data']['map_floor_fill'])
+        self.assertEqual(saved['data']['map_room_fill_color'], [10, 20, 30])
+        self.assertFalse(any(key.endswith('_section') for key in saved['data']))
+        for section, bad in (('outside_walls_section', {'map_wall_style': 'dotted'}),
+                             ('doors_section', {'map_door_thickness_cm': 0}),
+                             ('outside_walls_section', {'map_wall_thickness_cm': 31}),
+                             ('floor_section', {'map_floor_color': [300, 0, 0]})):
+            result = await self.flow.async_step_init({section: bad})
+            self.assertEqual(result['errors']['base'], 'invalid_map_option', bad)
+
+    def test_every_option_has_a_label(self):
+        strings = json.loads((Path(__file__).resolve().parents[1] /
+                              'custom_components/dyson_spot_scrub/strings.json').read_text())
+        sections = strings['options']['step']['init']['sections']
+        for name, defaults in self.flow_module.MAP_WALL_SECTIONS.items():
+            self.assertEqual(set(sections[name]['data']), set(defaults), name)
 
 if __name__ == '__main__':
     unittest.main()
