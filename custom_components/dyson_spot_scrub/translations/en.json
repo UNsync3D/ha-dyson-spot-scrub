@@ -203,7 +203,7 @@
             },
             "data_description": {
               "map_show_status_areas": "Colored room fills indicating cleaning progress.",
-              "map_show_perimeter": "Walls, and thinner lines where two rooms meet, from the Dyson map. Where rooms meet can be a real wall or a virtual split; Dyson doesn't say which.",
+              "map_show_perimeter": "Walls as solid lines, and doors or openings between rooms as dashed lines, as in the MyDyson app.",
               "map_show_visited_paths": "Outline of the floor the robot can reach in each room. It goes around furniture.",
               "map_show_grid": "Includes distance labels and the map origin marker.",
               "map_show_waypoints": "Dots along the cleaning path. The robot position remains visible.",

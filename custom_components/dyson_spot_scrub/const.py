@@ -72,11 +72,11 @@ MAP_CHOICES = {
 MAP_VISIBILITY_DEFAULTS = {
     "map_show_furniture": False,   # the floor fill shows furniture as grey
     "map_show_room_names": True,
-    "map_show_room_areas": True,
+    "map_show_room_areas": False,
     "map_show_legend": False,
     "map_show_status_areas": False,
     "map_show_perimeter": True,
-    "map_show_visited_paths": False,   # the floor fill shows the same shape
+    "map_show_visited_paths": True,
     "map_show_grid": False,
     "map_show_dock": True,
     "map_show_restrictions": False,   # keep-out zones hidden unless switched on

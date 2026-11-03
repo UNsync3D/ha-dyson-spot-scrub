@@ -166,10 +166,18 @@ class FloorFillTests(unittest.TestCase):
         self.assertNotEqual(renderer._room_color("10", "1"), renderer._room_color("10", "2"))
 
     def test_default_is_the_app_look(self):
-        """Fill on; outlines and furniture off (the fill already shows both)."""
+        """Agreed defaults (2 Nov 2026): fill on, furniture off (the fill shows
+        it), floor outlines on, room areas off, keep-out zones off."""
         visibility = constants.MAP_VISIBILITY_DEFAULTS
-        self.assertFalse(visibility["map_show_visited_paths"])
-        self.assertFalse(visibility["map_show_furniture"])
+        self.assertEqual(visibility, {
+            "map_show_furniture": False, "map_show_room_names": True,
+            "map_show_room_areas": False, "map_show_legend": False,
+            "map_show_status_areas": False, "map_show_perimeter": True,
+            "map_show_visited_paths": True, "map_show_grid": False,
+            "map_show_dock": True, "map_show_restrictions": False,
+            "map_show_waypoints": True})
+        self.assertTrue(constants.MAP_DEFAULTS["map_floor_fill"])
+        self.assertFalse(constants.MAP_DEFAULTS["map_room_colors"])
         data = self.room_with_floor()
         data["furniture"] = [{"points": [{"x": 1.5, "y": 1.5}, {"x": 2.5, "y": 1.5},
                                          {"x": 2.5, "y": 2.5}, {"x": 1.5, "y": 2.5}]}]
@@ -177,8 +185,13 @@ class FloorFillTests(unittest.TestCase):
                                   raise_errors=True)
         img = Image.open(io.BytesIO(png)).convert("RGBA")
         self.assertEqual(pixel(img, 2, 2, (0, 4)), renderer.FLOOR_FILL, "no furniture box")
-        self.assertEqual(pixel(img, 2, 1, (0, 4)), renderer.FLOOR_FILL, "no outline")
         self.assertEqual(pixel(img, 2, 0, (0, 4)), renderer.APP_WALL)
+        # Floor outlines are drawn by default (5 cm loops in a real capture).
+        data = json.loads(FOUR_ROOMS.read_text())
+        default = renderer.render_map(data, None, options={}, raise_errors=True)
+        without = renderer.render_map(data, None, options={"map_show_visited_paths": False},
+                                      raise_errors=True)
+        self.assertNotEqual(default, without, "floor outlines drawn")
 
     def test_walls_stay_white_with_room_colours(self):
         img = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
@@ -355,7 +368,7 @@ class AreaLabelTests(unittest.TestCase):
         return texts
 
     def test_area_is_drawn_without_the_squared_glyph(self):
-        texts = self.drawn_text()
+        texts = self.drawn_text(map_show_room_areas=True)
         self.assertFalse(any("\u00b2" in t for t in texts), texts)
         self.assertIn("4.2 m", texts)          # Room2: 4.1525 m²
         self.assertIn("2", texts)              # the raised 2
