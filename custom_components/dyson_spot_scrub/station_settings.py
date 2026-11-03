@@ -15,14 +15,14 @@ SWITCHES = {
 FREQUENCIES = {"After each room": None, "Every 15 minutes": 15,
                "Every 30 minutes": 30, "Only as needed": 60}
 # Roller drying hours the robot may report. The Spot+Scrub AI app offers 3-5 h;
-# the R2 Nurovi reports 2 h (captures, 18 and 20 Oct 2026). The R2 app's full
-# list is not known yet, so the R2 is only offered what it reports.
+# the R2 Nurovi app offers 2-4 h (app screenshot via FutuRazor, #32; both R2
+# captures, 18 and 20 Oct 2026, report 2 h).
 DRYING_HOURS = (2, 3, 4, 5)
 SELECTS = {
     "self_cleaning_frequency": ("Self-cleaning frequency", list(FREQUENCIES)),
     "roller_drying_duration": ("Roller drying duration", ["3 hours", "4 hours", "5 hours"]),
 }
-R2_SELECT_OPTIONS = {"roller_drying_duration": ["2 hours"]}
+R2_SELECT_OPTIONS = {"roller_drying_duration": ["2 hours", "3 hours", "4 hours"]}
 # Station switches the R2 Nurovi never reports (no cleaning solution).
 R2_MISSING_SWITCHES = {"cleaning_solution"}
 # CURRENT-STATE fields cleared on reconnect so a stale value is never shown.

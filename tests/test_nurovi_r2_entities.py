@@ -80,9 +80,9 @@ class R2EntityTests(unittest.TestCase):
                                if getattr(e, '_setting_key', None) == 'roller_drying_duration')
         self.client.state.update(R2_STATE)
         self.assertEqual(r2_drying.current_option, '2 hours')
-        self.assertEqual(r2_drying.options, ['2 hours'])
+        self.assertEqual(r2_drying.options, ['2 hours', '3 hours', '4 hours'])
         with self.assertRaises(Exception):
-            asyncio.run(r2_drying.async_select_option('3 hours'))   # not confirmed for the R2
+            asyncio.run(r2_drying.async_select_option('5 hours'))   # not offered on the R2
         # A reported value is always listed, so it never shows as invalid.
         self.assertEqual(spot_drying.options, ['3 hours', '4 hours', '5 hours', '2 hours'])
         self.client.state['airDryFrequency'] = 4
