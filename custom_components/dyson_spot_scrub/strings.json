@@ -197,6 +197,7 @@
             "data": {
               "map_show_furniture": "Show furniture",
               "map_show_room_names": "Show room names",
+              "map_center_room_names": "Center room names",
               "map_show_room_areas": "Show room areas (m²)",
               "map_show_legend": "Show legend",
               "map_show_status_areas": "Show cleaning status areas",
@@ -207,6 +208,7 @@
               "map_show_restrictions": "Show keep-out zones"
             },
             "data_description": {
+              "map_center_room_names": "Place each room name in the centre of the room's walls. Off uses the positions the MyDyson app uses.",
               "map_show_status_areas": "Colored room fills indicating cleaning progress.",
               "map_show_perimeter": "Walls as solid lines, and doors or openings between rooms as dashed lines, as in the MyDyson app.",
               "map_show_visited_paths": "Outline of the floor the robot can reach in each room. It goes around furniture.",

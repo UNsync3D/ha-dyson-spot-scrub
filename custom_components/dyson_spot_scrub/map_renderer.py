@@ -403,6 +403,10 @@ def _render(
         loc = z.get("nameLocation") or {}
         lx_m = loc.get("x", 0.0)
         ly_m = loc.get("y", 0.0)
+        if options["map_center_room_names"]:
+            centre = _room_label_point(z)
+            if centre:
+                lx_m, ly_m = centre
         if not lx_m and not ly_m:
             continue
         lx, ly = int(tx(lx_m)), int(ty(ly_m))
@@ -1075,3 +1079,78 @@ def _draw_robot(img, cx: float, cy: float, angle: float) -> None:
         draw.ellipse([fx - rad, fy - rad, fx + rad, fy + rad], fill=col)
 
     img.alpha_composite(layer.resize((w, h), Image.LANCZOS), dest=(x0, y0))
+
+
+# ── Room label placement ──────────────────────────────────────────────────────
+
+
+def _room_label_point(zone: dict) -> tuple[float, float] | None:
+    """Centre of the room's walls (the area centre of its outline). For a
+    shape whose centre falls outside it, such as an L, the point inside the
+    outline furthest from its walls."""
+    poly = list(_room_polygon(zone))
+    if len(poly) < 3:
+        poly = [_pt(p) for p in zone.get("visited") or []]
+    if len(poly) < 3:
+        return None
+    centre = _area_centre(poly)
+    if centre and _inside(poly, *centre):
+        return centre
+    return _pole_of_inaccessibility(tuple(poly))
+
+
+def _area_centre(poly: list) -> tuple[float, float] | None:
+    area = cx = cy = 0.0
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        k = x1 * y2 - x2 * y1
+        area += k
+        cx += (x1 + x2) * k
+        cy += (y1 + y2) * k
+    if abs(area) < 1e-9:
+        return None
+    return cx / (3 * area), cy / (3 * area)
+
+
+def _inside(poly, x: float, y: float) -> bool:
+    hit = False
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            hit = not hit
+    return hit
+
+
+@lru_cache(maxsize=64)
+def _pole_of_inaccessibility(poly: tuple, coarse: float = 0.15,
+                             fine: float = 0.05) -> tuple[float, float] | None:
+    edges = list(zip(poly, poly[1:] + poly[:1]))
+
+    def clearance(x, y):
+        best = math.inf
+        for (x1, y1), (x2, y2) in edges:
+            dx, dy = x2 - x1, y2 - y1
+            seg = dx * dx + dy * dy
+            t = 0.0 if seg == 0 else max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / seg))
+            best = min(best, math.hypot(x - x1 - t * dx, y - y1 - t * dy))
+        return best
+
+    def search(xs, ys, step):
+        best, best_d = None, -1.0
+        y = ys[0]
+        while y <= ys[1]:
+            x = xs[0]
+            while x <= xs[1]:
+                if _inside(poly, x, y):
+                    d = clearance(x, y)
+                    if d > best_d:
+                        best, best_d = (x, y), d
+                x += step
+            y += step
+        return best
+
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+    best = search((min(xs), max(xs)), (min(ys), max(ys)), coarse)
+    if best is None:
+        return None
+    refined = search((best[0] - coarse, best[0] + coarse),
+                     (best[1] - coarse, best[1] + coarse), fine)
+    return refined or best

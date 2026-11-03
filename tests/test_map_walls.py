@@ -171,6 +171,7 @@ class FloorFillTests(unittest.TestCase):
         visibility = constants.MAP_VISIBILITY_DEFAULTS
         self.assertEqual(visibility, {
             "map_show_furniture": False, "map_show_room_names": True,
+            "map_center_room_names": False,
             "map_show_room_areas": False, "map_show_legend": False,
             "map_show_status_areas": False, "map_show_perimeter": True,
             "map_show_visited_paths": True, "map_show_grid": False,

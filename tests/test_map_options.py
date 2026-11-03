@@ -90,6 +90,8 @@ class MapRenderingTests(unittest.TestCase):
         empty = self.render(self.hidden)
         self.assertEqual(empty.getchannel('A').getextrema(), (0, 0))
         for key in constants.MAP_VISIBILITY_DEFAULTS:
+            if key == 'map_center_room_names':   # moves names, draws nothing itself
+                continue
             visible = self.render({**self.hidden, key: True})
             self.assertEqual(visible.size, empty.size, key)
             self.assertGreater(visible.getchannel('A').getextrema()[1], 0, key)
