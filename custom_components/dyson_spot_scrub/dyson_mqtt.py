@@ -1031,7 +1031,12 @@ class DysonMqttClient:
                 })
 
             received = self._preference_ready.wait(_PREFERENCE_TIMEOUT)
-            with self._preference_lock:
+            # From here to the last publish this is a room-settings edit like
+            # any other, so it takes _room_edit_lock (always BEFORE
+            # _preference_lock, as the edit helpers do): a select or card save
+            # can't slip a set_preference in between our read and our send and
+            # then be reverted by it. Not held during the wait above.
+            with self._room_edit_lock, self._preference_lock:
                 # A Dyson-app command may have changed readiness while we waited.
                 if not self._can_start_new_clean():
                     return False
@@ -1061,7 +1066,10 @@ class DysonMqttClient:
                 # view: every robot-reported room stays addressable and the
                 # outgoing set_preference carries the full list, as the app does.
                 merged = self._preference_view(self._map_key(map_id)) or {}
-                rooms = merged.get("room") or []
+                # The edit base, not just the robot's view: if a setting change
+                # was sent moments ago and the robot hasn't confirmed it yet,
+                # start from what was sent so the start doesn't undo it.
+                rooms = self.room_preferences_for_edit()
                 if not rooms:
                     _LOGGER.warning("[%s] Cannot start: incomplete room preferences", self.serial)
                     return False

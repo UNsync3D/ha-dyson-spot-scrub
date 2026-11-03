@@ -4,6 +4,16 @@ clean_room:
     Start a single-room clean on the Dyson Spot+Scrub AI robot.
     The robot will clean only the named room, then return to its dock.
   fields:
+    entity_id:
+      name: Dyson vacuum
+      description: >
+        The vacuum to clean with. Optional when only one Dyson robot is set up;
+        required when there are several.
+      required: false
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
     room:
       name: Room
       description: >
@@ -22,6 +32,16 @@ clean_rooms:
     returns to its dock before moving on to the next.  Rooms are cleaned in
     the order listed.
   fields:
+    entity_id:
+      name: Dyson vacuum
+      description: >
+        The vacuum to clean with. Optional when only one Dyson robot is set up;
+        required when there are several.
+      required: false
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
     rooms:
       name: Rooms
       description: >
