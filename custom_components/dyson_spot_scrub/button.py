@@ -55,8 +55,8 @@ class DysonStartButton(ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """True only when the MQTT connection is live."""
-        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+        """True only while connected and the robot is reachable."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
 
     async def async_press(self) -> None:
         """Start cleaning.
@@ -64,8 +64,8 @@ class DysonStartButton(ButtonEntity):
         If any room switches are ON, clean those rooms sequentially in map order.
         Otherwise start a full clean of the whole house in the current mode.
         """
-        if not (self._coordinator.mqtt and self._coordinator.mqtt.connected):
-            _LOGGER.warning("Cannot start — MQTT not connected")
+        if not (self._coordinator.mqtt and self._coordinator.mqtt.available):
+            _LOGGER.warning("Cannot start — robot not reachable")
             return
 
         reason = start_block_reason(self._coordinator.mqtt.state, self.available)
@@ -105,7 +105,7 @@ class DysonDockActionButton(ButtonEntity):
     def available(self) -> bool:
         """True only when MQTT is live and the dock is not already busy."""
         mqtt = self._coordinator.mqtt
-        if not (mqtt and mqtt.connected):
+        if not (mqtt and mqtt.available):
             return False
         # Greyed out while the dock is mid-cycle (e.g. a 3-5 h DRYING_MOP).
         return self._coordinator.state.get("dockState") not in DOCK_BUSY_STATES
@@ -132,8 +132,8 @@ class DysonEmptyBinButton(DysonDockActionButton):
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_empty_bin"
 
     async def async_press(self) -> None:
-        if not (self._coordinator.mqtt and self._coordinator.mqtt.connected):
-            _LOGGER.warning("Cannot empty bin — MQTT not connected")
+        if not (self._coordinator.mqtt and self._coordinator.mqtt.available):
+            _LOGGER.warning("Cannot empty bin — robot not reachable")
             return
         success = await self.hass.async_add_executor_job(
             self._coordinator.mqtt.empty_bin
@@ -153,8 +153,8 @@ class DysonWashMopButton(DysonDockActionButton):
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_wash_mop"
 
     async def async_press(self) -> None:
-        if not (self._coordinator.mqtt and self._coordinator.mqtt.connected):
-            _LOGGER.warning("Cannot wash mop — MQTT not connected")
+        if not (self._coordinator.mqtt and self._coordinator.mqtt.available):
+            _LOGGER.warning("Cannot wash mop — robot not reachable")
             return
         success = await self.hass.async_add_executor_job(
             self._coordinator.mqtt.wash_mop

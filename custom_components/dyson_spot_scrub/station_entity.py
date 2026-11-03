@@ -30,7 +30,7 @@ class StationEntity:
     @property
     def available(self):
         client = self._coordinator.mqtt
-        return bool(client and client.connected and self.setting_value is not None)
+        return bool(client and client.available and self.setting_value is not None)
 
     @property
     def setting_value(self):

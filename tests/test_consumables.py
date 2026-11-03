@@ -34,7 +34,7 @@ class ConsumableTests(unittest.TestCase):
         self.sensor = importlib.import_module("consumable_test_integration.sensor")
         self.entry = SimpleNamespace(entry_id="entry", data={"serial": "TEST", "device_name": "Dyson"})
         self.listeners = []
-        self.coord = SimpleNamespace(mqtt=SimpleNamespace(connected=True), state={}, async_add_listener=self.listeners.append, async_remove_listener=self.listeners.remove)
+        self.coord = SimpleNamespace(mqtt=SimpleNamespace(connected=True, available=True), state={}, async_add_listener=self.listeners.append, async_remove_listener=self.listeners.remove)
         hass = SimpleNamespace(data={"dyson_spot_scrub": {"entry": self.coord}})
         self.entities = []
         asyncio.run(self.sensor.async_setup_entry(hass, self.entry, self.entities.extend))
@@ -78,7 +78,7 @@ class ConsumableTests(unittest.TestCase):
             self.assertEqual(self.solution.native_value, expected)
         self.assertIsNone(self.solution._attr_native_unit_of_measurement)
         self.assertEqual(self.solution._attr_options, ["ok", "refill_required"])
-        self.coord.mqtt.connected = False
+        self.coord.mqtt.connected = self.coord.mqtt.available = False
         for sensor in self.entities[1:]:
             self.assertFalse(sensor.available)
             self.assertIsNone(sensor.native_value)

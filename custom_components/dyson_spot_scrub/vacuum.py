@@ -78,7 +78,7 @@ _LOGGER = logging.getLogger(__name__)
 def _require_start_ready(coordinator: DysonCoordinator) -> None:
     """Reject new jobs before changing preferences or scheduling room work."""
     mqtt = coordinator.mqtt
-    reason = start_block_reason(mqtt.state if mqtt else {}, bool(mqtt and mqtt.connected))
+    reason = start_block_reason(mqtt.state if mqtt else {}, bool(mqtt and mqtt.available))
     if reason:
         raise HomeAssistantError(f"Cannot start a new clean: {reason.replace('_', ' ')}")
 
@@ -147,7 +147,7 @@ async def async_setup_entry(
                 "Several Dyson robots are set up: choose one with entity_id"
                 if robots else "No Dyson robot is set up")
         coordinator = robots[0]
-        if not coordinator.mqtt or not coordinator.mqtt.connected:
+        if not coordinator.mqtt or not coordinator.mqtt.available:
             raise HomeAssistantError("The Dyson vacuum is disconnected")
         return coordinator
 
@@ -167,7 +167,7 @@ async def async_setup_entry(
         coordinator = hass.data.get(DOMAIN, {}).get(registry_entry.config_entry_id)
         if not isinstance(coordinator, DysonCoordinator) or not coordinator.mqtt:
             raise HomeAssistantError("The selected Dyson vacuum is unavailable")
-        if not coordinator.mqtt.connected:
+        if not coordinator.mqtt.available:
             raise HomeAssistantError("The selected Dyson vacuum is disconnected")
         return coordinator
 
@@ -259,8 +259,8 @@ class DysonVacuumEntity(StateVacuumEntity):
 
     @property
     def available(self) -> bool:
-        """True only when the MQTT connection is live."""
-        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+        """True only while connected and the robot is reachable."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
 
     @property
     def activity(self) -> VacuumActivity | None:

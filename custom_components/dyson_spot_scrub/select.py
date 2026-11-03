@@ -171,7 +171,7 @@ class DysonCleaningModeSelectEntity(SelectEntity):
 
     @property
     def available(self) -> bool:
-        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
 
     @property
     def current_option(self) -> str:
@@ -265,7 +265,7 @@ class DysonRoomSelectEntity(SelectEntity):
     def available(self) -> bool:
         return (
             self._coordinator.mqtt is not None
-            and self._coordinator.mqtt.connected
+            and self._coordinator.mqtt.available
             and self._find_room_prefs() is not None
         )
 
