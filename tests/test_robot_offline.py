@@ -125,6 +125,20 @@ class OfflineTests(unittest.TestCase):
         fetch.assert_called_once()        # one room-settings refresh, nothing replayed
         self.assertEqual(self.sent, [])
 
+    def test_im_back_asks_for_state_at_once(self):
+        self.go_offline()
+        self.message("status", {"msg": "IM-BACK", "state": "INACTIVE_CHARGING"})
+        self.assertEqual([p["msg"] for p in self.sent], ["REQUEST-CURRENT-STATE"])
+        self.assertFalse(self.client.robot_online, "online only after its telemetry")
+
+    def test_secret_fields_never_reach_the_log(self):
+        with self.assertLogs(self.mqtt._LOGGER, level="DEBUG") as logs:
+            self.mqtt._LOGGER.setLevel("DEBUG")
+            self.message("status", {"msg": "UPDATE-LOCAL-BROKER-CONFIG",
+                                    "localpwd": "do-not-log", "configref": "x"})
+        self.assertNotIn("do-not-log", "\n".join(logs.output))
+        self.assertIn('"localpwd": "***"', "\n".join(logs.output))
+
     def test_other_clients_requests_do_not_count_as_the_robot(self):
         """In the capture, other clients' polling continued while the robot was gone."""
         self.go_offline()

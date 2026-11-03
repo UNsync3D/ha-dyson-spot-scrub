@@ -48,6 +48,19 @@ _PROBE_INTERVAL = 2.5
 _OFFLINE_POLL_INTERVAL = 60.0
 # Robot telemetry that proves the robot itself is reachable again.
 _ROBOT_TELEMETRY = {"CURRENT-STATE", "STATE-CHANGE"}
+# Fields that must never reach the log (seen in UPDATE-LOCAL-BROKER-CONFIG,
+# which the robot sends when it reconnects).
+_SECRET_FIELDS = {"localpwd", "password", "token", "secret"}
+
+
+def _redact(data):
+    """Copy of a payload with secret fields masked, for debug logging."""
+    if isinstance(data, dict):
+        return {k: ("***" if str(k).lower() in _SECRET_FIELDS else _redact(v))
+                for k, v in data.items()}
+    if isinstance(data, list):
+        return [_redact(v) for v in data]
+    return data
 # How many outstanding get_preference msgId -> map_id mappings to remember.
 _MAX_TRACKED_REQUESTS = 64
 # A room-preference row must reach index [10] (roomOrder) to be usable.
@@ -1269,7 +1282,7 @@ class DysonMqttClient:
         # json.dumps of large map/state payloads is costly; skip it unless
         # debug logging is actually enabled.
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
+            _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(_redact(data)))
 
         if topic.endswith("/command/jdm"):
             # Our own and the Dyson app's requests. Only used to learn which
@@ -1346,6 +1359,13 @@ class DysonMqttClient:
         msg_type = data.get("msg") or data.get("method")
         if msg_type == "GONE-AWAY":
             self._mark_robot_offline()
+            return
+        if msg_type == "IM-BACK" and not self.robot_online:
+            # The robot announces its return (3 Nov 2026 test); ask for its
+            # state now instead of waiting up to a minute for the next poll.
+            # Its CURRENT-STATE reply is what marks it online.
+            _LOGGER.debug("[%s] Robot says it is back; requesting its state", self.serial)
+            self.request_current_state()
             return
         if msg_type in _ROBOT_TELEMETRY and not self.robot_online:
             self._mark_robot_online()
