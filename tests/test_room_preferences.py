@@ -412,6 +412,15 @@ class RoomSettingsTests(unittest.TestCase):
         self.client.return_to_base()
         self.assertEqual(self.commands(), ["ABORT"])
 
+    def test_pause_is_legacy_only(self):
+        self.client.pause()
+        self.assertEqual(self.commands(), ["PAUSE"])
+
+    def test_resume_sends_one_request(self):
+        self.client.resume()
+        self.assertEqual(self.commands(), ["service.set_room_clean"])
+        self.assertEqual(self.sent[0][1]["params"]["ctrl_value"], 1)
+
     def test_dock_actions_are_legacy_only(self):
         self.assertTrue(self.client.empty_bin())
         self.assertEqual(self.commands(), ["START-DOCK-ACTION"])

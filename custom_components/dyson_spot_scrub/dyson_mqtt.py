@@ -549,21 +549,17 @@ class DysonMqttClient:
                 self._reply_waiters.pop(msg_id, None)
 
     def pause(self) -> None:
-        """Pause an active clean.
+        """Pause an active clean: legacy PAUSE only.
 
-        Mirrors the Dyson app sequence (captured Oct 2026):
-        1. PAUSE on the command channel
-        2. service.set_room_clean with ctrl_value: 2 (pause signal) on JDM
+        Dyson's cloud adds service.set_room_clean (ctrl_value 2) itself; the
+        HA test on 3 Nov 2026 showed that request twice when we sent it too.
         Any in-flight start is cancelled first so the preference lock is
-        released and the PAUSE messages are sent immediately.
+        released and PAUSE is sent immediately.
         """
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → PAUSE", self.serial)
             self._publish({"msg": "PAUSE", "mode-reason": "RAPP", "time": _now_iso()})
-            self._publish_jdm("service.set_room_clean", {
-                "ctrl_value": 2, "clean_type": 0, "room_ids": [],
-            })
 
     def resume(self) -> None:
         """Resume a paused clean.
