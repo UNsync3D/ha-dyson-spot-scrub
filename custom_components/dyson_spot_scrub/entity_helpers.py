@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE
+from .const import DOMAIN, CONF_SERIAL, CONF_DEVICE_NAME, CONF_PRODUCT_TYPE, CONF_MQTT_PREFIX
 
 
 def device_info(entry) -> DeviceInfo:
@@ -16,6 +16,13 @@ def device_info(entry) -> DeviceInfo:
         model=entry.data.get(CONF_PRODUCT_TYPE, "RB0S"),
         serial_number=serial,
     )
+
+
+def is_nurovi_r2(entry) -> bool:
+    """Dyson R2 Nurovi Wash+Dry: product type 914, MQTT prefix RB07."""
+    data = getattr(entry, "data", {}) or {}
+    return (str(data.get(CONF_PRODUCT_TYPE, "")) == "914"
+            or str(data.get(CONF_MQTT_PREFIX, "")).upper() == "RB07")
 
 
 def room_slug(room_name: str) -> str:

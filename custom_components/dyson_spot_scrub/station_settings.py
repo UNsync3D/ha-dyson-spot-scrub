@@ -14,10 +14,17 @@ SWITCHES = {
 # Label → minutes between self-cleans (None = after each room, i.e. ROOM mode).
 FREQUENCIES = {"After each room": None, "Every 15 minutes": 15,
                "Every 30 minutes": 30, "Only as needed": 60}
+# Roller drying hours the robot may report. The Spot+Scrub AI app offers 3-5 h;
+# the R2 Nurovi reports 2 h (captures, 18 and 20 Oct 2026). The R2 app's full
+# list is not known yet, so the R2 is only offered what it reports.
+DRYING_HOURS = (2, 3, 4, 5)
 SELECTS = {
     "self_cleaning_frequency": ("Self-cleaning frequency", list(FREQUENCIES)),
     "roller_drying_duration": ("Roller drying duration", ["3 hours", "4 hours", "5 hours"]),
 }
+R2_SELECT_OPTIONS = {"roller_drying_duration": ["2 hours"]}
+# Station switches the R2 Nurovi never reports (no cleaning solution).
+R2_MISSING_SWITCHES = {"cleaning_solution"}
 # CURRENT-STATE fields cleared on reconnect so a stale value is never shown.
 STATE_FIELDS = [item[1] for item in SWITCHES.values()] + [
     "backWashType", "backWashTime", "airDryFrequency"]
@@ -38,7 +45,7 @@ def current_setting(state, key):
                          if value == minutes), None)
     if key == "roller_drying_duration":
         hours = state.get("airDryFrequency")
-        if type(hours) is int and hours in (3, 4, 5):
+        if type(hours) is int and hours in DRYING_HOURS:
             return f"{hours} hours"
     return None
 
@@ -54,8 +61,9 @@ def setting_payloads(key, value):
             return {"backWashType": "ROOM"}, {"back_wash_type": 1}
         return ({"backWashType": "TIME", "backWashTime": minutes},
                 {"back_wash_type": 0, "back_wash_time": minutes})
-    if key == "roller_drying_duration" and value in SELECTS[key][1]:
-        hours = int(value[0])
+    if (key == "roller_drying_duration" and isinstance(value, str)
+            and value in [f"{h} hours" for h in DRYING_HOURS]):
+        hours = int(value.split()[0])
         return {"airDryFrequency": hours}, {"airdry_frequency": hours}
     raise ValueError("Unsupported station setting or value")
 
@@ -71,7 +79,7 @@ def reported_properties(props):
     if type(value) is int and value in (0, 1):
         updates["backWashType"] = "ROOM" if value else "TIME"
     for prop, field, allowed in [("back_wash_time", "backWashTime", (15, 30, 60)),
-                                 ("airdry_frequency", "airDryFrequency", (3, 4, 5))]:
+                                 ("airdry_frequency", "airDryFrequency", DRYING_HOURS)]:
         value = props.get(prop)
         if type(value) is int and value in allowed:
             updates[field] = value

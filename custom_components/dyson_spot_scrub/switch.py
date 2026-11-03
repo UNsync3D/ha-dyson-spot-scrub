@@ -15,8 +15,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .station_entity import StationEntity
-from .entity_helpers import device_info, room_slug
-from .station_settings import SWITCHES
+from .entity_helpers import device_info, is_nurovi_r2, room_slug
+from .station_settings import R2_MISSING_SWITCHES, SWITCHES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,8 +27,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
+    skip = R2_MISSING_SWITCHES if is_nurovi_r2(entry) else set()
     async_add_entities([DysonStationSwitch(coordinator, entry, key, item[0])
-                        for key, item in SWITCHES.items()])
+                        for key, item in SWITCHES.items() if key not in skip])
     known_rooms: set[str] = set()
 
     @callback
