@@ -116,12 +116,79 @@
               "map_mop_color": "Mop path color",
               "map_combined_color": "Vacuum and mop path color",
               "map_path_width": "Path width",
-              "map_glow_width": "Glow width"
+              "map_glow_width": "Glow width",
+              "map_room_colors": "Room colors"
             },
             "data_description": {
               "map_combined_color": "Used for simultaneous vacuuming and mopping. Sequential cleaning keeps separate vacuum and mop colors.",
               "map_path_width": "Line width in source-image pixels. Dashboard scaling affects its displayed size.",
-              "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable."
+              "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable.",
+              "map_room_colors": "Give each room its own color for its floor, outline, name, area and legend entry, fixed by map and room. Walls turn white, and cleaning-path colors are unchanged."
+            }
+          },
+          "outside_walls_section": {
+            "name": "Outside walls",
+            "description": "A room's edge that isn't shared with another room.",
+            "data": {
+              "map_wall_style": "Style",
+              "map_wall_thickness_cm": "Thickness",
+              "map_wall_color": "Color"
+            },
+            "data_description": {
+              "map_wall_thickness_cm": "In centimetres on the real floor, so walls scale with the map.",
+              "map_wall_color": "The default grey turns white with Room colors on or the floor fill off. Any other color is used as chosen."
+            }
+          },
+          "inner_walls_section": {
+            "name": "Walls between rooms",
+            "description": "A solid wall shared by two rooms.",
+            "data": {
+              "map_inner_wall_style": "Style",
+              "map_inner_wall_thickness_cm": "Thickness",
+              "map_inner_wall_color": "Color"
+            },
+            "data_description": {
+              "map_inner_wall_thickness_cm": "In centimetres on the real floor.",
+              "map_inner_wall_color": "The default grey turns white with Room colors on or the floor fill off. Any other color is used as chosen."
+            }
+          },
+          "doors_section": {
+            "name": "Doors and openings",
+            "description": "Where the robot can pass from one room to the next, including open-plan splits.",
+            "data": {
+              "map_door_style": "Style",
+              "map_door_thickness_cm": "Thickness",
+              "map_door_color": "Color"
+            },
+            "data_description": {
+              "map_door_thickness_cm": "In centimetres on the real floor.",
+              "map_door_color": "The default grey turns light grey with Room colors on or the floor fill off. Any other color is used as chosen."
+            }
+          },
+          "floor_section": {
+            "name": "Floor",
+            "data": {
+              "map_floor_fill": "Fill rooms like the MyDyson app",
+              "map_floor_color": "Reachable floor color",
+              "map_room_fill_color": "Rest of room color"
+            },
+            "data_description": {
+              "map_floor_fill": "The floor the robot can reach is dark, and furniture and other areas it can't reach are grey.",
+              "map_floor_color": "Used only when Room colors is off. With Room colors on, each room's floor takes its room color.",
+              "map_room_fill_color": "Furniture and other parts of a room the robot can't reach."
+            }
+          },
+          "keepout_section": {
+            "name": "Keep-out zones",
+            "description": "Show or hide them under Visible elements.",
+            "data": {
+              "map_keepout_style": "Style",
+              "map_keepout_thickness_cm": "Thickness",
+              "map_keepout_color": "Color"
+            },
+            "data_description": {
+              "map_keepout_thickness_cm": "Outline thickness in centimetres on the real floor.",
+              "map_keepout_color": "Outline color; the zone is filled with a faint tint of it."
             }
           },
           "visibility_settings_section": {
@@ -133,8 +200,8 @@
               "map_show_room_areas": "Show room areas (m²)",
               "map_show_legend": "Show legend",
               "map_show_status_areas": "Show cleaning status areas",
-              "map_show_perimeter": "Show room perimeter paths",
-              "map_show_visited_paths": "Show historical room paths",
+              "map_show_perimeter": "Show walls and room dividers",
+              "map_show_visited_paths": "Show accessible floor outlines",
               "map_show_grid": "Show grid",
               "map_show_dock": "Show charging station",
               "map_show_restrictions": "Show keep-out zones",
@@ -142,8 +209,8 @@
             },
             "data_description": {
               "map_show_status_areas": "Colored room fills indicating cleaning progress.",
-              "map_show_perimeter": "Room-edge segments from the Dyson map. These are separate from the live cleaning path.",
-              "map_show_visited_paths": "Additional room tracks provided by Dyson. These may also trace room boundaries.",
+              "map_show_perimeter": "Walls as solid lines, and doors or openings between rooms as dashed lines, as in the MyDyson app.",
+              "map_show_visited_paths": "Outline of the floor the robot can reach in each room. It goes around furniture.",
               "map_show_grid": "Includes distance labels and the map origin marker.",
               "map_show_waypoints": "Dots along the cleaning path. The robot position remains visible.",
               "map_show_legend": "The legend has its own room labels, independent of Show room names."
@@ -154,6 +221,14 @@
     },
     "error": {
       "invalid_map_option": "Enter a valid value within the allowed range."
+    }
+  },
+  "selector": {
+    "line_style": {
+      "options": {
+        "solid": "Solid",
+        "dashed": "Dashed"
+      }
     }
   }
 }

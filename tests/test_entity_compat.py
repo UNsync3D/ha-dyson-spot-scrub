@@ -61,12 +61,23 @@ def collect(root):
             for e in ents:
                 di = {k: sorted(map(list, v)) if isinstance(v, set) else v for k, v in e._attr_device_info.items()}
                 out.append([platform, type(e).__name__, e._attr_unique_id, di])
+                NAMES[e._attr_unique_id] = getattr(e, '_attr_name', None)
         return sorted(out, key=lambda r: r[2])
+
+
+NAMES = {}
 
 
 class EntityCompatibilityTests(unittest.TestCase):
     def test_unique_ids_and_devices_match_snapshot(self):
         self.assertEqual(collect(str(ROOT)), json.loads(SNAPSHOT.read_text()))
+
+    def test_repetitions_select_is_renamed_but_keeps_its_id(self):
+        """#35: shown as Clean Repetitions; the card finds it by unique ID."""
+        collect(str(ROOT))
+        uid = '7VD-AU-ABC1234A_room_living_room_mop_repetitions'
+        self.assertEqual(NAMES[uid], 'Room Living Room Clean Repetitions')
+        self.assertFalse(any('Mop Repetitions' in str(n) for n in NAMES.values()))
 
 
 if __name__ == "__main__":

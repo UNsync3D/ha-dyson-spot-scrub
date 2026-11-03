@@ -471,6 +471,10 @@ class DysonMapCamera(Camera):
             self._map_data  = map_data
             self._metadata  = metadata
             self._cache_ts  = time.monotonic()
+            # Same metadata is the authoritative room list for the MQTT client.
+            apply_inventory = getattr(self._coordinator, "apply_map_inventory", None)
+            if apply_inventory:
+                apply_inventory(metadata)
 
             _LOGGER.debug(
                 "[%s] map_data top-level keys: %s",

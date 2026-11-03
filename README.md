@@ -77,6 +77,8 @@ data:
       mop_repetitions: Two Passes
 ```
 
+`mop_repetitions` sets the room's **Clean Repetitions** select (one or two passes). Despite its field name, the second pass also applies to vacuum-only cleans.
+
 To start with a local draft, call `dyson_spot_scrub.start_rooms_with_settings`. It applies the supplied room settings and sends the selected room IDs to the robot in the supplied order. The current Dyson protocol calls the field `unorderedZones`, so the robot may choose its own execution order until ordered cleaning is supported by the integration. Existing entities and actions keep their current behavior.
 
 ```yaml

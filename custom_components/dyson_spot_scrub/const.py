@@ -13,30 +13,90 @@ MAP_APPEARANCE_DEFAULTS = {
     "map_combined_color": [192, 132, 252],
     "map_path_width": 3,
     "map_glow_width": 6,
+    # Off = monochrome. On = each room's floor, outline, label and legend
+    # swatch get a colour, fixed by map ID and room ID. Walls are white with
+    # room colours on; path colours are unaffected.
+    "map_room_colors": False,
+}
+# Walls, doors and floor shading (section "Walls and floors"). Defaults are
+# the MyDyson app's look. The default grey wall and door colours switch to
+# white when Room colors is on or the floor fill is off, so they stay readable.
+# Walls, doors, floor shading and keep-out zones: one options section per
+# map element. Defaults are the MyDyson app's look. The default grey wall and
+# door colours switch to white when Room colors is on or the floor fill is
+# off, so they stay readable.
+MAP_WALL_SECTIONS = {
+    "outside_walls_section": {           # presentation type 0
+        "map_wall_style": "solid",
+        "map_wall_thickness_cm": 5,
+        "map_wall_color": [147, 147, 147],
+    },
+    "inner_walls_section": {             # type 2: walls between rooms
+        "map_inner_wall_style": "solid",
+        "map_inner_wall_thickness_cm": 5,
+        "map_inner_wall_color": [147, 147, 147],
+    },
+    "doors_section": {                   # type 1: doors and other openings
+        "map_door_style": "dashed",
+        "map_door_thickness_cm": 3,
+        "map_door_color": [147, 147, 147],
+    },
+    "floor_section": {
+        # Like the MyDyson app: reachable floor dark, the rest grey.
+        "map_floor_fill": True,
+        "map_floor_color": [18, 18, 20],     # used only with Room colors off
+        "map_room_fill_color": [37, 37, 40], # furniture and unreachable areas
+    },
+    "keepout_section": {
+        # Outline style/thickness/colour; the fill is a faint tint of the
+        # same colour. Shown or hidden by map_show_restrictions.
+        "map_keepout_style": "dashed",
+        "map_keepout_thickness_cm": 1,
+        "map_keepout_color": [245, 158, 11],
+    },
+}
+MAP_WALL_DEFAULTS = {key: value for section in MAP_WALL_SECTIONS.values()
+                     for key, value in section.items()}
+# Map styling options are switched off for v2.0.0: the map always uses the
+# defaults above (the MyDyson-app look agreed with FutuRazor on #28), the
+# sections are hidden from the options screen, and any previously saved
+# styling values are ignored. Set to True to bring the options back.
+MAP_STYLING_ENABLED = False
+MAP_LINE_STYLES = ("solid", "dashed")
+MAP_CHOICES = {
+    "map_wall_style": MAP_LINE_STYLES,
+    "map_inner_wall_style": MAP_LINE_STYLES,
+    "map_keepout_style": MAP_LINE_STYLES,
+    "map_door_style": MAP_LINE_STYLES,
 }
 MAP_VISIBILITY_DEFAULTS = {
-    "map_show_furniture": True,
+    "map_show_furniture": False,   # the floor fill shows furniture as grey
     "map_show_room_names": True,
-    "map_show_room_areas": True,
+    "map_show_room_areas": False,
     "map_show_legend": False,
     "map_show_status_areas": False,
     "map_show_perimeter": True,
     "map_show_visited_paths": True,
     "map_show_grid": False,
     "map_show_dock": True,
-    "map_show_restrictions": True,
+    "map_show_restrictions": False,   # keep-out zones hidden unless switched on
     "map_show_waypoints": True,
 }
 MAP_DEFAULTS = {
     **MAP_RETENTION_DEFAULTS,
     "map_transparent_background": False,
     **MAP_APPEARANCE_DEFAULTS,
+    **MAP_WALL_DEFAULTS,
     **MAP_VISIBILITY_DEFAULTS,
 }
 MAP_NUMBER_RANGES = {
     "map_retention_minutes": (0, 60),
     "map_path_width": (1, 15),
     "map_glow_width": (0, 25),
+    "map_wall_thickness_cm": (1, 30),
+    "map_inner_wall_thickness_cm": (1, 30),
+    "map_keepout_thickness_cm": (1, 30),
+    "map_door_thickness_cm": (1, 30),
 }
 MAP_PATH_ACTIONS = {
     "VACUUMING": "map_vacuum_color",
@@ -87,7 +147,10 @@ DEFAULT_MODE = MODE_VACUUM
 # "804" = Spot+Scrub AI (confirmed from live manifest, Aug 2026)
 # "RB0" = other robot vacuum family
 # "276", "277" = older robot models
-ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804")
+# "914" = Dyson R2 Nurovi Wash+Dry (model RB07-CC, MQTT prefix RB07), from an
+#         owner's manifest in thoukydides/matterbridge-dyson-robot#50. Listed so
+#         setup finds it; R2 support is not confirmed yet (issue #32).
+ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804", "914")
 
 # Dock states during which a new station action (empty bin / wash mop) must
 # not be sent — the dock is already running one.

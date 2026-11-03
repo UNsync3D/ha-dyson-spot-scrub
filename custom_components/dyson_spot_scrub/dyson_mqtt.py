@@ -25,6 +25,7 @@ import re
 import ssl
 import threading
 import time
+from collections import OrderedDict
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -42,6 +43,36 @@ _PREFERENCE_TIMEOUT = 10.0
 # Map IDs probed on connect (and their stagger) before persistentMapId is known.
 _PROBE_MAP_IDS = range(4)
 _PROBE_INTERVAL = 2.5
+# How long a start waits for the robot to confirm the room settings before
+# sending START (the app waits for this reply too; it usually takes <1 s).
+_SETTINGS_CONFIRM_TIMEOUT = 5.0
+# While Dyson reports the robot gone (GONE-AWAY), ask for its state this often
+# until it answers. One small request a minute; nothing else is resent.
+_OFFLINE_POLL_INTERVAL = 60.0
+# Robot telemetry that proves the robot itself is reachable again.
+_ROBOT_TELEMETRY = {"CURRENT-STATE", "STATE-CHANGE"}
+# Fields that must never reach the log (seen in UPDATE-LOCAL-BROKER-CONFIG,
+# which the robot sends when it reconnects).
+_SECRET_FIELDS = {"localpwd", "password", "token", "secret"}
+
+
+def _redact(data):
+    """Copy of a payload with secret fields masked, for debug logging."""
+    if isinstance(data, dict):
+        return {k: ("***" if str(k).lower() in _SECRET_FIELDS else _redact(v))
+                for k, v in data.items()}
+    if isinstance(data, list):
+        return [_redact(v) for v in data]
+    return data
+# How many outstanding get_preference msgId -> map_id mappings to remember.
+_MAX_TRACKED_REQUESTS = 64
+# A room-preference row must reach index [10] (roomOrder) to be usable.
+_MIN_ROOM_ROW_LEN = 11
+
+
+def _valid_room_row(row) -> bool:
+    return (isinstance(row, list) and len(row) >= _MIN_ROOM_ROW_LEN
+            and isinstance(row[0], (int, str)) and not isinstance(row[0], bool))
 _DRYING_TIME_KEYS = ("drying_total_seconds", "drying_remaining_seconds", "drying_updated_at")
 
 # Per-room setting name → (index in the room-preference array, label → raw value).
@@ -288,6 +319,11 @@ def _room_display_name(raw_name: Any) -> str:
     return s.title()
 
 
+def _same_room_name(a: Any, b: Any) -> bool:
+    """Robot and REST name the same room in different formats; compare normalised."""
+    return _room_display_name(a).casefold() == _room_display_name(b).casefold()
+
+
 # ── MQTT client ───────────────────────────────────────────────────────────────
 
 
@@ -322,10 +358,31 @@ class DysonMqttClient:
 
         self._client:    mqtt.Client | None = None
         self._lock       = threading.Lock()
-        self.connected   = False
+        self.connected   = False      # connected to Dyson's cloud broker
+        # The robot itself: False after Dyson reports GONE-AWAY, until the robot
+        # sends fresh telemetry. The broker can be up while the robot is not.
+        self.robot_online = True
+        self._offline_timer: threading.Timer | None = None
+        self._closing = False          # disconnect() in progress: not a failure
         self.state: dict = {}
 
-        self._cached_preference:    dict | None = None
+        # ── Room preference store (see _cached_preference) ─────────────────
+        # get_preference is NOT a complete room inventory: after a scheduled
+        # start it can contain only the scheduled room (FutuRazor captures,
+        # 26 Oct 2026), and a reply can be for a different map than the
+        # current one (new-map capture, 25 Oct). So replies are MERGED per
+        # map and room ID into this store and never remove rooms. Rooms are
+        # removed only when the authoritative REST map metadata for that map
+        # no longer lists them (set_map_inventory). All guarded by
+        # _preference_lock (the paho thread writes, executor/loop read).
+        self._room_store: dict[str, dict[str, list]] = {}    # map -> room id -> row
+        self._uv_store: dict[str, dict[str, list]] = {}      # map -> room id -> [id, on]
+        self._pref_extras: dict[str, dict] = {}              # map -> other reply keys
+        self._map_inventory: dict[str, dict[str, str]] = {}  # map -> room id -> name
+        # get_preference msgId -> map_id, for our requests and the app's
+        # (seen on command/jdm), so each reply is filed under the right map.
+        self._pref_request_maps: OrderedDict[str, str] = OrderedDict()
+        self._prefs_map_id: str | None = None   # map whose prefs were last fetched
 
         # Room settings HA has sent but the robot hasn't yet reported back.
         # The cache above only ever holds what the robot reported; these let a
@@ -341,7 +398,6 @@ class DysonMqttClient:
         self._room_edit_lock = threading.RLock()
         self._pending_refresh_id: str | None = None
         self._pending_since = 0.0
-        self._preferences_fetched              = False
 
         # Guard: only fire on_disconnected once per client instance.
         # paho's loop_start() may call _on_disconnect multiple times if it
@@ -354,7 +410,12 @@ class DysonMqttClient:
         # Start calls run in HA's executor; MQTT replies arrive on paho's thread.
         self._start_lock = threading.Lock()
         self._preference_lock = threading.RLock()
+        # Called (paho thread) when the robot reports a different current map.
+        self.on_map_changed: Callable[[str], None] | None = None
         self._preference_ready = threading.Event()
+        # Replies awaited by msgId (e.g. the set_preference before a START).
+        self._reply_lock = threading.Lock()
+        self._reply_waiters: dict[str, dict] = {}
         self._preference_request_id: str | None = None
         self._preference_response: dict | None = None
         self._start_cancelled = False
@@ -441,8 +502,16 @@ class DysonMqttClient:
 
         client.loop_start()
 
+    @property
+    def available(self) -> bool:
+        """Connected to Dyson's broker AND the robot is reachable."""
+        return self.connected and self.robot_online
+
     def disconnect(self) -> None:
+        """Close this connection on purpose (reconnect, reload or shutdown)."""
+        self._closing = True
         self._cancel_pending_start()
+        self._stop_offline_poll()
         with self._lock:
             c = self._client
             self._client = None
@@ -461,7 +530,7 @@ class DysonMqttClient:
         No automatic retries: a partial send may already have changed the robot.
         """
         state_fields, props = setting_payloads(key, value)
-        if not self.connected or current_setting(self.state, key) is None:
+        if not self.available or current_setting(self.state, key) is None:
             return False
         if current_setting(self.state, key) == value:
             return True
@@ -480,7 +549,7 @@ class DysonMqttClient:
         return self._start_cleaning(mode)
 
     def _can_start_new_clean(self) -> bool:
-        reason = start_block_reason(self.state, self.connected)
+        reason = start_block_reason(self.state, self.available)
         if reason:
             _LOGGER.warning("[%s] New cleaning start blocked: %s", self.serial, reason)
         return reason is None
@@ -490,23 +559,38 @@ class DysonMqttClient:
         with self._preference_lock:
             self._start_cancelled = True
             self._preference_ready.set()
+        with self._reply_lock:
+            for waiter in self._reply_waiters.values():
+                waiter["event"].set()
+
+    def _expect_reply(self, msg_id: str) -> dict:
+        """Register interest in the JDM reply with this msgId (before sending)."""
+        waiter = {"event": threading.Event(), "code": None}
+        with self._reply_lock:
+            self._reply_waiters[msg_id] = waiter
+        return waiter
+
+    def _await_reply(self, msg_id: str, waiter: dict, timeout: float):
+        """Wait for a registered reply; returns its code, or None on timeout."""
+        try:
+            waiter["event"].wait(timeout)
+            return waiter["code"]
+        finally:
+            with self._reply_lock:
+                self._reply_waiters.pop(msg_id, None)
 
     def pause(self) -> None:
-        """Pause an active clean.
+        """Pause an active clean: legacy PAUSE only.
 
-        Mirrors the Dyson app sequence (captured Oct 2026):
-        1. PAUSE on the command channel
-        2. service.set_room_clean with ctrl_value: 2 (pause signal) on JDM
+        Dyson's cloud adds service.set_room_clean (ctrl_value 2) itself; the
+        HA test on 3 Nov 2026 showed that request twice when we sent it too.
         Any in-flight start is cancelled first so the preference lock is
-        released and the PAUSE messages are sent immediately.
+        released and PAUSE is sent immediately.
         """
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → PAUSE", self.serial)
             self._publish({"msg": "PAUSE", "mode-reason": "RAPP", "time": _now_iso()})
-            self._publish_jdm("service.set_room_clean", {
-                "ctrl_value": 2, "clean_type": 0, "room_ids": [],
-            })
 
     def resume(self) -> None:
         """Resume a paused clean.
@@ -537,7 +621,7 @@ class DysonMqttClient:
 
     def cancel_drying(self) -> bool:
         """Cancel only roller drying; telemetry confirms completion."""
-        if not self.connected or self.state.get("dockState") != "DRYING_MOP":
+        if not self.available or self.state.get("dockState") != "DRYING_MOP":
             return False
         return self._abort_dock_action()
 
@@ -562,35 +646,28 @@ class DysonMqttClient:
         return self._start_dock_action("WASH_MOP", 1)
 
     def _start_dock_action(self, action: str, station_act: int) -> bool:
-        """Send one station action on both command channels, if the dock is free.
+        """Send one station action, legacy command only, if the dock is free.
 
-        OPEN QUESTION (FutuRazor testing, Oct 2026): HA-triggered actions show
-        TWO service.start_station_act requests with different msgIds, while
-        app-triggered actions show one. This method publishes the JDM call
-        exactly once, so the extra request is probably generated upstream
-        (robot/cloud translating the legacy START-DOCK-ACTION into JDM). Under
-        investigation: compare a legacy-only publish against this pair before
-        changing anything.
+        Dyson's cloud translates legacy commands into JDM itself (capture,
+        3 Nov 2026: the translated JDM requests carry no "time" field). The
+        app sends only START-DOCK-ACTION; sending the JDM request as well made
+        the dock receive the action twice (FutuRazor, #22). station_act is
+        kept for the log: 3 = empty bin, 1 = wash mop.
         """
         dock = self.state.get("dockState")
-        if not self.connected:
-            _LOGGER.warning("[%s] %s: not connected", self.serial, action)
+        if not self.available:
+            _LOGGER.warning("[%s] %s: robot not reachable", self.serial, action)
             return False
         if dock in DOCK_BUSY_STATES:
             _LOGGER.warning("[%s] %s: dock already busy (%s)", self.serial, action, dock)
             return False
         _LOGGER.info("[%s] → %s (station_act=%d)", self.serial, action, station_act)
-        self._publish({
+        return self._publish({
             "msg":         "START-DOCK-ACTION",
             "action":      action,
             "mode-reason": "RAPP",
             "time":        _now_iso(),
         })
-        self._publish_jdm("service.start_station_act", {
-            "station_act": station_act,
-            "ctrl_value":  1,
-        })
-        return True
 
     def _clear_drying_time(self) -> None:
         """Never carry a previous cycle's times into a new dock cycle."""
@@ -607,17 +684,144 @@ class DysonMqttClient:
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → RETURN_TO_BASE", self.serial)
+            # Legacy only: Dyson's cloud adds service.start_recharge itself.
             self._publish({"msg": "ABORT", "mode-reason": "RAPP", "time": _now_iso()})
-            self._publish_jdm("service.start_recharge", {})
+
+    # ── Room listing ──────────────────────────────────────────────────────────
+
+    # ── Room preference store ─────────────────────────────────────────────────
+
+    def _map_key(self, map_id=None) -> str:
+        """Store key for a map ID; the current map if none is given."""
+        if map_id is None:
+            map_id = self.state.get("persistentMapId")
+        return "?" if map_id in (None, "") else str(map_id)
+
+    def _merge_preference(self, map_key: str, pref: dict) -> int:
+        """Merge one get_preference payload into the store; returns rooms merged.
+
+        Rooms absent from the payload are left untouched: a partial reply
+        updates only the rooms it contains.
+        """
+        merged = 0
+        with self._preference_lock:
+            rooms = self._room_store.setdefault(map_key, {})
+            uv = self._uv_store.setdefault(map_key, {})
+            room_rows = pref.get("room")
+            for row in room_rows if isinstance(room_rows, list) else []:
+                # Malformed rows are never stored: they would later be sent
+                # back to the robot as part of a full preference list.
+                if _valid_room_row(row):
+                    rooms[str(row[0])] = deepcopy(row)
+                    merged += 1
+            for pair in pref.get("uv_switch") or []:
+                if isinstance(pair, list) and len(pair) >= 2:
+                    uv[str(pair[0])] = list(pair)
+            extras = {k: deepcopy(v) for k, v in pref.items() if k not in ("room", "uv_switch")}
+            if extras:
+                self._pref_extras.setdefault(map_key, {}).update(extras)
+        return merged
+
+    def _reply_matches_map(self, map_key: str, pref: dict) -> bool:
+        """Could this reply (to a request we didn't see) be for this map?
+
+        Every room in it must already be known for the map with the same name:
+        from the REST inventory when we have it, otherwise from rooms already
+        stored. With neither, it is not trusted; our own (tracked) request
+        fills the map instead.
+        """
+        rows = [r for r in pref.get("room") or [] if _valid_room_row(r)]
+        if not rows:
+            return False
+        with self._preference_lock:
+            known = self._map_inventory.get(map_key)
+            if not known:
+                known = {rid: row[1] for rid, row in self._room_store.get(map_key, {}).items()}
+        if not known:
+            return False
+        return all(str(r[0]) in known and _same_room_name(r[1], known[str(r[0])])
+                   for r in rows)
+
+    def _preference_view(self, map_key: str) -> dict | None:
+        """The merged preferences for one map, shaped like a get_preference reply."""
+        with self._preference_lock:
+            rooms = self._room_store.get(map_key)
+            if not rooms:
+                return None
+            room_rows = [deepcopy(row) for row in rooms.values()]
+            uv = self._uv_store.get(map_key, {})
+            uv_rows = [list(uv[rid]) for rid in rooms if rid in uv]
+            return {**deepcopy(self._pref_extras.get(map_key, {})),
+                    "room": room_rows, "uv_switch": uv_rows}
+
+    @property
+    def _cached_preference(self) -> dict | None:
+        """Merged preferences for the CURRENT map (a fresh copy), or None.
+
+        Kept under its historical name: callers and tests read it like the
+        single cached get_preference reply it used to be.
+        """
+        return self._preference_view(self._map_key())
+
+    @_cached_preference.setter
+    def _cached_preference(self, value: dict | None) -> None:
+        """Replace the current map's stored preferences wholesale (tests/reset)."""
+        key = self._map_key()
+        with self._preference_lock:
+            self._room_store.pop(key, None)
+            self._uv_store.pop(key, None)
+            self._pref_extras.pop(key, None)
+        if value:
+            self._merge_preference(key, value)
+
+    def set_map_inventory(self, map_id, zones: list) -> None:
+        """Record a map's authoritative room list (REST persistent-map metadata).
+
+        Rooms the store holds for that map but the metadata no longer lists are
+        removed - this is the only way a room disappears. As a safety net, if
+        none of the metadata's zone IDs match any stored room ID the data is
+        assumed inconsistent and nothing is removed.
+        """
+        if not isinstance(zones, list):
+            return
+        inventory = {str(z.get("id")): str(z.get("name") or "")
+                     for z in zones if isinstance(z, dict) and z.get("id") is not None}
+        key = self._map_key(map_id)
+        removed: list[str] = []
+        with self._preference_lock:
+            self._map_inventory[key] = inventory
+            stored = self._room_store.get(key, {})
+            if inventory and stored and set(stored) & set(inventory):
+                removed = [rid for rid in stored if rid not in inventory]
+                for rid in removed:
+                    stored.pop(rid, None)
+                    self._uv_store.get(key, {}).pop(rid, None)
+            elif inventory and stored:
+                _LOGGER.warning("[%s] Map %s metadata shares no room IDs with stored "
+                                "preferences; not removing any rooms", self.serial, key)
+        if removed:
+            _LOGGER.info("[%s] Rooms %s removed from map %s (no longer in map data)",
+                         self.serial, removed, key)
+            self._notify_state_change()
+
+    def _track_preference_request(self, msg_id, map_id) -> None:
+        """Remember which map a get_preference request (ours or the app's) asked for."""
+        if msg_id is None or map_id is None:
+            return
+        with self._preference_lock:
+            self._pref_request_maps[str(msg_id)] = self._map_key(map_id)
+            while len(self._pref_request_maps) > _MAX_TRACKED_REQUESTS:
+                self._pref_request_maps.popitem(last=False)
 
     # ── Room listing ──────────────────────────────────────────────────────────
 
     @property
     def room_names(self) -> list[str]:
-        """Normalised display names of every room in the preference cache."""
-        if not (self._cached_preference and self._cached_preference.get("room")):
+        """Normalised display names of every known room on the current map."""
+        pref = self._cached_preference
+        if not (pref and pref.get("room")):
             return []
-        return [_room_display_name(r[1]) for r in self._cached_preference["room"]]
+        return [_room_display_name(r[1]) for r in pref["room"]]
 
     @property
     def room_preferences(self) -> list[list]:
@@ -637,11 +841,13 @@ class DysonMqttClient:
           [10] roomOrder         int
           [11] additional field  (preserved, newer firmware)
 
-        Returns a direct reference into the cache — callers may modify a room
-        entry in-place and then call set_room_preferences() to persist the change.
+        Returns a COPY of the merged rows for the current map: every room seen
+        in any preference reply for it, minus rooms the map metadata removed.
+        Change settings with edit_room_setting() / save_room_settings().
         """
-        if self._cached_preference and isinstance(self._cached_preference.get("room"), list):
-            return self._cached_preference["room"]
+        pref = self._cached_preference
+        if pref and isinstance(pref.get("room"), list):
+            return pref["room"]
         return []
 
     def room_preferences_for_edit(self) -> list[list]:
@@ -715,8 +921,8 @@ class DysonMqttClient:
         except (TypeError, ValueError):
             _LOGGER.warning("[%s] set_room_preferences: no map ID available", self.serial)
             return False
-        if not self.connected:
-            _LOGGER.warning("[%s] set_room_preferences: not connected", self.serial)
+        if not self.available:
+            _LOGGER.warning("[%s] set_room_preferences: robot not reachable", self.serial)
             return False
         uv_switch: list = []
         if self._cached_preference:
@@ -829,8 +1035,9 @@ class DysonMqttClient:
         """Read current preferences before editing mode and room selection.
 
         Called from an executor, never the MQTT callback or HA event-loop thread.
-        Keep the existing four-command start sequence; only its room payload is
-        corrected here. A failed refresh must not fall back to stale preferences.
+        Sends what the app sends: set_preference, wait for its reply, then the
+        legacy START (Dyson's cloud adds the JDM start requests itself). A
+        failed refresh must not fall back to stale preferences.
         """
         if mode is not None and mode not in (0, 1, 2, 3):
             _LOGGER.warning("[%s] Cannot start: invalid cleaning mode %r", self.serial, mode)
@@ -849,8 +1056,8 @@ class DysonMqttClient:
                 self._start_cancelled = False
                 if not self._can_start_new_clean():
                     return False
-                if not self.connected:
-                    _LOGGER.warning("[%s] Cannot start: MQTT disconnected", self.serial)
+                if not self.available:
+                    _LOGGER.warning("[%s] Cannot start: robot not reachable", self.serial)
                     return False
                 try:
                     map_id = int(self.state["persistentMapId"])
@@ -870,11 +1077,16 @@ class DysonMqttClient:
                 })
 
             received = self._preference_ready.wait(_PREFERENCE_TIMEOUT)
-            with self._preference_lock:
+            # From here to the last publish this is a room-settings edit like
+            # any other, so it takes _room_edit_lock (always BEFORE
+            # _preference_lock, as the edit helpers do): a select or card save
+            # can't slip a set_preference in between our read and our send and
+            # then be reverted by it. Not held during the wait above.
+            with self._room_edit_lock, self._preference_lock:
                 # A Dyson-app command may have changed readiness while we waited.
                 if not self._can_start_new_clean():
                     return False
-                if self._start_cancelled or not self.connected:
+                if self._start_cancelled or not self.available:
                     _LOGGER.info("[%s] Pending cleaning start cancelled", self.serial)
                     return False
                 if str(self.state.get("persistentMapId")) != str(map_id):
@@ -888,11 +1100,23 @@ class DysonMqttClient:
                         self.serial, _PREFERENCE_TIMEOUT,
                     )
                     return False
-                rooms = pref.get("room")
-                if not isinstance(rooms, list) or not rooms or any(
-                    not isinstance(room, list) or len(room) < 11
-                    or not isinstance(room[0], (int, str)) for room in rooms
-                ):
+                # The fresh reply itself must be well-formed - a malformed or
+                # empty one still aborts, and nothing is padded with defaults.
+                fresh = pref.get("room")
+                if not isinstance(fresh, list) or not fresh or not all(
+                        _valid_room_row(room) for room in fresh):
+                    _LOGGER.warning("[%s] Cannot start: incomplete room preferences", self.serial)
+                    return False
+                # It may still be PARTIAL (e.g. only the scheduled room). It has
+                # already been merged into the store, so start from the merged
+                # view: every robot-reported room stays addressable and the
+                # outgoing set_preference carries the full list, as the app does.
+                merged = self._preference_view(self._map_key(map_id)) or {}
+                # The edit base, not just the robot's view: if a setting change
+                # was sent moments ago and the robot hasn't confirmed it yet,
+                # start from what was sent so the start doesn't undo it.
+                rooms = self.room_preferences_for_edit()
+                if not rooms:
                     _LOGGER.warning("[%s] Cannot start: incomplete room preferences", self.serial)
                     return False
                 if room_ids is not None:
@@ -945,15 +1169,53 @@ class DysonMqttClient:
                     "[%s] Starting cleaning in rooms %s with refreshed preferences",
                     self.serial, ordered_room_ids,
                 )
-                if room_ids is not None and self._cached_preference is not None:
-                    self._cached_preference["room"] = deepcopy(updated_rooms)
-                self._publish_jdm("service.set_preference", {
-                    "map_id": map_id,
-                    "prefer_type": 1,
-                    "room_preference": updated_rooms,
-                    "uv_switch": deepcopy(pref.get("uv_switch", [])),
+                if room_ids is not None:
+                    # Pre-existing optimistic update of the card start path.
+                    self._merge_preference(self._map_key(map_id), {"room": updated_rooms})
+                # As the app does (capture, 3 Nov 2026): save the settings,
+                # wait for the robot to confirm them, then send only the
+                # legacy START. Dyson's cloud adds set_cur_map and
+                # set_room_clean itself; sending them too made the robot start,
+                # stop and start again ("starting, charging, starting", #24).
+                settings_id = _rand_msg_id()
+                waiter = self._expect_reply(settings_id)
+                settings_sent = self._publish_raw(self._jdm_command_topic, {
+                    "msgId": settings_id,
+                    "version": "1.0.1",
+                    "method": "service.set_preference",
+                    "params": {
+                        "map_id": map_id,
+                        "prefer_type": 1,
+                        "room_preference": updated_rooms,
+                        "uv_switch": deepcopy(merged.get("uv_switch", [])),
+                    },
+                    "time": _now_iso(),
                 })
-                self._abort_dock_action()
+                if not settings_sent:
+                    self._await_reply(settings_id, waiter, 0)
+                    _LOGGER.warning("[%s] Cannot start: room settings not sent", self.serial)
+                    return False
+                # The reply arrives on paho's thread, which also needs this
+                # lock for other messages: don't hold it while waiting. The
+                # room-edit lock stays held, so no edit can slip in.
+                self._preference_lock.release()
+                try:
+                    code = self._await_reply(settings_id, waiter, _SETTINGS_CONFIRM_TIMEOUT)
+                finally:
+                    self._preference_lock.acquire()
+                if self._start_cancelled or not self.available:
+                    _LOGGER.info("[%s] Pending cleaning start cancelled", self.serial)
+                    return False
+                if code != 0:
+                    _LOGGER.warning(
+                        "[%s] Cannot start: the robot did not confirm the room "
+                        "settings (%s)", self.serial,
+                        "no reply" if code is None else f"code {code}")
+                    return False
+                if self.state.get("dockState") == "DRYING_MOP":
+                    # The app stops roller drying before a clean; only needed
+                    # while it is actually drying.
+                    self._abort_dock_action()
                 published = self._publish({
                     "msg": "START",
                     "mode-reason": "RAPP",
@@ -970,10 +1232,6 @@ class DysonMqttClient:
                         self.serial,
                     )
                     return False
-                self._publish_jdm("service.set_cur_map", {"map_id": map_id})
-                self._publish_jdm("service.set_room_clean", {
-                    "ctrl_value": 1, "clean_type": 0, "room_ids": ordered_room_ids,
-                })
                 return True
         finally:
             with self._preference_lock:
@@ -997,11 +1255,15 @@ class DysonMqttClient:
         for key in ("state", "dockState", "workMode", "jdmStatus", *STATE_FIELDS):
             self.state.pop(key, None)
         self._notify_state_change()
-        self._preferences_fetched = False  # Allow re-fetch on reconnect
+        self._prefs_map_id = None  # Re-fetch the current map's rooms on reconnect
         # Single wildcard subscription covers every prefix (RB05, NROB, …).
         client.subscribe(f"+/{self.serial}/#", qos=0)
         self.request_current_state()
         self._schedule_map_probes()
+        if not self.robot_online:
+            # The robot was gone before this connection; keep asking until it
+            # answers rather than assuming it came back with the broker.
+            self._schedule_offline_poll()
         if self.on_connected:
             self.on_connected()
 
@@ -1012,6 +1274,15 @@ class DysonMqttClient:
             )
             return
         self._disconnected_handled = True
+        self._stop_offline_poll()
+        if self._closing:
+            # Our own disconnect(): the coordinator is replacing or closing
+            # this connection, so it is neither a failure nor a reason to
+            # reconnect.
+            _LOGGER.debug("[%s] MQTT connection closed (rc=%s)", self.serial, rc)
+            self.connected = False
+            self._notify_state_change()
+            return
         _LOGGER.warning("[%s] MQTT disconnected (rc=%s)", self.serial, rc)
         self.connected = False
         self._clear_drying_time()
@@ -1053,15 +1324,21 @@ class DysonMqttClient:
             if self.on_prefix_changed:
                 self.on_prefix_changed(parts[0])
             self.request_current_state()
-            self._preferences_fetched = False
+            self._prefs_map_id = None
             self._schedule_map_probes()
 
         # json.dumps of large map/state payloads is costly; skip it unless
         # debug logging is actually enabled.
         if _LOGGER.isEnabledFor(logging.DEBUG):
-            _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(data))
+            _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(_redact(data)))
 
-        if topic.endswith("/status/jdm"):
+        if topic.endswith("/command/jdm"):
+            # Our own and the Dyson app's requests. Only used to learn which
+            # map each get_preference reply belongs to.
+            if data.get("method") == "service.get_preference":
+                params = data.get("params") if isinstance(data.get("params"), dict) else {}
+                self._track_preference_request(data.get("msgId"), params.get("map_id"))
+        elif topic.endswith("/status/jdm"):
             self._handle_jdm(data)
         elif topic.endswith("/status") or topic.endswith("/status/current"):
             self._handle_status(data)
@@ -1070,6 +1347,12 @@ class DysonMqttClient:
 
     def _handle_jdm(self, data: dict) -> None:
         method = data.get("method")
+        if "code" in data:
+            with self._reply_lock:
+                waiter = self._reply_waiters.get(str(data.get("msgId")))
+            if waiter is not None:
+                waiter["code"] = data.get("code")
+                waiter["event"].set()
 
         if method == "prop.post" and data.get("params"):
             self._merge_jdm_props(data["params"])
@@ -1086,6 +1369,27 @@ class DysonMqttClient:
             pref = data.get("data")
             success = data.get("code") == 0 and isinstance(pref, dict)
             with self._preference_lock:
+                # File the reply under the map it was requested for. The reply
+                # itself doesn't say which map it describes, and room IDs are
+                # reused across maps (both start at 10), so a reply to a request
+                # we never saw is only trusted if it matches what we already
+                # know about the current map; otherwise it may be an older map's
+                # (FutuRazor review, #24) and would bring back stale names.
+                map_key = self._pref_request_maps.pop(str(data.get("msgId")), None)
+                trusted = map_key is not None
+                if map_key is None:
+                    map_key = self._map_key()
+                    if success and not self._reply_matches_map(map_key, pref):
+                        _LOGGER.debug("[%s] Ignoring get_preference reply %s: request "
+                                      "not seen and rooms don't match map %s",
+                                      self.serial, data.get("msgId"), map_key)
+                        trusted = False
+                    else:
+                        trusted = True
+                merged = 0
+                if success and trusted and isinstance(pref.get("room"), list):
+                    # Merge BEFORE waking a pending start, which reads the store.
+                    merged = self._merge_preference(map_key, pref)
                 if (self._preference_request_id is not None
                         and str(data.get("msgId")) == self._preference_request_id):
                     self._preference_response = deepcopy(pref) if success else None
@@ -1096,40 +1400,96 @@ class DysonMqttClient:
                     # edits build on what it reports, not on what we sent.
                     self._pending_rooms = None
                     self._pending_refresh_id = None
-            if not success or not isinstance(pref.get("room"), list):
+            if not merged:
+                _LOGGER.debug("[%s] get_preference for map %s: 0 rooms", self.serial, map_key)
                 return
-            n = len(pref.get("room", []))
-            if n == 0:
-                _LOGGER.debug("[%s] get_preference: 0 rooms (map probe)", self.serial)
-                return
-            first_cache = self._cached_preference is None
-            self._cached_preference = pref
-            if first_cache:
-                _LOGGER.info("[%s] Room preferences cached (%d room(s))", self.serial, n)
-                self._notify_state_change()
-            else:
-                _LOGGER.debug("[%s] Room preferences refreshed (%d room(s))", self.serial, n)
-                # Notify even on a refresh so room-switch entities update when
-                # the cache was replaced (e.g. stale wrong-map rooms → correct map).
+            known = len(self._room_store.get(map_key, {}))
+            _LOGGER.debug("[%s] Room preferences for map %s: %d in reply, %d known",
+                          self.serial, map_key, merged, known)
+            if map_key == self._map_key():
                 self._notify_state_change()
 
     def _handle_status(self, data: dict) -> None:
         msg_type = data.get("msg") or data.get("method")
+        if msg_type == "GONE-AWAY":
+            self._mark_robot_offline()
+            return
+        if msg_type == "IM-BACK" and not self.robot_online:
+            # The robot announces its return (3 Nov 2026 test); ask for its
+            # state now instead of waiting up to a minute for the next poll.
+            # Its CURRENT-STATE reply is what marks it online.
+            _LOGGER.debug("[%s] Robot says it is back; requesting its state", self.serial)
+            self.request_current_state()
+            return
+        if msg_type in _ROBOT_TELEMETRY and not self.robot_online:
+            self._mark_robot_online()
         if msg_type in {"CURRENT-STATE", "STATE-CHANGE", "PRODUCT_INFO", "INITIAL_STATE"}:
             self.state = {**self.state, **data}
             if "dockState" in data and data["dockState"] != "DRYING_MOP":
                 self._clear_drying_time()
             self._notify_state_change()
 
-            if not self._preferences_fetched and self.state.get("persistentMapId"):
-                self._preferences_fetched = True
+            # Fetch rooms whenever the current map changes (and after
+            # reconnect), not just once per connection: a new map must not
+            # keep showing the previous map's rooms.
+            map_id = self.state.get("persistentMapId")
+            if map_id not in (None, "") and str(map_id) != self._prefs_map_id:
+                self._prefs_map_id = str(map_id)
                 self._fetch_room_preferences()
+                if self.on_map_changed:
+                    self.on_map_changed(str(map_id))
 
         elif "faultCode" in data or "faultId" in data:
             _LOGGER.warning(
                 "[%s] Fault %s — status: %s", self.serial,
                 _fault_code(data), data.get("status")
             )
+
+    # ── Robot reachability (GONE-AWAY) ────────────────────────────────────────
+
+    def _mark_robot_offline(self) -> None:
+        """Dyson says the robot left: block commands, keep rooms and settings."""
+        if not self.robot_online:
+            return
+        _LOGGER.warning("[%s] Robot offline (Dyson reported GONE-AWAY); "
+                        "waiting for it to come back", self.serial)
+        self.robot_online = False
+        self._cancel_pending_start()
+        # Same as a reconnect: never authorize a new job from telemetry that
+        # predates the outage. Rooms, settings and the map are kept.
+        for key in ("state", "dockState", "workMode", "jdmStatus", *STATE_FIELDS):
+            self.state.pop(key, None)
+        self._clear_drying_time()
+        self._notify_state_change()
+        self._schedule_offline_poll()
+
+    def _mark_robot_online(self) -> None:
+        """Fresh telemetry after GONE-AWAY: the robot is reachable again."""
+        _LOGGER.info("[%s] Robot back online", self.serial)
+        self.robot_online = True
+        self._stop_offline_poll()
+        # Refresh room settings once: they may have changed in the app while
+        # the robot was away. Interrupted commands are NOT replayed.
+        self._prefs_map_id = None
+
+    def _schedule_offline_poll(self) -> None:
+        self._stop_offline_poll()
+        timer = threading.Timer(_OFFLINE_POLL_INTERVAL, self._offline_poll)
+        timer.daemon = True
+        self._offline_timer = timer
+        timer.start()
+
+    def _stop_offline_poll(self) -> None:
+        timer, self._offline_timer = self._offline_timer, None
+        if timer:
+            timer.cancel()
+
+    def _offline_poll(self) -> None:
+        if self.robot_online or not self.connected or self._closing:
+            return
+        _LOGGER.debug("[%s] Robot still offline; requesting its state", self.serial)
+        self.request_current_state()
+        self._schedule_offline_poll()
 
     def _merge_jdm_props(self, props: dict) -> None:
         updates: dict = reported_properties(props)
@@ -1184,21 +1544,14 @@ class DysonMqttClient:
     def _probe_map_id(self, map_id: int) -> None:
         """Send service.get_preference for one map_id.
 
-        Skips only when we already have rooms cached for this exact map.  Probes
-        for low integer IDs (0–3) fire speculatively at connection time before
-        the robot has reported persistentMapId; if one of those happens to return
-        rooms from a different map we must not let it block the authoritative
-        fetch that fires once the real persistentMapId arrives via MQTT state.
+        Probes for low integer IDs (0–3) fire speculatively at connection time
+        before the robot has reported persistentMapId. Replies are filed under
+        the map they were requested for, so a probe can no longer put another
+        map's rooms on the current map. Skipped if rooms for that map are known.
         """
-        if self._cached_preference and self._cached_preference.get("room"):
-            current_map_id = self.state.get("persistentMapId")
-            # Skip only when the robot hasn't reported its map yet (early probe
-            # race — any cached rooms are fine for now) OR the current map
-            # matches this probe (we already have the right rooms).
-            if current_map_id is None or str(current_map_id) == str(map_id):
+        with self._preference_lock:
+            if self._room_store.get(self._map_key(map_id)):
                 return
-            # Current map differs from probe target — cache is stale; fall
-            # through to re-fetch so room entities show correct rooms.
         _LOGGER.debug("[%s] Probing map_id=%d for room preferences", self.serial, map_id)
         self._publish_jdm("service.get_preference", {"map_id": map_id})
 
@@ -1209,7 +1562,8 @@ class DysonMqttClient:
         except (TypeError, ValueError):
             return
         _LOGGER.debug("[%s] Fetching room preferences for map %s", self.serial, map_id_int)
-        self._probe_map_id(map_id_int)
+        # Always ask (unlike the probes): refreshes known rooms after reconnect.
+        self._publish_jdm("service.get_preference", {"map_id": map_id_int})
 
     # ── Internal publish ──────────────────────────────────────────────────────
 
@@ -1229,6 +1583,9 @@ class DysonMqttClient:
 
     def _publish_raw(self, topic: str, payload: dict) -> bool:
         """Publish a JSON payload; returns True if paho accepted the message."""
+        if payload.get("method") == "service.get_preference":
+            params = payload.get("params") or {}
+            self._track_preference_request(payload.get("msgId"), params.get("map_id"))
         with self._lock:
             client = self._client
         if not client or not self.connected:

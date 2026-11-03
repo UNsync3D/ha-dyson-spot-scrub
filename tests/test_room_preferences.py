@@ -45,7 +45,8 @@ class RoomSettingsTests(unittest.TestCase):
             "room_test_integration.dyson_api": module(
                 "room_test_integration.dyson_api", DysonApiError=Exception,
                 DysonRateLimitError=Exception,
-                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock()),
+                get_iot_credentials=AsyncMock(), get_live_map=AsyncMock(),
+                get_map_metadata=AsyncMock(return_value=[])),
         }))
         self.mqtt = importlib.import_module("room_test_integration.dyson_mqtt")
         self.client = self.mqtt.DysonMqttClient(
@@ -64,12 +65,24 @@ class RoomSettingsTests(unittest.TestCase):
         self.sent = []
         self.enterContext(patch.object(self.client, "_publish_raw", self.publish))
         self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 0.02))
+        self.enterContext(patch.object(self.mqtt, "_SETTINGS_CONFIRM_TIMEOUT", 0.2))
         self.on_request = lambda payload: self.reply(payload)
+        # The robot confirms a start's settings save (set to None to stay silent).
+        self.settings_code = 0
 
     def publish(self, topic, payload):
         self.sent.append((topic, deepcopy(payload)))
         if payload.get("method") == "service.get_preference":
+            # As the real _publish_raw does: remember which map we asked about.
+            self.client._track_preference_request(
+                payload.get("msgId"), payload["params"].get("map_id"))
             self.on_request(payload)
+        elif (payload.get("method") == "service.set_preference"
+              and self.settings_code is not None
+              and payload.get("msgId") in self.client._reply_waiters):
+            self.client._handle_jdm({"msgId": payload["msgId"], "code": self.settings_code,
+                                     "method": "service.set_preference",
+                                     "data": {"result": self.settings_code}})
         return True  # Match the transport's successful-publication contract.
 
     def reply(self, request, preferences=None, code=0, msg_id=None):
@@ -107,10 +120,10 @@ class RoomSettingsTests(unittest.TestCase):
                     self.assertEqual(self.preferences, original)
                     self.assertEqual(self.client._cached_preference, original)
                     commands = [p.get("method", p.get("msg")) for _, p in self.sent]
+                    # What the app sends (capture, 3 Nov 2026): no JDM start requests.
                     self.assertEqual(commands, ["service.get_preference", "service.set_preference",
-                                               "ABORT-DOCK-ACTION", "START",
-                                               "service.set_cur_map", "service.set_room_clean"])
-                    self.assertEqual(self.sent[-1][1]["params"]["room_ids"], [12])
+                                               "START"])
+                    self.assertEqual(self.sent[-1][1]["cleaningProgramme"]["unorderedZones"], ["12"])
 
     def test_vacuum_then_mop_does_not_turn_auto_into_quick(self):
         self.assertTrue(self.client.start_room("Flur", 3))
@@ -125,7 +138,7 @@ class RoomSettingsTests(unittest.TestCase):
                 for room in expected:
                     room[3], room[8] = mode, 1
                 self.assertEqual(self.settings()["room_preference"], expected)
-                self.assertEqual(self.sent[-1][1]["params"]["room_ids"], [12, 10])
+                self.assertEqual(self.sent[-1][1]["cleaningProgramme"]["unorderedZones"], ["12", "10"])
 
     def test_new_response_overrides_stale_cache(self):
         self.preferences["room"][0][4:7] = [2, 99, 1]
@@ -242,7 +255,7 @@ class RoomSettingsTests(unittest.TestCase):
         hass = SimpleNamespace(async_add_executor_job=AsyncMock(return_value=False))
         coordinator = coordinator_module.DysonCoordinator(
             hass, "token", "serial", "RB05", SimpleNamespace(data={}))
-        coordinator.mqtt = SimpleNamespace(connected=True, start_room=Mock(), state=dict(self.client.state))
+        coordinator.mqtt = SimpleNamespace(connected=True, available=True, start_room=Mock(), state=dict(self.client.state))
         with patch.object(coordinator, "_async_wait_for_clean_complete", AsyncMock()) as wait:
             asyncio.run(coordinator.async_clean_rooms_sequential(["Flur", "Schlafzimmer"]))
             wait.assert_not_awaited()
@@ -290,6 +303,127 @@ class RoomSettingsTests(unittest.TestCase):
             self.assertTrue(await wait)
             self.assertEqual(watchers, [])
         asyncio.run(run())
+
+
+    # The card/room start sends a full room list, like a settings save, so it
+    # must not revert a setting change that is in flight (Oct 2026 follow-up).
+
+    def last_set(self):
+        return [p for _, p in self.sent if p.get("method") == "service.set_preference"][-1]
+
+    def test_start_keeps_a_just_sent_setting_change(self):
+        self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 5))
+        self.on_request = lambda payload: None      # robot hasn't confirmed the edit yet
+        self.assertTrue(self.client.edit_room_setting(12, 5, 1))   # Flur: water level 1
+        self.on_request = lambda payload: self.reply(payload)      # still reports the OLD value
+        self.assertTrue(self.client.start_room("flur", 0))
+        flur = next(r for r in self.last_set()["params"]["room_preference"] if r[0] == 12)
+        self.assertEqual(flur[5], 1, "the start must not send the old water level back")
+        self.assertEqual(flur[8], 1)
+
+    def test_edit_lock_held_while_preparing_and_sending_not_while_waiting(self):
+        lock_free = {}
+
+        def probe():
+            result = []
+            def attempt():
+                got = self.client._room_edit_lock.acquire(blocking=False)
+                result.append(got)
+                if got:
+                    self.client._room_edit_lock.release()
+            worker = threading.Thread(target=attempt)
+            worker.start()
+            worker.join(2)
+            return result[0]
+
+        original = self.publish
+        def publish(topic, payload):
+            name = payload.get("method") or payload.get("msg")
+            lock_free.setdefault(name, probe())
+            return original(topic, payload)
+        self.enterContext(patch.object(self.client, "_publish_raw", publish))
+        self.assertTrue(self.client.start_room("flur", 0))
+        self.assertTrue(lock_free["service.get_preference"], "free while waiting for the robot")
+        for name in ("service.set_preference", "START"):
+            self.assertFalse(lock_free[name], f"{name} sent while an edit could interleave")
+
+    def test_edit_that_read_before_the_start_cannot_revert_it(self):
+        # The race: an edit reads its base (robot's old selection: Flur), the
+        # start then selects Schlafzimmer and publishes, then the edit publishes
+        # its stale full list. The edit lock makes the start wait for the edit
+        # and build on it instead, so the LAST list sent has both.
+        self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 5))
+        read_base, start_sent = threading.Event(), threading.Event()
+        original = self.client.room_preferences_for_edit
+        def edit_base():
+            rooms = original()
+            if threading.current_thread().name == "edit":
+                read_base.set()
+                start_sent.wait(0.5)        # give the start its chance to interleave
+            return rooms
+        self.enterContext(patch.object(self.client, "room_preferences_for_edit", edit_base))
+        sent_before = self.publish
+        def publish(topic, payload):
+            if payload.get("msg") == "START":
+                start_sent.set()
+            return sent_before(topic, payload)
+        self.enterContext(patch.object(self.client, "_publish_raw", publish))
+        self.on_request = lambda payload: (self.reply(payload)
+                                           if threading.current_thread().name != "edit" else None)
+        edit = threading.Thread(name="edit",
+                                target=lambda: self.client.edit_room_setting(12, 5, 1))
+        edit.start()
+        self.assertTrue(read_base.wait(2))
+        self.assertTrue(self.client.start_room("schlafzimmer", 0))
+        edit.join(2)
+        rooms = {r[0]: r for r in self.last_set()["params"]["room_preference"]}
+        self.assertEqual((rooms[10][8], rooms[12][8]), (1, 0), "start's selection survives")
+        self.assertEqual(rooms[12][5], 1, "and so does the edit")
+
+    # Single start (3 Nov 2026 capture): the app saves the settings, waits for
+    # the robot's reply, then sends only the legacy START. Dyson's cloud turns
+    # that into set_cur_map + set_room_clean itself.
+
+    def commands(self):
+        return [p.get("method", p.get("msg")) for _, p in self.sent]
+
+    def test_start_sends_no_jdm_start_requests(self):
+        self.assertTrue(self.client.start_room("flur", 0))
+        self.assertNotIn("service.set_cur_map", self.commands())
+        self.assertNotIn("service.set_room_clean", self.commands())
+        self.assertEqual(self.commands().count("START"), 1)
+
+    def test_no_abort_dock_action_when_dock_is_idle(self):
+        self.assertTrue(self.client.start_room("flur", 0))
+        self.assertNotIn("ABORT-DOCK-ACTION", self.commands())
+
+    def test_no_start_without_settings_confirmation(self):
+        self.settings_code = None                    # robot never replies
+        self.assertFalse(self.client.start_room("flur", 0))
+        self.assertNotIn("START", self.commands())
+        self.assertEqual(self.client._reply_waiters, {})
+
+    def test_no_start_when_robot_rejects_settings(self):
+        self.settings_code = 1
+        self.assertFalse(self.client.start_room("flur", 0))
+        self.assertNotIn("START", self.commands())
+
+    def test_return_to_base_is_legacy_only(self):
+        self.client.return_to_base()
+        self.assertEqual(self.commands(), ["ABORT"])
+
+    def test_pause_is_legacy_only(self):
+        self.client.pause()
+        self.assertEqual(self.commands(), ["PAUSE"])
+
+    def test_resume_sends_one_request(self):
+        self.client.resume()
+        self.assertEqual(self.commands(), ["service.set_room_clean"])
+        self.assertEqual(self.sent[0][1]["params"]["ctrl_value"], 1)
+
+    def test_dock_actions_are_legacy_only(self):
+        self.assertTrue(self.client.empty_bin())
+        self.assertEqual(self.commands(), ["START-DOCK-ACTION"])
 
 
 if __name__ == "__main__":

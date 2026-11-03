@@ -62,8 +62,8 @@ class _DysonBinarySensorBase(BinarySensorEntity):
 
     @property
     def available(self) -> bool:
-        """True only when the MQTT connection is live."""
-        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+        """True only while connected and the robot is reachable."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 

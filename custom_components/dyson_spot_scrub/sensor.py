@@ -68,8 +68,8 @@ class DysonBatterySensor(SensorEntity):
 
     @property
     def available(self) -> bool:
-        """True only when the MQTT connection is live."""
-        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+        """True only while connected and the robot is reachable."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
 
     @property
     def native_value(self) -> int | None:
@@ -183,7 +183,7 @@ class DysonDryingCountdownSensor(DysonBatterySensor):
     def available(self) -> bool:
         """True only while MQTT is live and the dock is actively drying."""
         mqtt = self._coordinator.mqtt
-        if not (mqtt and mqtt.connected):
+        if not (mqtt and mqtt.available):
             return False
         return self._coordinator.state.get("dockState") == "DRYING_MOP"
 

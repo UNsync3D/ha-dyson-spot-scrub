@@ -51,9 +51,17 @@ ATTR_ENTITY_ID       = "entity_id"
 ATTR_ROOM_IDS        = "room_ids"
 ATTR_ROOM_SETTINGS   = "room_settings"
 
-_CLEAN_ROOM_SCHEMA  = vol.Schema({vol.Required(ATTR_ROOM): cv.string})
-_CLEAN_ROOMS_SCHEMA = vol.Schema({vol.Required(ATTR_ROOMS): vol.All(cv.ensure_list, [cv.string])})
 _CARD_ENTITY_SCHEMA = vol.All(cv.ensure_list, [cv.entity_id])
+# entity_id is optional on these two for existing automations: with one robot
+# configured it may be omitted; with several it is required.
+_CLEAN_ROOM_SCHEMA  = vol.Schema({
+    vol.Optional(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+    vol.Required(ATTR_ROOM): cv.string,
+})
+_CLEAN_ROOMS_SCHEMA = vol.Schema({
+    vol.Optional(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+    vol.Required(ATTR_ROOMS): vol.All(cv.ensure_list, [cv.string]),
+})
 _SAVE_ROOM_SETTINGS_SCHEMA = vol.Schema({
     vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
     vol.Required(ATTR_ROOM_SETTINGS): dict,
@@ -70,7 +78,7 @@ _LOGGER = logging.getLogger(__name__)
 def _require_start_ready(coordinator: DysonCoordinator) -> None:
     """Reject new jobs before changing preferences or scheduling room work."""
     mqtt = coordinator.mqtt
-    reason = start_block_reason(mqtt.state if mqtt else {}, bool(mqtt and mqtt.connected))
+    reason = start_block_reason(mqtt.state if mqtt else {}, bool(mqtt and mqtt.available))
     if reason:
         raise HomeAssistantError(f"Cannot start a new clean: {reason.replace('_', ' ')}")
 
@@ -93,17 +101,18 @@ async def async_setup_entry(
     async_add_entities([DysonVacuumEntity(coordinator, entry)])
 
     # Domain services are registered once, by the first entry to load, and
-    # resolve their target robot at call time. clean_room / clean_rooms have no
-    # entity target and act on EVERY connected Dyson robot; the card services
-    # below require exactly one vacuum entity_id.
+    # resolve their target robot at call time. Every service acts on exactly
+    # one robot. clean_room / clean_rooms used to act on EVERY connected robot;
+    # they now take an optional entity_id, required when several are set up.
     if not hass.services.has_service(DOMAIN, SERVICE_CLEAN_ROOM):
 
         async def _handle_clean_room(call: ServiceCall) -> None:
+            coordinator = _get_room_service_coordinator(call)
+            _require_start_ready(coordinator)
             room = call.data[ATTR_ROOM]
-            for coord in hass.data.get(DOMAIN, {}).values():
-                if isinstance(coord, DysonCoordinator) and coord.mqtt and coord.mqtt.connected:
-                    _require_start_ready(coord)
-                    await hass.async_add_executor_job(coord.mqtt.start_room, room)
+            started = await hass.async_add_executor_job(coordinator.mqtt.start_room, room)
+            if not started:
+                raise HomeAssistantError(f"Could not start cleaning {room!r}")
 
         hass.services.async_register(
             DOMAIN,
@@ -115,11 +124,10 @@ async def async_setup_entry(
     if not hass.services.has_service(DOMAIN, SERVICE_CLEAN_ROOMS):
 
         async def _handle_clean_rooms(call: ServiceCall) -> None:
-            rooms = call.data[ATTR_ROOMS]
-            for coord in hass.data.get(DOMAIN, {}).values():
-                if isinstance(coord, DysonCoordinator) and coord.mqtt and coord.mqtt.connected:
-                    _require_start_ready(coord)
-                    hass.async_create_task(coord.async_clean_rooms_sequential(rooms))
+            coordinator = _get_room_service_coordinator(call)
+            _require_start_ready(coordinator)
+            hass.async_create_task(
+                coordinator.async_clean_rooms_sequential(call.data[ATTR_ROOMS]))
 
         hass.services.async_register(
             DOMAIN,
@@ -127,6 +135,21 @@ async def async_setup_entry(
             _handle_clean_rooms,
             schema=_CLEAN_ROOMS_SCHEMA,
         )
+
+    def _get_room_service_coordinator(call: ServiceCall) -> DysonCoordinator:
+        """The robot for clean_room / clean_rooms: the named one, or the only one."""
+        if call.data.get(ATTR_ENTITY_ID):
+            return _get_target_coordinator(call)
+        robots = [c for c in hass.data.get(DOMAIN, {}).values()
+                  if isinstance(c, DysonCoordinator)]
+        if len(robots) != 1:
+            raise HomeAssistantError(
+                "Several Dyson robots are set up: choose one with entity_id"
+                if robots else "No Dyson robot is set up")
+        coordinator = robots[0]
+        if not coordinator.mqtt or not coordinator.mqtt.available:
+            raise HomeAssistantError("The Dyson vacuum is disconnected")
+        return coordinator
 
     def _get_target_coordinator(call: ServiceCall) -> DysonCoordinator:
         """Resolve a card action to exactly one configured vacuum."""
@@ -144,7 +167,7 @@ async def async_setup_entry(
         coordinator = hass.data.get(DOMAIN, {}).get(registry_entry.config_entry_id)
         if not isinstance(coordinator, DysonCoordinator) or not coordinator.mqtt:
             raise HomeAssistantError("The selected Dyson vacuum is unavailable")
-        if not coordinator.mqtt.connected:
+        if not coordinator.mqtt.available:
             raise HomeAssistantError("The selected Dyson vacuum is disconnected")
         return coordinator
 
@@ -236,8 +259,8 @@ class DysonVacuumEntity(StateVacuumEntity):
 
     @property
     def available(self) -> bool:
-        """True only when the MQTT connection is live."""
-        return self._coordinator.mqtt is not None and self._coordinator.mqtt.connected
+        """True only while connected and the robot is reachable."""
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
 
     @property
     def activity(self) -> VacuumActivity | None:

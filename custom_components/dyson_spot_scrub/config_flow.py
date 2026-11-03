@@ -29,6 +29,9 @@ from .const import (
     SERIAL_PATTERN,
     MAP_RETENTION_DEFAULTS,
     MAP_APPEARANCE_DEFAULTS,
+    MAP_CHOICES,
+    MAP_STYLING_ENABLED,
+    MAP_WALL_SECTIONS,
     MAP_VISIBILITY_DEFAULTS,
     MAP_NUMBER_RANGES,
 )
@@ -514,6 +517,9 @@ class DysonOptionsFlow(config_entries.OptionsFlow):
         }
         groups = {
             "line_settings_section": MAP_APPEARANCE_DEFAULTS,
+            # Walls, doors, floor and keep-out styling: hidden for v2.0.0
+            # (see MAP_STYLING_ENABLED in const.py).
+            **(MAP_WALL_SECTIONS if MAP_STYLING_ENABLED else {}),
             "visibility_settings_section": {
                 key: value for key, value in MAP_VISIBILITY_DEFAULTS.items()
                 if key != "map_transparent_background"
@@ -563,12 +569,19 @@ class DysonOptionsFlow(config_entries.OptionsFlow):
         for key, default in defaults.items():
             if isinstance(default, bool):
                 field = selector.BooleanSelector()
+            elif key in MAP_CHOICES:
+                field = selector.SelectSelector(selector.SelectSelectorConfig(
+                    options=list(MAP_CHOICES[key]), translation_key="line_style",
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                ))
             elif key in MAP_NUMBER_RANGES:
                 minimum, maximum = MAP_NUMBER_RANGES[key]
+                unit = ("min" if key == "map_retention_minutes"
+                        else "cm" if key.endswith("_cm") else "px")
                 field = selector.NumberSelector(selector.NumberSelectorConfig(
                     min=minimum, max=maximum, step=1,
                     mode=selector.NumberSelectorMode.SLIDER,
-                    unit_of_measurement="min" if key == "map_retention_minutes" else "px",
+                    unit_of_measurement=unit,
                 ))
             else:
                 field = selector.ColorRGBSelector()
