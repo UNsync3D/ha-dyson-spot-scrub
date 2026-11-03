@@ -17,6 +17,8 @@ and for five minutes after completion or cancellation. A new cleaning clears it.
 """
 from __future__ import annotations
 
+import json
+
 import asyncio
 import logging
 import time
@@ -390,8 +392,9 @@ class DysonMapCamera(Camera):
                 # can be hidden exactly.
                 path = live_data.get("cleanPath") or []
                 coded = sum(1 for p in path if isinstance(p, dict) and "update" in p)
-                _LOGGER.debug("[%s] Clean path: %d points, %d with update codes",
-                              self._serial, len(path), coded)
+                _LOGGER.debug("[%s] Clean path: %d points, %d with update codes; "
+                              "first points: %s", self._serial, len(path), coded,
+                              json.dumps(path[:3]))
                 self._path_format_logged = True
 
         # ── Update presentation cache from fresh zone data ────────────────────
