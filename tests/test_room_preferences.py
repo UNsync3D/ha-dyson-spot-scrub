@@ -65,7 +65,10 @@ class RoomSettingsTests(unittest.TestCase):
         self.sent = []
         self.enterContext(patch.object(self.client, "_publish_raw", self.publish))
         self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 0.02))
+        self.enterContext(patch.object(self.mqtt, "_SETTINGS_CONFIRM_TIMEOUT", 0.2))
         self.on_request = lambda payload: self.reply(payload)
+        # The robot confirms a start's settings save (set to None to stay silent).
+        self.settings_code = 0
 
     def publish(self, topic, payload):
         self.sent.append((topic, deepcopy(payload)))
@@ -74,6 +77,12 @@ class RoomSettingsTests(unittest.TestCase):
             self.client._track_preference_request(
                 payload.get("msgId"), payload["params"].get("map_id"))
             self.on_request(payload)
+        elif (payload.get("method") == "service.set_preference"
+              and self.settings_code is not None
+              and payload.get("msgId") in self.client._reply_waiters):
+            self.client._handle_jdm({"msgId": payload["msgId"], "code": self.settings_code,
+                                     "method": "service.set_preference",
+                                     "data": {"result": self.settings_code}})
         return True  # Match the transport's successful-publication contract.
 
     def reply(self, request, preferences=None, code=0, msg_id=None):
@@ -111,10 +120,10 @@ class RoomSettingsTests(unittest.TestCase):
                     self.assertEqual(self.preferences, original)
                     self.assertEqual(self.client._cached_preference, original)
                     commands = [p.get("method", p.get("msg")) for _, p in self.sent]
+                    # What the app sends (capture, 3 Nov 2026): no JDM start requests.
                     self.assertEqual(commands, ["service.get_preference", "service.set_preference",
-                                               "ABORT-DOCK-ACTION", "START",
-                                               "service.set_cur_map", "service.set_room_clean"])
-                    self.assertEqual(self.sent[-1][1]["params"]["room_ids"], [12])
+                                               "START"])
+                    self.assertEqual(self.sent[-1][1]["cleaningProgramme"]["unorderedZones"], ["12"])
 
     def test_vacuum_then_mop_does_not_turn_auto_into_quick(self):
         self.assertTrue(self.client.start_room("Flur", 3))
@@ -129,7 +138,7 @@ class RoomSettingsTests(unittest.TestCase):
                 for room in expected:
                     room[3], room[8] = mode, 1
                 self.assertEqual(self.settings()["room_preference"], expected)
-                self.assertEqual(self.sent[-1][1]["params"]["room_ids"], [12, 10])
+                self.assertEqual(self.sent[-1][1]["cleaningProgramme"]["unorderedZones"], ["12", "10"])
 
     def test_new_response_overrides_stale_cache(self):
         self.preferences["room"][0][4:7] = [2, 99, 1]
@@ -335,7 +344,7 @@ class RoomSettingsTests(unittest.TestCase):
         self.enterContext(patch.object(self.client, "_publish_raw", publish))
         self.assertTrue(self.client.start_room("flur", 0))
         self.assertTrue(lock_free["service.get_preference"], "free while waiting for the robot")
-        for name in ("service.set_preference", "START", "service.set_room_clean"):
+        for name in ("service.set_preference", "START"):
             self.assertFalse(lock_free[name], f"{name} sent while an edit could interleave")
 
     def test_edit_that_read_before_the_start_cannot_revert_it(self):
@@ -370,6 +379,42 @@ class RoomSettingsTests(unittest.TestCase):
         rooms = {r[0]: r for r in self.last_set()["params"]["room_preference"]}
         self.assertEqual((rooms[10][8], rooms[12][8]), (1, 0), "start's selection survives")
         self.assertEqual(rooms[12][5], 1, "and so does the edit")
+
+    # Single start (3 Nov 2026 capture): the app saves the settings, waits for
+    # the robot's reply, then sends only the legacy START. Dyson's cloud turns
+    # that into set_cur_map + set_room_clean itself.
+
+    def commands(self):
+        return [p.get("method", p.get("msg")) for _, p in self.sent]
+
+    def test_start_sends_no_jdm_start_requests(self):
+        self.assertTrue(self.client.start_room("flur", 0))
+        self.assertNotIn("service.set_cur_map", self.commands())
+        self.assertNotIn("service.set_room_clean", self.commands())
+        self.assertEqual(self.commands().count("START"), 1)
+
+    def test_no_abort_dock_action_when_dock_is_idle(self):
+        self.assertTrue(self.client.start_room("flur", 0))
+        self.assertNotIn("ABORT-DOCK-ACTION", self.commands())
+
+    def test_no_start_without_settings_confirmation(self):
+        self.settings_code = None                    # robot never replies
+        self.assertFalse(self.client.start_room("flur", 0))
+        self.assertNotIn("START", self.commands())
+        self.assertEqual(self.client._reply_waiters, {})
+
+    def test_no_start_when_robot_rejects_settings(self):
+        self.settings_code = 1
+        self.assertFalse(self.client.start_room("flur", 0))
+        self.assertNotIn("START", self.commands())
+
+    def test_return_to_base_is_legacy_only(self):
+        self.client.return_to_base()
+        self.assertEqual(self.commands(), ["ABORT"])
+
+    def test_dock_actions_are_legacy_only(self):
+        self.assertTrue(self.client.empty_bin())
+        self.assertEqual(self.commands(), ["START-DOCK-ACTION"])
 
 
 if __name__ == "__main__":

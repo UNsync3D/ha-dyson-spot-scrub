@@ -55,6 +55,7 @@ class InventoryFixture(unittest.TestCase):
         }))
         self.mqtt = importlib.import_module("inventory_integration.dyson_mqtt")
         self.enterContext(patch.object(self.mqtt, "_PREFERENCE_TIMEOUT", 0.5))
+        self.enterContext(patch.object(self.mqtt, "_SETTINGS_CONFIRM_TIMEOUT", 0.2))
         self.client = self.mqtt.DysonMqttClient(SERIAL, "RB05", "e", "t", "s", "c", "a")
         self.client.connected = True
         self.client.state = {"persistentMapId": str(MAP), "state": "INACTIVE_CHARGING",
@@ -74,6 +75,11 @@ class InventoryFixture(unittest.TestCase):
                     "msgId": payload["msgId"], "code": 0, "method": "service.get_preference",
                     "data": {"room": self.robot_answers(payload), "material": [],
                              "uv_switch": [], "prefer_on": 1}})
+            if (payload.get("method") == "service.set_preference"
+                    and payload.get("msgId") in self.client._reply_waiters):
+                self.client._handle_jdm({"msgId": payload["msgId"], "code": 0,
+                                         "method": "service.set_preference",
+                                         "data": {"result": 0}})
             return True
         self.enterContext(patch.object(self.client, "_publish_raw", side_effect=publish))
 
