@@ -74,9 +74,9 @@ MAP_CHOICES = {
 MAP_VISIBILITY_DEFAULTS = {
     "map_show_furniture": False,   # the floor fill shows furniture as grey
     "map_show_room_names": True,
+    # On (default): in the centre of each room's walls.
     # Off: names sit where the MyDyson app puts them (nameLocation).
-    # On: in the centre of each room's walls.
-    "map_center_room_names": False,
+    "map_center_room_names": True,
     "map_show_room_areas": False,
     "map_show_legend": False,
     "map_show_status_areas": False,

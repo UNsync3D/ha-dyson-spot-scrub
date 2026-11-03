@@ -45,14 +45,14 @@ class RoomLabelTests(unittest.TestCase):
         self.assertEqual(got["Living Room"], (3.1, -2.8))
         self.assertEqual(got["Dining"], (0.15, 1.1))
 
-    def test_option_moves_the_names_and_off_keeps_dysons(self):
+    def test_on_by_default_and_off_uses_dysons_positions(self):
         data = json.loads(FIXTURE.read_text())
         def render(centre):
             png = renderer.render_map(data, None, None, {"map_center_room_names": centre},
                                       raise_errors=True)
             return Image.open(io.BytesIO(png)).convert("RGB")
         self.assertNotEqual(render(False).tobytes(), render(True).tobytes())
-        self.assertEqual(render(False).tobytes(),
+        self.assertEqual(render(True).tobytes(),
                          Image.open(io.BytesIO(renderer.render_map(data, None, None, raise_errors=True))).convert("RGB").tobytes())
 
 

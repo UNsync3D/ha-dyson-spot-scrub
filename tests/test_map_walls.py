@@ -90,7 +90,7 @@ class WallTests(unittest.TestCase):
     def test_captured_map_walls_and_split(self):
         data = json.loads(FIXTURE.read_text())
         img = render(data, map_show_furniture=False, map_show_restrictions=False,
-                     map_show_visited_paths=False, map_show_labels=False)
+                     map_show_visited_paths=False, map_show_room_names=False)
         bounds = (-0.85, 2.425)   # leftmost floor-outline point, topmost wall
         # Room1's 4.7 m south wall and 3.9 m east wall: previously not drawn.
         self.assertEqual(pixel(img, 3.3, -5.225, bounds), renderer.WALL)
@@ -134,7 +134,7 @@ class FloorFillTests(unittest.TestCase):
         self.assertTrue(constants.MAP_DEFAULTS["map_floor_fill"])
 
     def test_floor_dark_rest_grey_walls_app_grey(self):
-        img = render(self.room_with_floor(), map_floor_fill=True, map_show_labels=False)
+        img = render(self.room_with_floor(), map_floor_fill=True, map_show_room_names=False)
         self.assertEqual(pixel(img, 2, 2, (0, 4)), renderer.FLOOR_FILL)
         self.assertEqual(pixel(img, 0.5, 2, (0, 4)), renderer.ROOM_FILL)
         self.assertEqual(pixel(img, 2, 0, (0, 4)), renderer.APP_WALL)
@@ -142,7 +142,7 @@ class FloorFillTests(unittest.TestCase):
 
     def test_room_colours_tint_the_floor(self):
         img = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
-                     map_show_labels=False)
+                     map_show_room_names=False)
         floor = pixel(img, 2, 2, (0, 4))
         self.assertNotEqual(floor, renderer.FLOOR_FILL)
         self.assertEqual(floor, renderer._tint(renderer.FLOOR_FILL, renderer._room_color("10"), 0.22))
@@ -151,11 +151,11 @@ class FloorFillTests(unittest.TestCase):
         """FutuRazor's report: with Room colors on, a strong Reachable floor
         color used to dominate. The room colour now decides the floor."""
         plain = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
-                       map_show_labels=False)
+                       map_show_room_names=False)
         custom = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
-                        map_show_labels=False, map_floor_color=[255, 255, 255])
+                        map_show_room_names=False, map_floor_color=[255, 255, 255])
         self.assertEqual(pixel(custom, 2, 2, (0, 4)), pixel(plain, 2, 2, (0, 4)))
-        off = render(self.room_with_floor(), map_floor_fill=True, map_show_labels=False,
+        off = render(self.room_with_floor(), map_floor_fill=True, map_show_room_names=False,
                      map_floor_color=[255, 255, 255])
         self.assertEqual(pixel(off, 2, 2, (0, 4)), (255, 255, 255, 255), "used with Room colors off")
 
@@ -171,7 +171,7 @@ class FloorFillTests(unittest.TestCase):
         visibility = constants.MAP_VISIBILITY_DEFAULTS
         self.assertEqual(visibility, {
             "map_show_furniture": False, "map_show_room_names": True,
-            "map_center_room_names": False,
+            "map_center_room_names": True,
             "map_show_room_areas": False, "map_show_legend": False,
             "map_show_status_areas": False, "map_show_perimeter": True,
             "map_show_visited_paths": True, "map_show_grid": False,
@@ -181,7 +181,7 @@ class FloorFillTests(unittest.TestCase):
         data = self.room_with_floor()
         data["furniture"] = [{"points": [{"x": 1.5, "y": 1.5}, {"x": 2.5, "y": 1.5},
                                          {"x": 2.5, "y": 2.5}, {"x": 1.5, "y": 2.5}]}]
-        png = renderer.render_map(data, None, options={"map_show_labels": False},
+        png = renderer.render_map(data, None, options={"map_show_room_names": False},
                                   raise_errors=True)
         img = Image.open(io.BytesIO(png)).convert("RGBA")
         self.assertEqual(pixel(img, 2, 2, (0, 4)), renderer.FLOOR_FILL, "no furniture box")
@@ -195,12 +195,12 @@ class FloorFillTests(unittest.TestCase):
 
     def test_walls_stay_white_with_room_colours(self):
         img = render(self.room_with_floor(), map_floor_fill=True, map_room_colors=True,
-                     map_show_labels=False)
+                     map_show_room_names=False)
         self.assertEqual(pixel(img, 2, 0, (0, 4)), renderer.WALL)
 
     def test_four_room_capture_like_the_app(self):
         img = render(json.loads(FOUR_ROOMS.read_text()), map_floor_fill=True,
-                     map_show_labels=False, map_show_restrictions=False)
+                     map_show_room_names=False, map_show_restrictions=False)
         bounds = (-0.85, 2.525)
         # Kitchen | Toilet: type 2 in both rooms, solid in the app.
         wall = [pixel(img, 5.075, y / 20, bounds) for y in range(0, 30)]
@@ -222,7 +222,7 @@ class WallOptionTests(unittest.TestCase):
         return data
 
     def draw(self, **options):
-        return render(self.room(), map_floor_fill=True, map_show_labels=False, **options)
+        return render(self.room(), map_floor_fill=True, map_show_room_names=False, **options)
 
     def wall_pixels(self, img, colour):
         """How many pixels thick the left wall (x = 0) is, sampled at y = 2."""
@@ -264,7 +264,7 @@ class WallOptionTests(unittest.TestCase):
     def test_each_wall_type_has_its_own_options(self):
         """Type 0 outside walls, type 2 walls between rooms, type 1 openings."""
         data = square_room([seg(1, 0, 1, 4, 2), seg(3, 0, 3, 4, 1)])
-        img = render(data, map_floor_fill=True, map_show_labels=False,
+        img = render(data, map_floor_fill=True, map_show_room_names=False,
                      map_wall_color=[255, 0, 0], map_inner_wall_color=[0, 255, 0],
                      map_door_color=[0, 0, 255], map_door_style="solid",
                      map_inner_wall_thickness_cm=15)
@@ -284,7 +284,7 @@ class WallOptionTests(unittest.TestCase):
         data = self.room()
         data["restrictions"] = [{"behavior": "keepOut", "points": [
             {"x": 2.5, "y": 1}, {"x": 3.5, "y": 1}, {"x": 3.5, "y": 3}, {"x": 2.5, "y": 3}]}]
-        img = render(data, map_floor_fill=True, map_show_labels=False,
+        img = render(data, map_floor_fill=True, map_show_room_names=False,
                      map_show_restrictions=True,
                      map_keepout_color=[255, 0, 255], map_keepout_style="solid",
                      map_keepout_thickness_cm=10)
@@ -294,7 +294,7 @@ class WallOptionTests(unittest.TestCase):
         inside = pixel(img, 3, 2, (0, 4))
         self.assertNotEqual(inside, renderer.ROOM_FILL, "tinted")
         self.assertGreater(inside[0], inside[1], "tinted magenta")
-        dashed = render(data, map_floor_fill=True, map_show_labels=False,
+        dashed = render(data, map_floor_fill=True, map_show_room_names=False,
                         map_show_restrictions=True)
         edge = [pixel(dashed, 2.5, i / 20, (0, 4)) for i in range(22, 58)]
         self.assertIn((245, 158, 11, 255), edge, "default amber")
@@ -334,8 +334,8 @@ class StylingSwitchedOffTests(unittest.TestCase):
                  "map_room_colors": True}
         with unittest.mock.patch.object(options_module, "MAP_STYLING_ENABLED", False):
             result = options_module.map_options(saved)
-            custom = render(square_room(), map_show_labels=False, **saved)
-            default = render(square_room(), map_show_labels=False, map_room_colors=True)
+            custom = render(square_room(), map_show_room_names=False, **saved)
+            default = render(square_room(), map_show_room_names=False, map_room_colors=True)
         for key in constants.MAP_WALL_DEFAULTS:
             self.assertEqual(result[key], constants.MAP_WALL_DEFAULTS[key], key)
         self.assertTrue(result["map_room_colors"], "Room colors still works")
