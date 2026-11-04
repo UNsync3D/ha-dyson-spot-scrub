@@ -44,8 +44,8 @@ MAP_WALL_SECTIONS = {
         "map_door_color": [147, 147, 147],
     },
     "floor_section": {
-        # Like the MyDyson app: reachable floor dark, the rest grey.
-        "map_floor_fill": True,
+        # Floor shading on/off lives in Visible elements (map_floor_fill), so
+        # it can be turned off while the styling sections are hidden.
         "map_floor_color": [18, 18, 20],     # used only with Room colors off
         "map_room_fill_color": [37, 37, 40], # furniture and unreachable areas
     },
@@ -85,6 +85,9 @@ MAP_VISIBILITY_DEFAULTS = {
     "map_show_grid": False,
     "map_show_dock": True,
     "map_show_restrictions": False,   # keep-out zones hidden unless switched on
+    # Like the MyDyson app: reachable floor dark, the rest of each room grey.
+    # Off for overlaying the map on your own floor plan (FutuRazor, #37).
+    "map_floor_fill": True,
 }
 MAP_DEFAULTS = {
     **MAP_RETENTION_DEFAULTS,

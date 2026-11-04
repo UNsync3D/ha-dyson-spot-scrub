@@ -83,6 +83,8 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(values['map_retention_minutes'], 5)
         self.assertFalse(values['map_keep_last'])
         self.assertEqual(values['line_settings_section']['map_glow_width'], 10)
+        # Floor shading can be turned off even while the styling sections are hidden.
+        self.assertTrue(values['visibility_settings_section']['map_floor_fill'])
         self.assertTrue(values['visibility_settings_section']['map_show_dock'])
         for marker, section in schema.schema.items():
             if isinstance(section, Section):
@@ -145,7 +147,7 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
             'inner_walls_section': {'map_inner_wall_style': 'solid',
                                     'map_inner_wall_thickness_cm': 5},
             'doors_section': {'map_door_style': 'dashed', 'map_door_thickness_cm': 3},
-            'floor_section': {'map_floor_fill': True, 'map_floor_color': [18, 18, 20]},
+            'floor_section': {'map_floor_color': [18, 18, 20]},
             'keepout_section': {'map_keepout_style': 'dashed',
                                 'map_keepout_color': [245, 158, 11]},
         }
@@ -153,6 +155,9 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
             for key, value in fields.items():
                 self.assertEqual(values[section][key], value, (section, key))
         self.assertNotIn('map_floor_fill', values['line_settings_section'])
+        # Floor shading on/off is a visible element (usable while styling is hidden).
+        self.assertNotIn('map_floor_fill', values['floor_section'])
+        self.assertTrue(values['visibility_settings_section']['map_floor_fill'])
         names = [str(marker) for marker in schema.schema]
         self.assertEqual(names[names.index('line_settings_section') + 1:
                                names.index('visibility_settings_section')], list(expected))
@@ -166,7 +171,8 @@ class MapOptionsFlowTests(unittest.IsolatedAsyncioTestCase):
         saved = await self.flow.async_step_init({
             'outside_walls_section': {'map_wall_style': 'dashed', 'map_wall_thickness_cm': 8,
                                       'map_wall_color': [255, 0, 0]},
-            'floor_section': {'map_floor_fill': False, 'map_room_fill_color': [10, 20, 30]}})
+            'floor_section': {'map_room_fill_color': [10, 20, 30]},
+            'visibility_settings_section': {'map_floor_fill': False}})
         self.assertEqual(saved['type'], 'create_entry')
         self.assertEqual(saved['data']['map_wall_style'], 'dashed')
         self.assertEqual(saved['data']['map_wall_thickness_cm'], 8)

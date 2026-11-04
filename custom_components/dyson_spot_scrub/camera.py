@@ -17,7 +17,6 @@ and for five minutes after completion or cancellation. A new cleaning clears it.
 """
 from __future__ import annotations
 
-import json
 
 import asyncio
 import logging
@@ -37,7 +36,7 @@ from .coordinator import DysonCoordinator
 from .dyson_api import get_current_map, get_map_metadata, DysonApiError
 from .dyson_mqtt import RUNNING_STATES, is_any_cleaning
 from .entity_helpers import device_info
-from .map_renderer import render_map
+from .map_renderer import format_path_codes, path_code_counts, render_map
 from .map_options import map_options
 from .map_path import PathHistory
 
@@ -138,7 +137,7 @@ class DysonMapCamera(Camera):
         self._last_source: tuple | None = None
         self._last_image_options: dict | None = None
         self._path_history = PathHistory()
-        self._path_format_logged = False
+        self._path_codes: dict = {}
         self._observed_action: str | None = None
         self._action_changed_at = 0.0
 
@@ -156,7 +155,7 @@ class DysonMapCamera(Camera):
         self._last_source = None
         self._last_image_options = None
         self._path_history = PathHistory()
-        self._path_format_logged = False
+        self._path_codes = {}
         self._cleaning_finished_at = None
         _LOGGER.debug("[%s] Cleaning image reset: %s", self._serial, reason)
 
@@ -186,6 +185,9 @@ class DysonMapCamera(Camera):
             if self._cleaning_active:
                 self._cleaning_active = False
                 self._cleaning_finished_at = time.monotonic()
+                if self._path_codes:
+                    _LOGGER.debug("[%s] Clean path at the end: %s", self._serial,
+                                  format_path_codes(self._path_codes))
                 _LOGGER.debug(
                     "[%s] Cleaning image retention started: %s, duration=%s s",
                     self._serial, status, self._retention_seconds,
@@ -386,16 +388,15 @@ class DysonMapCamera(Camera):
                     or self._coordinator._live_map_fetched_at < self._action_changed_at):
                 action = None
             live_data = self._path_history.annotate(live_data, action)
-            if not self._path_format_logged:
-                # Once per clean: does Dyson's live map carry per-point
-                # "update" codes (travel/vacuum/mop)? Decides whether travel
-                # can be hidden exactly.
-                path = live_data.get("cleanPath") or []
-                coded = sum(1 for p in path if isinstance(p, dict) and "update" in p)
-                _LOGGER.debug("[%s] Clean path: %d points, %d with update codes; "
-                              "first points: %s", self._serial, len(path), coded,
-                              json.dumps(path[:3]))
-                self._path_format_logged = True
+            # Diagnostic (no coordinates): how many path points carry each
+            # "update" code (0 travel, 1 vacuum, 2 mop, 3 vacuum+mop).
+            # Logged when a code first appears, and at the end of the clean.
+            codes = path_code_counts(live_data.get("cleanPath") or [])
+            if set(codes) - set(self._path_codes):
+                new = sorted(set(codes) - set(self._path_codes), key=str)
+                _LOGGER.debug("[%s] Clean path: new code %s; %s", self._serial,
+                              ", ".join(map(str, new)), format_path_codes(codes))
+            self._path_codes = codes
 
         # ── Update presentation cache from fresh zone data ────────────────────
         # Prefer live_data (most up-to-date), fall back to static map.

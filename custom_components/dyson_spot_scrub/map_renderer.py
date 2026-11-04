@@ -1154,3 +1154,20 @@ def _pole_of_inaccessibility(poly: tuple, coarse: float = 0.15,
     refined = search((best[0] - coarse, best[0] + coarse),
                      (best[1] - coarse, best[1] + coarse), fine)
     return refined or best
+
+
+def path_code_counts(path: list) -> dict:
+    """Points per "update" code; "none" for points without one."""
+    counts: dict = {}
+    for point in path:
+        if isinstance(point, dict):
+            code = point.get("update", "none")
+            key = code if isinstance(code, int) and not isinstance(code, bool) else "none"
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def format_path_codes(counts: dict) -> str:
+    total = sum(counts.values())
+    parts = ", ".join(f"code {k}: {v}" for k, v in sorted(counts.items(), key=lambda i: str(i[0])))
+    return f"{total} points ({parts})"

@@ -52,5 +52,17 @@ class SmoothTests(unittest.TestCase):
         self.assertGreater(len(out), len(square))
 
 
+
+class PathCodeCountTests(unittest.TestCase):
+    def test_counts_by_code_without_coordinates(self):
+        path = [{"x": 1, "y": 2, "update": 0}, {"x": 1, "y": 3, "update": 0},
+                {"x": 2, "y": 3, "update": 1}, {"x": 2, "y": 4, "update": 2},
+                {"x": 3, "y": 4}, {"x": 3, "y": 5, "update": True}, [4, 5]]
+        counts = renderer.path_code_counts(path)
+        self.assertEqual(counts, {0: 2, 1: 1, 2: 1, "none": 2})
+        text = renderer.format_path_codes(counts)
+        self.assertEqual(text, "6 points (code 0: 2, code 1: 1, code 2: 1, code none: 2)")
+        self.assertNotIn("x", text.replace("none", ""))
+
 if __name__ == "__main__":
     unittest.main()
