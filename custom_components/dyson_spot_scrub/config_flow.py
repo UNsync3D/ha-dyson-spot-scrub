@@ -20,10 +20,13 @@ from .const import (
     CONF_SERIAL,
     CONF_DEVICE_NAME,
     CONF_PRODUCT_TYPE,
+    CONF_EXPERIMENTAL,
     CONF_MQTT_PREFIX,
     CONF_COUNTRY,
     CONF_CACHED_ROOMS,
     COUNTRY_PATTERN,
+    EXPERIMENTAL_ROBOT_PREFIX,
+    ISSUES_URL,
     MQTT_PREFIX_PATTERN,
     ROBOT_PRODUCT_PREFIXES,
     SERIAL_PATTERN,
@@ -142,6 +145,30 @@ def _is_robot(device: dict) -> bool:
     return any(pt.startswith(p) for p in ROBOT_PRODUCT_PREFIXES)
 
 
+def _robot_prefix(device: dict) -> str:
+    """MQTT prefix from the manifest, or from an "RBxxPR…" firmware version."""
+    prefix = str(device.get("mqttRootTopicLevel") or "").upper()
+    if not prefix:
+        version = str(device.get("Version") or device.get("version") or "").upper()
+        prefix = version[:4] if version.startswith("RB") else ""
+    return prefix
+
+
+def _is_experimental_robot(device: dict) -> bool:
+    """A Dyson robot vacuum we don't know yet (e.g. R1 or R3 Nurovi)."""
+    return (not _is_robot(device)
+            and re.fullmatch(EXPERIMENTAL_ROBOT_PREFIX, _robot_prefix(device)) is not None)
+
+
+def _device_summary(device: dict) -> str:
+    """One line per device for logs and issue reports. Never includes the serial."""
+    pt = device.get("ProductType") or device.get("productType") or "?"
+    prefix = _robot_prefix(device) or "?"
+    version = device.get("Version") or device.get("version") or "?"
+    clean = lambda v: re.sub(r"[^\w.+-]", "", str(v))[:40] or "?"  # noqa: E731
+    return f"product type {clean(pt)}, prefix {clean(prefix)}, firmware {clean(version)}"
+
+
 def _valid_serial(serial: str) -> bool:
     return re.fullmatch(SERIAL_PATTERN, serial) is not None
 
@@ -153,6 +180,21 @@ def _valid_country(country: str) -> bool:
 def _device_name(device: dict) -> str:
     raw = device.get("Name") or device.get("name") or "Dyson Robot"
     return re.sub(r"[^\w\s'.,!?-]", "", raw).strip()
+
+
+def _log_unsupported(devices: list) -> None:
+    """Log devices we don't support, so owners of new models can report them."""
+    for d in devices:
+        if _is_robot(d):
+            continue
+        if _is_experimental_robot(d):
+            _LOGGER.warning(
+                "Found a Dyson robot this integration doesn't know yet (%s). It can be "
+                "set up as experimental; please share a debug log at %s",
+                _device_summary(d), ISSUES_URL)
+        else:
+            _LOGGER.info("Skipping Dyson device that isn't a robot vacuum (%s)",
+                         _device_summary(d))
 
 
 # ── Config flow ────────────────────────────────────────────────────────────────
@@ -380,7 +422,9 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # Try the manifest; fall back to a minimal synthetic entry.
             try:
                 devices = await get_devices(token)
-                robots  = [d for d in devices if _is_robot(d)]
+                _log_unsupported(devices)
+                robots  = [d for d in devices
+                           if _is_robot(d) or _is_experimental_robot(d)]
                 match   = next(
                     (d for d in robots
                      if (d.get("Serial") or d.get("serial", "")).upper() == serial),
@@ -388,6 +432,8 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 if match:
                     self._selected_device = match
+                    if _is_experimental_robot(match):
+                        return await self.async_step_experimental()
                     return self._create_entry(self._selected_device)
                 errors["base"] = "serial_not_found"
             except DysonApiError as exc:
@@ -436,12 +482,24 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             _LOGGER.error("Could not fetch device manifest: %s", exc)
             return self.async_abort(reason="cannot_connect")
 
-        self._robots = [d for d in devices if _is_robot(d)]
+        _log_unsupported(devices)
+        known = [d for d in devices if _is_robot(d)]
+        experimental = [d for d in devices if _is_experimental_robot(d)]
+        self._robots = known + experimental
 
         if not self._robots:
-            return self.async_abort(reason="no_robots_found")
+            others = [_device_summary(d) for d in devices]
+            return self.async_abort(
+                reason="no_robots_found",
+                description_placeholders={
+                    "devices": "; ".join(others) if others else "none",
+                    "issues_url": ISSUES_URL,
+                },
+            )
         if len(self._robots) == 1:
             self._selected_device = self._robots[0]
+            if experimental:
+                return await self.async_step_experimental()
             return self._create_entry(self._selected_device)
         return await self.async_step_select_robot()
 
@@ -458,14 +516,35 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             if device:
                 self._selected_device = device
+                if _is_experimental_robot(device):
+                    return await self.async_step_experimental()
                 return self._create_entry(self._selected_device)
 
         options = {
-            (d.get("Serial") or d.get("serial")): _device_name(d)
+            (d.get("Serial") or d.get("serial")): (
+                f"{_device_name(d)} (experimental)" if _is_experimental_robot(d)
+                else _device_name(d))
             for d in self._robots
         }
         schema = vol.Schema({vol.Required("serial"): vol.In(options)})
         return self.async_show_form(step_id="select_robot", data_schema=schema)
+
+    async def async_step_experimental(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Confirm setting up a Dyson robot model the integration doesn't know."""
+        device = self._selected_device or {}
+        if user_input is not None:
+            return self._create_entry(device)
+        return self.async_show_form(
+            step_id="experimental",
+            data_schema=vol.Schema({}),
+            description_placeholders={
+                "name": _device_name(device),
+                "summary": _device_summary(device),
+                "issues_url": ISSUES_URL,
+            },
+        )
 
     def _create_entry(self, device: dict) -> FlowResult:
         """Store the bearer token and device identity in the config entry.
@@ -500,6 +579,7 @@ class DysonConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 CONF_DEVICE_NAME:  name,
                 CONF_PRODUCT_TYPE: pt,
                 CONF_MQTT_PREFIX:  prefix,
+                CONF_EXPERIMENTAL: _is_experimental_robot(device),
                 CONF_COUNTRY:      self._country,
                 CONF_CACHED_ROOMS: [],
             },

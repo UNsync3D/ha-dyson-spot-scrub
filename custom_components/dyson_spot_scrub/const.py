@@ -118,6 +118,7 @@ CONF_AUTH_TOKEN = "auth_token"
 CONF_SERIAL     = "serial"
 CONF_DEVICE_NAME    = "device_name"
 CONF_PRODUCT_TYPE   = "product_type"
+CONF_EXPERIMENTAL   = "experimental"   # unknown Dyson robot model, set up on request
 CONF_MQTT_PREFIX    = "mqtt_prefix"
 
 # Input validation. The serial and MQTT prefix are interpolated into MQTT
@@ -158,6 +159,12 @@ DEFAULT_MODE = MODE_VACUUM
 #         owner's manifest in thoukydides/matterbridge-dyson-robot#50. Listed so
 #         setup finds it; R2 support is not confirmed yet (issue #32).
 ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804", "914")
+# Every Dyson robot vacuum so far uses an MQTT prefix "RB" + two digits
+# (RB01 360 Eye, RB03 360 Vis Nav, RB05 Spot+Scrub AI, RB07 R2 Nurovi). A device
+# with such a prefix but an unknown product type (e.g. an R1 or R3 Nurovi) is
+# offered as an experimental robot, so owners can try it and share logs.
+EXPERIMENTAL_ROBOT_PREFIX = r"RB\d{2}"
+ISSUES_URL = "https://github.com/UNsync3D/ha-dyson-spot-scrub/issues"
 
 # Dock states during which a new station action (empty bin / wash mop) must
 # not be sent — the dock is already running one.

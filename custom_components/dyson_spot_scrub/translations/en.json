@@ -41,10 +41,14 @@
         "data": {
           "serial": "Robot"
         }
+      },
+      "experimental": {
+        "title": "Experimental robot",
+        "description": "**{name}** ({summary}) is a Dyson robot this integration doesn't support yet. You can still add it as an experimental robot: it uses the same code as the Spot+Scrub AI and R2 Nurovi, so many features may work, but some may not.\n\nPlease help us add full support: enable debug logging for this integration, run one clean, and share the log on the issues page: {issues_url} (remove your serial number first).\n\nSelect **Submit** to add it."
       }
     },
     "abort": {
-      "no_robots_found":    "No robot vacuums were found in your Dyson account.",
+      "no_robots_found":    "No supported robot vacuums were found in your Dyson account. Devices found: {devices}. If one of these is a Dyson robot vacuum, please open an issue with this list at {issues_url} so we can add it.",
       "cannot_connect":     "Could not connect to Dyson's cloud API.",
       "already_configured": "This device is already configured.",
       "invalid_serial":     "The device reported an invalid serial number."
@@ -229,6 +233,12 @@
         "solid": "Solid",
         "dashed": "Dashed"
       }
+    }
+  },
+  "issues": {
+    "experimental_robot": {
+      "title": "Help add support for your Dyson robot",
+      "description": "**{name}** (product type {product_type}, prefix {prefix}) is set up as an **experimental** robot: this model isn't fully supported yet, so some features may not work.\n\nYou can help: enable debug logging for this integration (Settings → Devices & services → Dyson Spot+Scrub AI → ⋮ → Enable debug logging), run one clean, disable debug logging to download the log, then share it on the issues page: {issues_url}. Please remove your robot's serial number from the log first. Select **Learn more** to open a new issue."
     }
   }
 }
