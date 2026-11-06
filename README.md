@@ -2,6 +2,14 @@
 
 A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum, with support for the **Dyson R2 Nurovi Wash+Dry**. It connects through Dyson's cloud, the same way the MyDyson app does. The robot pushes status updates to Home Assistant over MQTT as they happen, so there's no constant polling. The robot doesn't accept local connections, so an internet connection is required.
 
+### Supported robots
+
+| Robot | Status |
+|---|---|
+| **Dyson Spot+Scrub AI** | Supported and tested on hardware |
+| **Dyson R2 Nurovi Wash+Dry** | Supported, built from real R2 logs; owner testing welcome ([#32](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/32)) |
+| **Dyson R1 Nurovi Dry**, **Dyson R3 Nurovi Spot+Scrub UV** | Not yet supported: owners wanted to help test ([#30](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30)) |
+
 ---
 
 ## Dashboard card: Dyson Cleaning Planner Card
@@ -12,7 +20,7 @@ This integration and **[FutuRazor's Dyson Cleaning Planner Card](https://github.
 - **Follow the session:** see the cleaning status, the selected rooms and the live map.
 - **No YAML needed:** select your Dyson vacuum in the card editor, and its rooms and supported controls are detected automatically.
 
-The card needs **v1.5.0 or newer** of this integration. Install it through HACS as a custom repository (type **Dashboard**); the [card's README](https://github.com/FutuRazor/dyson-cleaning-planner-card#installation) has the steps. You can also [try the interactive preview](https://futurazor.github.io/dyson-cleaning-planner-card/preview/index.html), which uses simulated data.
+The card needs **v1.5.0 or newer** of this integration. On Home Assistant 2026.11 or newer, install it from **Settings → Marketplace → Add from link** with `https://github.com/FutuRazor/dyson-cleaning-planner-card`; on older versions, add it in HACS as a custom repository (type **Dashboard**). The [card's README](https://github.com/FutuRazor/dyson-cleaning-planner-card#installation) has the details. You can also [try the interactive preview](https://futurazor.github.io/dyson-cleaning-planner-card/preview/index.html), which uses simulated data.
 
 The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRazor)**, who has also contributed much of this integration: the station controls, consumable sensors, mop drying controls, start readiness checks, map display options and card actions, along with extensive hardware testing, MQTT captures and code reviews. Thank you, FutuRazor! Please report card issues in the [card's repository](https://github.com/FutuRazor/dyson-cleaning-planner-card/issues).
 
@@ -20,16 +28,33 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 
 ## Features
 
+**Robot**
+
 | Entity | Type | Notes |
 |---|---|---|
-| Robot Vacuum | `vacuum` | Start, Stop, Return to Dock |
+| Robot vacuum | `vacuum` | Start, pause, resume, stop, return to dock, suction power |
 | Vacuum Mode | `select` | Vacuum / Vacuum and Mop / Mop / Vacuum then Mop |
-| Floor Map | `camera` | Live map showing room layout and robot track |
-| Battery | `sensor` | Live battery percentage |
-| Docked | `binary_sensor` | On when robot is sitting in its dock |
-| Charging | `binary_sensor` | On while battery is actively charging |
-| Fault | `binary_sensor` | On when robot has reported an error |
-| Room switches | `switch` | One per mapped room: choose which rooms the next **Start** cleans. Nothing is sent to the robot until you start |
+| Vacuum Start | `button` | Starts the rooms selected with the room switches |
+| Floor Map | `camera` | Live map of rooms, the cleaned path and the robot |
+| Battery | `sensor` | Battery percentage |
+| Docked, Charging, Fault | `binary_sensor` | Robot on the dock, battery charging, error reported |
+
+**Rooms** (one set per room on the current map)
+
+| Entity | Type | Notes |
+|---|---|---|
+| Room *name* | `switch` | Chooses whether the next **Start** cleans this room. Nothing is sent to the robot until you start |
+| Room *name* Cleaning Mode, Cleaning Strategy, Water Level, Clean Repetitions | `select` | The room's saved settings, as in the MyDyson app |
+
+**Dock and station**
+
+| Entity | Type | Notes |
+|---|---|---|
+| Empty Bin, Wash Mop, Dry Mop | `button` | Dock actions. Available only while the robot is on the dock between cleans and the dock is idle |
+| Hot water mopping, Hot water self-cleaning, Extended roller preparation, Cleaning solution | `switch` | Station settings (no cleaning solution on the R2) |
+| Self-cleaning frequency, Roller drying duration | `select` | Station settings (drying: 3–5 hours on the Spot+Scrub AI, 2–4 hours on the R2) |
+| Mop drying time remaining | `sensor` | Countdown while the mop is drying |
+| Consumable usage, Cleaning solution | `sensor` | See [Consumable monitoring](#consumable-monitoring) |
 
 ### New cleaning start readiness
 
@@ -41,14 +66,21 @@ See [start readiness and testing](START_READINESS.md) for the state contract, ev
 
 ### Floor Map
 
-The Floor Map camera entity renders a live PNG showing:
+The Floor Map camera entity draws a live PNG in the style of the MyDyson app:
 
-- **Room outlines** — reconstructed from the robot's perimeter pass data
-- **Cleaned area** — the track the robot has driven so far, updated as it cleans
-- **Dock location** — marked on the map
-- **Room labels** — zone names pulled from your Dyson app layout
+- **Rooms:** walls, doors and room dividers from your Dyson map, with the floor the robot can reach shaded dark and the rest of each room grey.
+- **Cleaned path:** smooth lines, purple for vacuuming and blue with a soft glow for mopping. Travel between areas isn't drawn.
+- **Robot:** seen from above, with a red front bumper and a green beam showing which way it's heading.
+- **Dock and room names:** names are centred in each room by default.
 
-The map refreshes every 5 seconds while the robot is cleaning, and every 60 seconds when idle.
+The map refreshes about every 5 seconds while the robot is cleaning, and every 60 seconds otherwise. After a clean, the last map is kept for 5 minutes by default.
+
+**Map options** (the integration's **Configure** dialog):
+
+- **Retention:** how long the finished map stays (0–60 minutes), or keep the last map until the next clean.
+- **Transparent background:** for laying the map over your own floor plan.
+- **Appearance:** path colours for vacuum, mop and vacuum-and-mop, path and glow width, and per-room colours.
+- **Visible elements:** furniture, room names (and **Center room names**, or Dyson's positions), room areas, legend, cleaning status, walls, floor outlines, grid, dock, keep-out zones, and **Show floor shading**.
 
 ### Cleaning modes
 
@@ -104,14 +136,21 @@ data:
 
 ## Installation
 
-### Option A — HACS (recommended)
+### Option A — Marketplace (Home Assistant 2026.11 or newer, recommended)
 
-1. Open HACS → **Integrations** → ⋮ → **Custom repositories**
-2. Add `https://github.com/UNsync3D/ha-dyson-spot-scrub` as an **Integration**
-3. Search for *Dyson Spot+Scrub AI* and install
-4. Restart Home Assistant
+1. Go to **Settings → Marketplace**.
+2. Select **Add from link** and enter `https://github.com/UNsync3D/ha-dyson-spot-scrub`. The first time, you're asked to connect GitHub.
+3. Open **Dyson Spot+Scrub AI** and select **Install**.
+4. Continue with [Setup](#setup).
 
-### Option B — Manual
+### Option B — HACS (Home Assistant 2026.10 or older)
+
+1. Open **HACS**, select **⋮ → Custom repositories**.
+2. Add `https://github.com/UNsync3D/ha-dyson-spot-scrub` with the type **Integration**.
+3. Search for *Dyson Spot+Scrub AI* and select **Download**.
+4. Restart Home Assistant.
+
+### Option C — Manual
 
 Copy the `custom_components/dyson_spot_scrub/` folder into your HA config directory:
 
@@ -245,13 +284,12 @@ Pull requests welcome. Please open an issue before starting significant work so 
 
 ---
 
-## Licence
-
-MIT
-
 ## Consumable monitoring
 
-Five percentage sensors report used lifespan for the brush bar, mop roller, side brushes, robot filter and dock filter. A cleaning-solution sensor reports OK or Refill required. See [Consumable sensors](CONSUMABLES.md) for entity identification, card integration and testing.
+Five percentage sensors report the used lifespan of each consumable (the MyDyson app shows the remaining life instead, so 2% used here is 98% in the app):
+
+- **Spot+Scrub AI:** brush bar, mop roller, side brushes, robot filter and dock filter, plus a **Cleaning solution** sensor (OK or Refill required).
+- **R2 Nurovi Wash+Dry:** brush bar, **mop pad**, side brushes, robot filter and dock filter. The R2 has no cleaning solution. See [Consumable sensors](CONSUMABLES.md) for entity identification, card integration and testing.
 
 
 ### Mop roller drying
@@ -287,3 +325,9 @@ to change. The existing pre-clean drying cancellation remains unchanged.
 Card integration contract: detect `hass.services.dyson_spot_scrub.cancel_drying`,
 then call it with the selected vacuum's `entity_id`. The planner card's Cancel
 drying button uses this action.
+
+---
+
+## Licence
+
+MIT
