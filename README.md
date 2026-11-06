@@ -95,7 +95,7 @@ data:
 
 ## Requirements
 
-- Home Assistant **2024.1** or newer
+- Home Assistant **2025.1** or newer
 - The robot already registered in the **Dyson app**
 - Your **Dyson account email and password**, with access to the email inbox for a one-time code — or, alternatively, a Dyson **bearer token** (see [Getting a bearer token](#getting-a-bearer-token))
 - Your Dyson account **country code** (e.g. `AU`, `GB`, `US`, `DE`); the token method also needs the robot's **serial number**
