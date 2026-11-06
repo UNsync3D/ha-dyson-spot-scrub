@@ -563,8 +563,8 @@ class DysonMqttClient:
         self.request_current_state()
         return accepted
 
-    def start_mode(self, mode: int) -> bool:
-        """Start all rooms in mode 0-3, preserving their other settings."""
+    def start_mode(self, mode: int | None) -> bool:
+        """Start all rooms; mode 0-3 replaces each room's saved mode, None keeps it."""
         return self._start_cleaning(mode)
 
     def _can_start_new_clean(self) -> bool:
@@ -1039,8 +1039,11 @@ class DysonMqttClient:
 
     # ── Single-room clean ─────────────────────────────────────────────────────
 
-    def start_room(self, room_name: str, mode: int = 0) -> bool:
-        """Start one room, matching its normalised display name."""
+    def start_room(self, room_name: str, mode: int | None = None) -> bool:
+        """Start one room, matching its normalised display name.
+
+        mode None keeps the room's saved cleaning mode.
+        """
         return self._start_cleaning(mode, room_name)
 
     def start_rooms_with_settings(

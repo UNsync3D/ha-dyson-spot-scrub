@@ -516,7 +516,7 @@ class DysonCoordinator:
                     _LOGGER.warning("[%s] robot not reachable — aborting sequential clean", self.serial)
                     return
                 _LOGGER.info("[%s] Sequential clean → '%s'", self.serial, room)
-                mode_int = MODE_TO_INT.get(self.current_mode, 0)
+                mode_int = MODE_TO_INT.get(self.current_mode)
                 started = await self.hass.async_add_executor_job(
                     self.mqtt.start_room, room, mode_int,
                 )

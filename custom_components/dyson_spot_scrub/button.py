@@ -85,7 +85,7 @@ class DysonStartButton(ButtonEntity):
             return
 
         # No rooms toggled — full clean in current mode
-        mode_int = MODE_TO_INT.get(self._coordinator.current_mode, 0)
+        mode_int = MODE_TO_INT.get(self._coordinator.current_mode)
         _LOGGER.info("Start button pressed — full clean in mode '%s'", self._coordinator.current_mode)
         await self.hass.async_add_executor_job(
             self._coordinator.mqtt.start_mode, mode_int

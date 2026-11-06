@@ -202,7 +202,7 @@ class DysonCleaningModeSelectEntity(SelectEntity):
         # (logs "start blocked"); the new mode applies to the next clean.
         # Left as-is pending hardware investigation of mid-clean mode changes.
         if self._coordinator.mqtt and is_any_cleaning(self._coordinator.state):
-            mode_int = MODE_TO_INT[option]
+            mode_int = MODE_TO_INT.get(option)
             await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.start_mode, mode_int
             )

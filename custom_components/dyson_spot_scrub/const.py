@@ -134,12 +134,15 @@ COUNTRY_PATTERN     = r"[A-Z]{2}"
 CONF_CACHED_ROOMS   = "cached_rooms"
 
 # Cleaning mode names (displayed in HA)
+# "Room settings" leaves each room's own saved mode alone (no override).
+MODE_ROOM_SETTINGS   = "Room settings"
 MODE_VACUUM          = "Vacuum"
 MODE_VACUUM_AND_MOP  = "Vacuum and Mop"
 MODE_MOP             = "Mop"
 MODE_VACUUM_THEN_MOP = "Vacuum then Mop"
 
-CLEANING_MODES = [MODE_VACUUM, MODE_VACUUM_AND_MOP, MODE_MOP, MODE_VACUUM_THEN_MOP]
+CLEANING_MODES = [MODE_ROOM_SETTINGS, MODE_VACUUM, MODE_VACUUM_AND_MOP, MODE_MOP,
+                  MODE_VACUUM_THEN_MOP]
 
 MODE_TO_INT: dict[str, int] = {
     MODE_VACUUM:          0,
@@ -148,8 +151,9 @@ MODE_TO_INT: dict[str, int] = {
     MODE_VACUUM_THEN_MOP: 3,
 }
 
-# Default fan speed (cleaning mode) when none has been chosen yet
-DEFAULT_MODE = MODE_VACUUM
+# Default: use each room's saved mode. MODE_TO_INT has no entry for it, so
+# MODE_TO_INT.get(mode) gives None, which the start code treats as "don't change".
+DEFAULT_MODE = MODE_ROOM_SETTINGS
 
 # Dyson robot product type prefixes / exact codes.
 # "804" = Spot+Scrub AI (confirmed from live manifest, Aug 2026)

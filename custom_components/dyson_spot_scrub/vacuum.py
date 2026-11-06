@@ -110,7 +110,8 @@ async def async_setup_entry(
             coordinator = _get_room_service_coordinator(call)
             _require_start_ready(coordinator)
             room = call.data[ATTR_ROOM]
-            started = await hass.async_add_executor_job(coordinator.mqtt.start_room, room)
+            started = await hass.async_add_executor_job(
+                coordinator.mqtt.start_room, room, MODE_TO_INT.get(coordinator.current_mode))
             if not started:
                 raise HomeAssistantError(f"Could not start cleaning {room!r}")
 
@@ -346,7 +347,7 @@ class DysonVacuumEntity(StateVacuumEntity):
             )
         else:
             _require_start_ready(self._coordinator)
-            mode_int = MODE_TO_INT.get(self._coordinator.current_mode, 0)
+            mode_int = MODE_TO_INT.get(self._coordinator.current_mode)
             await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.start_mode, mode_int
             )
@@ -381,7 +382,7 @@ class DysonVacuumEntity(StateVacuumEntity):
         # mid-clean mode change (and with which command) needs investigating
         # on hardware before this guard is relaxed or replaced.
         if is_any_cleaning(self._mqtt_state):
-            mode_int = MODE_TO_INT[fan_speed]
+            mode_int = MODE_TO_INT.get(fan_speed)
             await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.start_mode, mode_int
             )
