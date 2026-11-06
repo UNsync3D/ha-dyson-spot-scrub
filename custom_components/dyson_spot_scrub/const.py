@@ -8,11 +8,13 @@ MAP_RETENTION_DEFAULTS = {
     "map_keep_last": False,
 }
 MAP_APPEARANCE_DEFAULTS = {
-    "map_vacuum_color": [250, 204, 21],
-    "map_mop_color": [34, 211, 238],
-    "map_combined_color": [192, 132, 252],
+    # MyDyson app colours: vacuum purple, wash blue. The app's legend has no
+    # separate vacuum+mop colour, so it defaults to wash blue.
+    "map_vacuum_color": [130, 95, 200],
+    "map_mop_color": [72, 128, 214],
+    "map_combined_color": [72, 128, 214],
     "map_path_width": 3,
-    "map_glow_width": 6,
+    "map_glow_width": 10,
     # Off = monochrome. On = each room's floor, outline, label and legend
     # swatch get a colour, fixed by map ID and room ID. Walls are white with
     # room colours on; path colours are unaffected.
@@ -42,8 +44,8 @@ MAP_WALL_SECTIONS = {
         "map_door_color": [147, 147, 147],
     },
     "floor_section": {
-        # Like the MyDyson app: reachable floor dark, the rest grey.
-        "map_floor_fill": True,
+        # Floor shading on/off lives in Visible elements (map_floor_fill), so
+        # it can be turned off while the styling sections are hidden.
         "map_floor_color": [18, 18, 20],     # used only with Room colors off
         "map_room_fill_color": [37, 37, 40], # furniture and unreachable areas
     },
@@ -72,6 +74,9 @@ MAP_CHOICES = {
 MAP_VISIBILITY_DEFAULTS = {
     "map_show_furniture": False,   # the floor fill shows furniture as grey
     "map_show_room_names": True,
+    # On (default): in the centre of each room's walls.
+    # Off: names sit where the MyDyson app puts them (nameLocation).
+    "map_center_room_names": True,
     "map_show_room_areas": False,
     "map_show_legend": False,
     "map_show_status_areas": False,
@@ -80,7 +85,9 @@ MAP_VISIBILITY_DEFAULTS = {
     "map_show_grid": False,
     "map_show_dock": True,
     "map_show_restrictions": False,   # keep-out zones hidden unless switched on
-    "map_show_waypoints": True,
+    # Like the MyDyson app: reachable floor dark, the rest of each room grey.
+    # Off for overlaying the map on your own floor plan (FutuRazor, #37).
+    "map_floor_fill": True,
 }
 MAP_DEFAULTS = {
     **MAP_RETENTION_DEFAULTS,
@@ -111,6 +118,7 @@ CONF_AUTH_TOKEN = "auth_token"
 CONF_SERIAL     = "serial"
 CONF_DEVICE_NAME    = "device_name"
 CONF_PRODUCT_TYPE   = "product_type"
+CONF_EXPERIMENTAL   = "experimental"   # unknown Dyson robot model, set up on request
 CONF_MQTT_PREFIX    = "mqtt_prefix"
 
 # Input validation. The serial and MQTT prefix are interpolated into MQTT
@@ -126,12 +134,15 @@ COUNTRY_PATTERN     = r"[A-Z]{2}"
 CONF_CACHED_ROOMS   = "cached_rooms"
 
 # Cleaning mode names (displayed in HA)
+# "Room settings" leaves each room's own saved mode alone (no override).
+MODE_ROOM_SETTINGS   = "Room settings"
 MODE_VACUUM          = "Vacuum"
 MODE_VACUUM_AND_MOP  = "Vacuum and Mop"
 MODE_MOP             = "Mop"
 MODE_VACUUM_THEN_MOP = "Vacuum then Mop"
 
-CLEANING_MODES = [MODE_VACUUM, MODE_VACUUM_AND_MOP, MODE_MOP, MODE_VACUUM_THEN_MOP]
+CLEANING_MODES = [MODE_ROOM_SETTINGS, MODE_VACUUM, MODE_VACUUM_AND_MOP, MODE_MOP,
+                  MODE_VACUUM_THEN_MOP]
 
 MODE_TO_INT: dict[str, int] = {
     MODE_VACUUM:          0,
@@ -140,8 +151,9 @@ MODE_TO_INT: dict[str, int] = {
     MODE_VACUUM_THEN_MOP: 3,
 }
 
-# Default fan speed (cleaning mode) when none has been chosen yet
-DEFAULT_MODE = MODE_VACUUM
+# Default: use each room's saved mode. MODE_TO_INT has no entry for it, so
+# MODE_TO_INT.get(mode) gives None, which the start code treats as "don't change".
+DEFAULT_MODE = MODE_ROOM_SETTINGS
 
 # Dyson robot product type prefixes / exact codes.
 # "804" = Spot+Scrub AI (confirmed from live manifest, Aug 2026)
@@ -151,6 +163,12 @@ DEFAULT_MODE = MODE_VACUUM
 #         owner's manifest in thoukydides/matterbridge-dyson-robot#50. Listed so
 #         setup finds it; R2 support is not confirmed yet (issue #32).
 ROBOT_PRODUCT_PREFIXES = ("RB0", "276", "277", "804", "914")
+# Every Dyson robot vacuum so far uses an MQTT prefix "RB" + two digits
+# (RB01 360 Eye, RB03 360 Vis Nav, RB05 Spot+Scrub AI, RB07 R2 Nurovi). A device
+# with such a prefix but an unknown product type (e.g. an R1 or R3 Nurovi) is
+# offered as an experimental robot, so owners can try it and share logs.
+EXPERIMENTAL_ROBOT_PREFIX = r"RB\d{2}"
+ISSUES_URL = "https://github.com/UNsync3D/ha-dyson-spot-scrub/issues"
 
 # Dock states during which a new station action (empty bin / wash mop) must
 # not be sent — the dock is already running one.

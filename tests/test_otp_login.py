@@ -346,3 +346,70 @@ class OtpLoginTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# A Dyson robot whose product type we don't know yet (e.g. an R1 or R3 Nurovi).
+NEW_ROBOT = {"Serial": "8XX-GB-NEW1234A", "ProductType": "915", "Name": "New Robot",
+             "Version": "RB09PR.01.001.0001.260901_1.0.0"}
+PURIFIER = {"Serial": "AB1-GB-PUR1234A", "ProductType": "438", "Name": "Purifier",
+            "Version": "438MPF.00.01.003.0011"}
+
+
+class ExperimentalRobotTests(unittest.TestCase):
+    """Unknown Dyson robots: reported, and offered as experimental."""
+
+    # Reuse the login harness without re-running the login tests.
+    setUp = OtpLoginTests.setUp
+    run_step = OtpLoginTests.run_step
+    login = OtpLoginTests.login
+    verify = OtpLoginTests.verify
+    ACTIVE = OtpLoginTests.ACTIVE
+
+    def setup_with(self, devices):
+        self.login(response(200, {"challengeId": "chal-1"}))
+        self.replies["get"].append(response(200, devices))
+        return self.verify(response(200, {"token": "bearer-1"}))
+
+    def test_unknown_robot_alone_asks_for_confirmation(self):
+        result = self.setup_with([NEW_ROBOT, PURIFIER])
+        self.assertEqual(result["type"], "form")
+        self.assertEqual(result["step_id"], "experimental")
+        placeholders = result["description_placeholders"]
+        self.assertIn("product type 915", placeholders["summary"])
+        self.assertIn("prefix RB09", placeholders["summary"])
+        self.assertNotIn("NEW1234", placeholders["summary"], "never the serial")
+        self.assertTrue(placeholders["issues_url"].endswith("/ha-dyson-spot-scrub/issues"))
+        entry = self.run_step("experimental", {})
+        self.assertEqual(entry["type"], "create_entry")
+        self.assertTrue(entry["data"]["experimental"])
+        self.assertEqual(entry["data"]["mqtt_prefix"], "RB09")
+
+    def test_known_robot_is_not_experimental(self):
+        entry = self.setup_with([ROBOT, PURIFIER])
+        self.assertEqual(entry["type"], "create_entry")
+        self.assertFalse(entry["data"]["experimental"])
+
+    def test_both_robots_listed_with_experimental_label(self):
+        result = self.setup_with([ROBOT, NEW_ROBOT])
+        self.assertEqual(result["step_id"], "select_robot")
+        labels = next(iter(result["data_schema"].schema.values())).container
+        self.assertEqual(labels, {"7VD-AU-ABC1234A": "Robot",
+                                  "8XX-GB-NEW1234A": "New Robot (experimental)"})
+        result = self.run_step("select_robot", {"serial": "8XX-GB-NEW1234A"})
+        self.assertEqual(result["step_id"], "experimental")
+
+    def test_no_robot_reports_what_was_found(self):
+        result = self.setup_with([PURIFIER])
+        self.assertEqual(result["type"], "abort")
+        self.assertEqual(result["reason"], "no_robots_found")
+        devices = result["description_placeholders"]["devices"]
+        self.assertIn("product type 438", devices)
+        self.assertNotIn("PUR1234", devices, "never the serial")
+        self.assertIn("issues", result["description_placeholders"]["issues_url"])
+
+    def test_messages_explain_and_link_the_issues_page(self):
+        for name in ("strings.json", "translations/en.json"):
+            data = __import__("json").loads((ROOT / name).read_text())
+            self.assertIn("{issues_url}", data["config"]["step"]["experimental"]["description"])
+            self.assertIn("{issues_url}", data["config"]["abort"]["no_robots_found"])
+            self.assertIn("{issues_url}", data["issues"]["experimental_robot"]["description"])

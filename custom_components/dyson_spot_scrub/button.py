@@ -9,9 +9,9 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_SERIAL, DOCK_BUSY_STATES, MODE_TO_INT
+from .const import DOMAIN, CONF_SERIAL, MODE_TO_INT
 from .coordinator import DysonCoordinator
-from .dyson_mqtt import start_block_reason
+from .dyson_mqtt import dock_action_blocker, start_block_reason
 from .entity_helpers import device_info
 
 _LOGGER = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ async def async_setup_entry(
         DysonStartButton(coordinator, entry),
         DysonEmptyBinButton(coordinator, entry),
         DysonWashMopButton(coordinator, entry),
+        DysonDryMopButton(coordinator, entry),
     ])
 
 
@@ -84,7 +85,7 @@ class DysonStartButton(ButtonEntity):
             return
 
         # No rooms toggled — full clean in current mode
-        mode_int = MODE_TO_INT.get(self._coordinator.current_mode, 0)
+        mode_int = MODE_TO_INT.get(self._coordinator.current_mode)
         _LOGGER.info("Start button pressed — full clean in mode '%s'", self._coordinator.current_mode)
         await self.hass.async_add_executor_job(
             self._coordinator.mqtt.start_mode, mode_int
@@ -92,7 +93,7 @@ class DysonStartButton(ButtonEntity):
 
 
 class DysonDockActionButton(ButtonEntity):
-    """Base class for dock station-action buttons (empty bin, wash mop)."""
+    """Base class for dock station-action buttons (empty bin, wash mop, dry mop)."""
 
     _attr_has_entity_name = True
     _attr_should_poll     = False
@@ -103,12 +104,13 @@ class DysonDockActionButton(ButtonEntity):
 
     @property
     def available(self) -> bool:
-        """True only when MQTT is live and the dock is not already busy."""
+        """True only when the robot is reachable, docked between cleans, and
+        the dock is idle. Greyed out while cleaning or returning, and while the
+        dock is mid-cycle (e.g. a 2-5 h DRYING_MOP)."""
         mqtt = self._coordinator.mqtt
         if not (mqtt and mqtt.available):
             return False
-        # Greyed out while the dock is mid-cycle (e.g. a 3-5 h DRYING_MOP).
-        return self._coordinator.state.get("dockState") not in DOCK_BUSY_STATES
+        return dock_action_blocker(self._coordinator.state) is None
 
     async def async_added_to_hass(self) -> None:
         self._coordinator.async_add_listener(self)
@@ -139,7 +141,7 @@ class DysonEmptyBinButton(DysonDockActionButton):
             self._coordinator.mqtt.empty_bin
         )
         if not success:
-            raise HomeAssistantError("Cannot empty bin: dock is already busy")
+            raise HomeAssistantError("Cannot empty bin: the robot must be docked and the dock idle")
 
 
 class DysonWashMopButton(DysonDockActionButton):
@@ -160,4 +162,25 @@ class DysonWashMopButton(DysonDockActionButton):
             self._coordinator.mqtt.wash_mop
         )
         if not success:
-            raise HomeAssistantError("Cannot wash mop: dock is already busy")
+            raise HomeAssistantError("Cannot wash mop: the robot must be docked and the dock idle")
+
+
+class DysonDryMopButton(DysonDockActionButton):
+    """Dry the mop roller without washing it first ("dry only" in the app)."""
+
+    _attr_name = "Dry Mop"
+    _attr_icon = "mdi:weather-windy"
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_dry_mop"
+
+    async def async_press(self) -> None:
+        if not (self._coordinator.mqtt and self._coordinator.mqtt.available):
+            _LOGGER.warning("Cannot dry mop — robot not reachable")
+            return
+        success = await self.hass.async_add_executor_job(
+            self._coordinator.mqtt.dry_mop
+        )
+        if not success:
+            raise HomeAssistantError("Cannot dry mop: the robot must be docked and the dock idle")

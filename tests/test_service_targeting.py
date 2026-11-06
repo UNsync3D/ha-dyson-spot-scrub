@@ -30,7 +30,7 @@ class ServiceTargetingTests(unittest.TestCase):
             pass
 
         class Coordinator:
-            pass
+            current_mode = "Room settings"   # the default: keep each room's mode
 
         self.HAError, self.Coordinator = HAError, Coordinator
         package = module("targeting_pkg")
@@ -115,7 +115,7 @@ class ServiceTargetingTests(unittest.TestCase):
         self.call("clean_room", entity_id=["vacuum.robot_two"], room="Kitchen")
         self.call("clean_rooms", entity_id=["vacuum.robot_two"], rooms=["Kitchen", "Dining"])
         self.assertEqual(self.started(), {"one": (0, 0), "two": (1, 1)})
-        self.robots["two"].mqtt.start_room.assert_called_once_with("Kitchen")
+        self.robots["two"].mqtt.start_room.assert_called_once_with("Kitchen", None)
         self.robots["two"].async_clean_rooms_sequential.assert_called_once_with(
             ["Kitchen", "Dining"])
 

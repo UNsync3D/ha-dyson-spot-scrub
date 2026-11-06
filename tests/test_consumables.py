@@ -105,3 +105,36 @@ class ConsumableTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class R2ConsumableTests(ConsumableTests):
+    """Dyson R2 Nurovi Wash+Dry: mop pad instead of mop roller, no cleaning solution."""
+
+    def setUp(self):
+        super().setUp()
+        self.entry = SimpleNamespace(entry_id="entry", data={"serial": "TEST", "device_name": "R2",
+                                                             "product_type": "914"})
+        hass = SimpleNamespace(data={"dyson_spot_scrub": {"entry": self.coord}})
+        self.entities = []
+        asyncio.run(self.sensor.async_setup_entry(hass, self.entry, self.entities.extend))
+
+    def test_registration_and_discovery_contract(self):
+        kinds = [getattr(e, "_attr_extra_state_attributes", {}).get("consumable_type")
+                 for e in self.entities]
+        self.assertIn("mopPad", kinds)
+        self.assertNotIn("mopRoller", kinds)
+        self.assertNotIn("cleaningSolution", kinds)
+        self.assertEqual(len(self.entities), 7)
+        pad = next(e for e in self.entities
+                   if getattr(e, "_attr_extra_state_attributes", {}).get("consumable_type") == "mopPad")
+        self.assertEqual(pad._attr_unique_id, "TEST_consumable_mop_pad_usage")
+        self.assertEqual(pad._attr_name, "Mop pad usage")
+        self.coord.state = {"consumables": [{"type": "mopPad", "usage": 1}]}
+        self.assertEqual(pad.native_value, 1)
+
+    # The Spot+Scrub-specific checks below do not apply to the R2's entity list.
+    test_sample_and_zero_are_consumption_not_remaining = None
+    test_unknown_and_invalid_never_look_new = None
+    test_solution_boolean_and_disconnection = None
+    test_drying_countdown_only_while_drying = None
+    test_push_listener_lifecycle = None

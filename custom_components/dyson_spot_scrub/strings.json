@@ -41,10 +41,14 @@
         "data": {
           "serial": "Robot"
         }
+      },
+      "experimental": {
+        "title": "Experimental robot",
+        "description": "**{name}** ({summary}) is a Dyson robot this integration doesn't support yet. You can still add it as an experimental robot: it uses the same code as the Spot+Scrub AI and R2 Nurovi, so many features may work, but some may not.\n\nPlease help us add full support: enable debug logging for this integration, run one clean, and share the log on the issues page: {issues_url} (remove your serial number first).\n\nSelect **Submit** to add it."
       }
     },
     "abort": {
-      "no_robots_found":    "No robot vacuums were found in your Dyson account.",
+      "no_robots_found":    "No supported robot vacuums were found in your Dyson account. Devices found: {devices}. If one of these is a Dyson robot vacuum, please open an issue with this list at {issues_url} so we can add it.",
       "cannot_connect":     "Could not connect to Dyson's cloud API.",
       "already_configured": "This device is already configured.",
       "invalid_serial":     "The device reported an invalid serial number."
@@ -122,7 +126,7 @@
             "data_description": {
               "map_combined_color": "Used for simultaneous vacuuming and mopping. Sequential cleaning keeps separate vacuum and mop colors.",
               "map_path_width": "Line width in source-image pixels. Dashboard scaling affects its displayed size.",
-              "map_glow_width": "Total width of the translucent line behind the cleaning path. Set a value greater than Path width for a visible glow. Set 0 to disable.",
+              "map_glow_width": "Total width of the translucent band behind mop and vacuum-and-mop paths, like the MyDyson app. Vacuum-only paths have no glow. Set a value greater than Path width for a visible glow. Set 0 to disable.",
               "map_room_colors": "Give each room its own color for its floor, outline, name, area and legend entry, fixed by map and room. Walls turn white, and cleaning-path colors are unchanged."
             }
           },
@@ -168,12 +172,10 @@
           "floor_section": {
             "name": "Floor",
             "data": {
-              "map_floor_fill": "Fill rooms like the MyDyson app",
               "map_floor_color": "Reachable floor color",
               "map_room_fill_color": "Rest of room color"
             },
             "data_description": {
-              "map_floor_fill": "The floor the robot can reach is dark, and furniture and other areas it can't reach are grey.",
               "map_floor_color": "Used only when Room colors is off. With Room colors on, each room's floor takes its room color.",
               "map_room_fill_color": "Furniture and other parts of a room the robot can't reach."
             }
@@ -197,6 +199,7 @@
             "data": {
               "map_show_furniture": "Show furniture",
               "map_show_room_names": "Show room names",
+              "map_center_room_names": "Center room names",
               "map_show_room_areas": "Show room areas (m²)",
               "map_show_legend": "Show legend",
               "map_show_status_areas": "Show cleaning status areas",
@@ -205,14 +208,15 @@
               "map_show_grid": "Show grid",
               "map_show_dock": "Show charging station",
               "map_show_restrictions": "Show keep-out zones",
-              "map_show_waypoints": "Show path waypoints"
+              "map_floor_fill": "Show floor shading"
             },
             "data_description": {
+              "map_center_room_names": "Place each room name in the centre of the room's walls. Off uses the positions the MyDyson app uses.",
+              "map_floor_fill": "Dark for the floor the robot can reach, grey for furniture and other areas it can't. Turn off to overlay the map on your own floor plan.",
               "map_show_status_areas": "Colored room fills indicating cleaning progress.",
               "map_show_perimeter": "Walls as solid lines, and doors or openings between rooms as dashed lines, as in the MyDyson app.",
               "map_show_visited_paths": "Outline of the floor the robot can reach in each room. It goes around furniture.",
               "map_show_grid": "Includes distance labels and the map origin marker.",
-              "map_show_waypoints": "Dots along the cleaning path. The robot position remains visible.",
               "map_show_legend": "The legend has its own room labels, independent of Show room names."
             }
           }
@@ -229,6 +233,12 @@
         "solid": "Solid",
         "dashed": "Dashed"
       }
+    }
+  },
+  "issues": {
+    "experimental_robot": {
+      "title": "Help add support for your Dyson robot",
+      "description": "**{name}** (product type {product_type}, prefix {prefix}) is set up as an **experimental** robot: this model isn't fully supported yet, so some features may not work.\n\nYou can help: enable debug logging for this integration (Settings → Devices & services → Dyson Spot+Scrub AI → ⋮ → Enable debug logging), run one clean, disable debug logging to download the log, then share it on the issues page: {issues_url}. Please remove your robot's serial number from the log first. Select **Learn more** to open a new issue."
     }
   }
 }

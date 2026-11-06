@@ -6,13 +6,17 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 
 from .const import (
     DOMAIN,
     PLATFORMS,
     CONF_AUTH_TOKEN,
+    CONF_EXPERIMENTAL,
+    CONF_PRODUCT_TYPE,
     CONF_SERIAL,
     CONF_MQTT_PREFIX,
+    ISSUES_URL,
 )
 from .coordinator import DysonCoordinator
 
@@ -48,8 +52,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # "unavailable" on users upgrading from an earlier release.
     _purge_orphan_entities(hass, entry, serial)
 
+    _report_experimental(hass, entry, mqtt_prefix)
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
+
+
+def _report_experimental(hass: HomeAssistant, entry: ConfigEntry, mqtt_prefix: str) -> None:
+    """Ask owners of not-yet-supported robots to share a debug log."""
+    issue_id = f"experimental_robot_{entry.entry_id}"
+    if not entry.data.get(CONF_EXPERIMENTAL):
+        ir.async_delete_issue(hass, DOMAIN, issue_id)
+        return
+    product_type = str(entry.data.get(CONF_PRODUCT_TYPE, "?"))
+    _LOGGER.warning(
+        "Experimental robot (product type %s, prefix %s): this Dyson model isn't "
+        "supported yet. Please enable debug logging, run one clean, and share the "
+        "log at %s (remove the serial number first)",
+        product_type, mqtt_prefix, ISSUES_URL)
+    ir.async_create_issue(
+        hass, DOMAIN, issue_id,
+        is_fixable=False,
+        is_persistent=False,
+        severity=ir.IssueSeverity.WARNING,
+        learn_more_url=f"{ISSUES_URL}/new",
+        translation_key="experimental_robot",
+        translation_placeholders={
+            "name": entry.title,
+            "product_type": product_type,
+            "prefix": mqtt_prefix,
+            "issues_url": ISSUES_URL,
+        },
+    )
 
 
 def _purge_orphan_entities(hass: HomeAssistant, entry: ConfigEntry, serial: str) -> None:
@@ -63,6 +97,11 @@ def _purge_orphan_entities(hass: HomeAssistant, entry: ConfigEntry, serial: str)
         if entity_id:
             _LOGGER.info("Removing obsolete entity %s", entity_id)
             reg.async_remove(entity_id)
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Clear the experimental-robot notice when the robot is removed."""
+    ir.async_delete_issue(hass, DOMAIN, f"experimental_robot_{entry.entry_id}")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

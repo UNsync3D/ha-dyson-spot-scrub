@@ -193,6 +193,25 @@ def is_docked(state: dict) -> bool:
     )
 
 
+# On the dock with no clean in progress. Excludes FULL_CLEAN_CHARGING (a
+# mid-clean recharge) and FULL_CLEAN_FINISHED (also reported on the way back).
+IDLE_ON_DOCK_STATES = {"INACTIVE_CHARGING", "INACTIVE_CHARGED", "CHARGING"}
+
+
+def dock_action_blocker(state: dict) -> str | None:
+    """Why a dock action (empty bin, wash, dry) can't start now, or None.
+
+    Like FutuRazor's dry-only test (#32): only while the robot sits on the
+    dock between cleans and the dock itself is idle.
+    """
+    dock = state.get("dockState")
+    if dock in DOCK_BUSY_STATES:
+        return f"dock already busy ({dock})"
+    if state.get("state") not in IDLE_ON_DOCK_STATES:
+        return f"robot not docked ({state.get('state') or 'unknown'})"
+    return None
+
+
 def is_charging(state: dict) -> bool:
     return state.get("state") in CHARGING_STATES and is_docked(state)
 
@@ -544,8 +563,8 @@ class DysonMqttClient:
         self.request_current_state()
         return accepted
 
-    def start_mode(self, mode: int) -> bool:
-        """Start all rooms in mode 0-3, preserving their other settings."""
+    def start_mode(self, mode: int | None) -> bool:
+        """Start all rooms; mode 0-3 replaces each room's saved mode, None keeps it."""
         return self._start_cleaning(mode)
 
     def _can_start_new_clean(self) -> bool:
@@ -630,7 +649,7 @@ class DysonMqttClient:
 
         legacy: START-DOCK-ACTION / action=COLLECT_DUST (confirmed, app captures)
         JDM:    service.start_station_act / station_act=3
-        Returns False if not connected or a dock action is already running.
+        Returns False if not connected, not docked, or the dock is busy.
         """
         return self._start_dock_action("COLLECT_DUST", 3)
 
@@ -641,9 +660,22 @@ class DysonMqttClient:
         JDM:    service.start_station_act / station_act=1
         The dock auto-transitions to DRYING_MOP after washing (station_act=2)
         — no separate dry command is needed.
-        Returns False if not connected or a dock action is already running.
+        Returns False if not connected, not docked, or the dock is busy.
         """
         return self._start_dock_action("WASH_MOP", 1)
+
+    def dry_mop(self) -> bool:
+        """Dry the mop roller only, without washing it first.
+
+        legacy: START-DOCK-ACTION / action=DRY_MOP
+        JDM:    service.start_station_act / station_act=2, ctrl_value=1
+        Confirmed on a Spot+Scrub AI (FutuRazor, #32, 3 Nov 2026): the cloud
+        adds the JDM request, the dock reports DRYING_MOP at once, and
+        ABORT-DOCK-ACTION / DRY_MOP cancels it. The R2 app has the same
+        "dry only" button.
+        Returns False if not connected, not docked, or the dock is busy.
+        """
+        return self._start_dock_action("DRY_MOP", 2)
 
     def _start_dock_action(self, action: str, station_act: int) -> bool:
         """Send one station action, legacy command only, if the dock is free.
@@ -652,14 +684,14 @@ class DysonMqttClient:
         3 Nov 2026: the translated JDM requests carry no "time" field). The
         app sends only START-DOCK-ACTION; sending the JDM request as well made
         the dock receive the action twice (FutuRazor, #22). station_act is
-        kept for the log: 3 = empty bin, 1 = wash mop.
+        kept for the log: 3 = empty bin, 1 = wash mop, 2 = dry mop.
         """
-        dock = self.state.get("dockState")
         if not self.available:
             _LOGGER.warning("[%s] %s: robot not reachable", self.serial, action)
             return False
-        if dock in DOCK_BUSY_STATES:
-            _LOGGER.warning("[%s] %s: dock already busy (%s)", self.serial, action, dock)
+        blocker = dock_action_blocker(self.state)
+        if blocker:
+            _LOGGER.warning("[%s] %s: %s", self.serial, action, blocker)
             return False
         _LOGGER.info("[%s] → %s (station_act=%d)", self.serial, action, station_act)
         return self._publish({
@@ -1007,8 +1039,11 @@ class DysonMqttClient:
 
     # ── Single-room clean ─────────────────────────────────────────────────────
 
-    def start_room(self, room_name: str, mode: int = 0) -> bool:
-        """Start one room, matching its normalised display name."""
+    def start_room(self, room_name: str, mode: int | None = None) -> bool:
+        """Start one room, matching its normalised display name.
+
+        mode None keeps the room's saved cleaning mode.
+        """
         return self._start_cleaning(mode, room_name)
 
     def start_rooms_with_settings(

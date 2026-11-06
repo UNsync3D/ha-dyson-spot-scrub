@@ -63,10 +63,17 @@ MAX_CANVAS = 4096
 
 BG             = (6,   6,   8,   255)   # near-black
 DOCK           = (52,  211, 153, 255)   # #34d399 emerald green
-ROBOT          = (245, 158, 11,  255)   # #f59e0b amber
-ROBOT_HALO     = (245, 158, 11,  50)
+ROBOT_BODY     = (58,  58,  64,  255)   # charcoal top
+ROBOT_RIM      = (255, 255, 255, 230)
+ROBOT_SHADOW   = (0,   0,   0,   110)
+ROBOT_BUMPER   = (225, 29,  42,  255)   # #e11d2a red front bumper
+ROBOT_TURRET   = (200, 200, 205, 255)
+ROBOT_SENSOR   = (57,  255, 20,  255)   # #39ff14 fluorescent green
+ROBOT_BEAM     = (57,  255, 20)         # heading beam, alpha fades outwards
 PATH_MAIN      = (34,  211, 238, 255)   # #22d3ee cyan
 PATH_UNKNOWN   = (160, 160, 168, 255)
+GLOW_MODES     = {"MOPPING", "VACUUMING_AND_MOPPING"}
+GLOW_ALPHA     = 90
 KEEPOUT_FILL   = (245, 158, 11,  35)    # default tint; alpha used with map_keepout_color
 FURN_FILL      = (55,  60,  70,  255)   # dark grey
 FURN_STROKE    = (90,  95,  110, 200)   # slightly lighter grey
@@ -340,31 +347,33 @@ def _render(
             _poly_alpha(img, txy_list(bnd), FURN_FILL, FURN_STROKE)
 
     # ── 7. Live clean path ────────────────────────────────────────────────────
+    # Drawn like the MyDyson app: travel (update 0) is not shown, cleaning
+    # runs are smooth curves with round ends, no nodes at the joins.
     draw = ImageDraw.Draw(img)
     if live_data:
         cp = live_data.get("cleanPath", [])
         if len(cp) > 1:
-            pts2 = [txy(p) for p in cp]
+            pts2 = [(tx(_pt(p)[0]), ty(_pt(p)[1])) for p in cp]
             modes = live_data.get("_pathModes", [None] * (len(pts2) - 1))
-            colors = [tuple(options[MAP_PATH_ACTIONS[mode]]) + (255,)
-                      if mode in MAP_PATH_ACTIONS else PATH_UNKNOWN for mode in modes]
-            if len(colors) != len(pts2) - 1:
-                colors = [PATH_UNKNOWN] * (len(pts2) - 1)
-            if options["map_glow_width"] > 0:
+            if len(modes) != len(pts2) - 1:
+                modes = [None] * (len(pts2) - 1)
+            runs = _path_runs(cp, pts2, modes)
+            colors = {mode: (tuple(options[MAP_PATH_ACTIONS[mode]]) + (255,)
+                             if mode in MAP_PATH_ACTIONS else PATH_UNKNOWN)
+                      for mode, _ in runs}
+            width = options["map_path_width"]
+            # Like the app, only wash runs (mop, vacuum+mop) get a glow.
+            glowing = [(m, r) for m, r in runs if m in GLOW_MODES]
+            if options["map_glow_width"] > 0 and glowing:
                 glow = Image.new("RGBA", img.size, (0, 0, 0, 0))
                 glow_draw = ImageDraw.Draw(glow)
-                for j, color in enumerate(colors):
-                    glow_draw.line([pts2[j], pts2[j + 1]], fill=color[:3] + (50,),
-                                   width=options["map_glow_width"])
+                for mode, run in glowing:
+                    _draw_smooth(glow_draw, run, colors[mode][:3] + (GLOW_ALPHA,),
+                                 options["map_glow_width"])
                 img.alpha_composite(glow)
             draw = ImageDraw.Draw(img)
-            for j, color in enumerate(colors):
-                draw.line([pts2[j], pts2[j + 1]], fill=color,
-                          width=options["map_path_width"])
-            if options["map_show_waypoints"]:
-                for j in range(4, len(pts2), 5):
-                    x, y = pts2[j]
-                    draw.ellipse([x - 3, y - 3, x + 3, y + 3], fill=colors[j - 1])
+            for mode, run in runs:
+                _draw_smooth(draw, run, colors[mode], width)
 
     # ── 8. Dock ───────────────────────────────────────────────────────────────
     dock = _get_dock(map_data, live_data)
@@ -379,15 +388,8 @@ def _render(
     if live_data:
         robot = live_data.get("robotLocation")
         if robot:
-            rx, ry = int(tx(robot["x"])), int(ty(robot["y"]))
             angle  = float(robot.get("angle", 0.0))
-            _ellipse_alpha(img, rx, ry, 20, ROBOT_HALO)
-            draw = ImageDraw.Draw(img)
-            draw.ellipse([rx - 9, ry - 9, rx + 9, ry + 9], fill=ROBOT)
-            # Heading arrow
-            ax = rx + int(16 * math.cos(angle))
-            ay = ry - int(16 * math.sin(angle))
-            draw.line([(rx, ry), (ax, ay)], fill=BG, width=2)
+            _draw_robot(img, tx(robot["x"]), ty(robot["y"]), angle)
 
     # ── 10. Zone labels ───────────────────────────────────────────────────────
     font_l, font_s = _load_fonts()
@@ -401,6 +403,10 @@ def _render(
         loc = z.get("nameLocation") or {}
         lx_m = loc.get("x", 0.0)
         ly_m = loc.get("y", 0.0)
+        if options["map_center_room_names"]:
+            centre = _room_label_point(z)
+            if centre:
+                lx_m, ly_m = centre
         if not lx_m and not ly_m:
             continue
         lx, ly = int(tx(lx_m)), int(ty(ly_m))
@@ -947,3 +953,221 @@ def _error_image(msg: str) -> bytes:
         return buf.getvalue()
     except Exception:
         return b""
+
+
+# ── Clean path helpers ────────────────────────────────────────────────────────
+# Per-point "update" in the robot's path stream (logs, 3 Nov 2026): 0 while
+# travelling (leaving the dock, returning, moving between rooms), 1 vacuuming,
+# 2 mopping; 3 vacuuming and mopping (seen by others).
+PATH_UPDATE_MODES = {1: "VACUUMING", 2: "MOPPING", 3: "VACUUMING_AND_MOPPING"}
+PATH_TRAVEL = 0
+
+
+def _point_update(p: Any) -> int | None:
+    """The point's "update" code, if Dyson sent one."""
+    if isinstance(p, dict):
+        value = p.get("update")
+        return value if type(value) is int else None
+    return None
+
+
+def _path_runs(cp: list, pts: list, modes: list) -> list:
+    """Split the path into same-mode runs, leaving travel out.
+
+    A segment takes its mode from the point it ends on when Dyson sent
+    per-point codes; otherwise from the observed robot activity (modes).
+    """
+    runs: list = []
+    current_mode = object()
+    current: list = []
+    for j in range(len(pts) - 1):
+        update = _point_update(cp[j + 1])
+        if update == PATH_TRAVEL:
+            mode = PATH_TRAVEL
+        elif update in PATH_UPDATE_MODES:
+            mode = PATH_UPDATE_MODES[update]
+        else:
+            mode = modes[j]
+        if mode == PATH_TRAVEL:
+            if len(current) > 1:
+                runs.append((current_mode, current))
+            current_mode, current = object(), []
+            continue
+        if mode != current_mode:
+            if len(current) > 1:
+                runs.append((current_mode, current))
+            current_mode, current = mode, [pts[j]]
+        current.append(pts[j + 1])
+    if len(current) > 1:
+        runs.append((current_mode, current))
+    return runs
+
+
+def _smooth(points: list, iterations: int = 2) -> list:
+    """Chaikin corner cutting: rounds the corners, keeps both end points."""
+    for _ in range(iterations):
+        if len(points) < 3:
+            return points
+        out = [points[0]]
+        for (x0, y0), (x1, y1) in zip(points, points[1:]):
+            out.append((0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1))
+            out.append((0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1))
+        out.append(points[-1])
+        points = out
+    return points
+
+
+def _draw_smooth(draw, points: list, color: tuple, width: int) -> None:
+    """One continuous rounded line: curved joins and round ends, no nodes."""
+    pts = _smooth(points)
+    draw.line(pts, fill=color, width=width, joint="curve")
+    if width > 2:
+        r = width / 2
+        for x, y in (pts[0], pts[-1]):
+            draw.ellipse([x - r, y - r, x + r, y + r], fill=color)
+
+
+# ── Robot marker ───────────────────────────────────────────────────────────────
+
+ROBOT_RADIUS = 11.5     # body radius in map pixels
+BEAM_LENGTH = 25.0      # heading beam reach from the centre
+BEAM_HALF_ANGLE = 30.0  # degrees either side of the heading
+_SS = 4                 # supersampling for smooth edges
+
+
+def _draw_robot(img, cx: float, cy: float, angle: float) -> None:
+    """Robot seen from above: charcoal body, white rim, red front bumper,
+    sensor turret with a green dot, and a green beam that fades outwards."""
+    reach = int(math.ceil(BEAM_LENGTH)) + 3
+    box = _overlay_box(img, [int(cx) - reach, int(cx) + reach], [int(cy) - reach, int(cy) + reach])
+    if box is None:
+        return
+    x0, y0, x1, y1 = box
+    w, h = x1 - x0, y1 - y0
+    layer = Image.new("RGBA", (w * _SS, h * _SS), (0, 0, 0, 0))
+    ox, oy = (cx - x0) * _SS, (cy - y0) * _SS
+    heading = -math.degrees(angle)          # PIL angles run clockwise
+
+    def disc(draw, r, **kw):
+        r *= _SS
+        draw.ellipse([ox - r, oy - r, ox + r, oy + r], **kw)
+
+    # Beam: concentric wedges from the outside in, each a little stronger.
+    mask = Image.new("L", layer.size, 0)
+    md = ImageDraw.Draw(mask)
+    steps = 24
+    for i in range(steps, -1, -1):
+        r = ROBOT_RADIUS + (BEAM_LENGTH - ROBOT_RADIUS) * i / steps
+        a = int(245 * (1 - i / steps) ** 1.3)
+        rr = r * _SS
+        md.pieslice([ox - rr, oy - rr, ox + rr, oy + rr],
+                    heading - BEAM_HALF_ANGLE, heading + BEAM_HALF_ANGLE, fill=a)
+    beam = Image.new("RGBA", layer.size, ROBOT_BEAM + (0,))
+    beam.putalpha(mask)
+    layer.alpha_composite(beam)
+
+    draw = ImageDraw.Draw(layer)
+    disc(draw, ROBOT_RADIUS + 1.5, fill=ROBOT_SHADOW)
+    disc(draw, ROBOT_RADIUS, fill=ROBOT_BODY, outline=ROBOT_RIM, width=int(1.5 * _SS))
+    r = ROBOT_RADIUS * _SS
+    draw.arc([ox - r, oy - r, ox + r, oy + r], heading - 60, heading + 60,
+             fill=ROBOT_BUMPER, width=int(3.2 * _SS))
+    fx = ox + 4.5 * _SS * math.cos(angle)
+    fy = oy - 4.5 * _SS * math.sin(angle)
+    for rad, col in ((3.2, ROBOT_TURRET), (1.4, ROBOT_SENSOR)):
+        rad *= _SS
+        draw.ellipse([fx - rad, fy - rad, fx + rad, fy + rad], fill=col)
+
+    img.alpha_composite(layer.resize((w, h), Image.LANCZOS), dest=(x0, y0))
+
+
+# ── Room label placement ──────────────────────────────────────────────────────
+
+
+def _room_label_point(zone: dict) -> tuple[float, float] | None:
+    """Centre of the room's walls (the area centre of its outline). For a
+    shape whose centre falls outside it, such as an L, the point inside the
+    outline furthest from its walls."""
+    poly = list(_room_polygon(zone))
+    if len(poly) < 3:
+        poly = [_pt(p) for p in zone.get("visited") or []]
+    if len(poly) < 3:
+        return None
+    centre = _area_centre(poly)
+    if centre and _inside(poly, *centre):
+        return centre
+    return _pole_of_inaccessibility(tuple(poly))
+
+
+def _area_centre(poly: list) -> tuple[float, float] | None:
+    area = cx = cy = 0.0
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        k = x1 * y2 - x2 * y1
+        area += k
+        cx += (x1 + x2) * k
+        cy += (y1 + y2) * k
+    if abs(area) < 1e-9:
+        return None
+    return cx / (3 * area), cy / (3 * area)
+
+
+def _inside(poly, x: float, y: float) -> bool:
+    hit = False
+    for (x1, y1), (x2, y2) in zip(poly, poly[1:] + poly[:1]):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            hit = not hit
+    return hit
+
+
+@lru_cache(maxsize=64)
+def _pole_of_inaccessibility(poly: tuple, coarse: float = 0.15,
+                             fine: float = 0.05) -> tuple[float, float] | None:
+    edges = list(zip(poly, poly[1:] + poly[:1]))
+
+    def clearance(x, y):
+        best = math.inf
+        for (x1, y1), (x2, y2) in edges:
+            dx, dy = x2 - x1, y2 - y1
+            seg = dx * dx + dy * dy
+            t = 0.0 if seg == 0 else max(0.0, min(1.0, ((x - x1) * dx + (y - y1) * dy) / seg))
+            best = min(best, math.hypot(x - x1 - t * dx, y - y1 - t * dy))
+        return best
+
+    def search(xs, ys, step):
+        best, best_d = None, -1.0
+        y = ys[0]
+        while y <= ys[1]:
+            x = xs[0]
+            while x <= xs[1]:
+                if _inside(poly, x, y):
+                    d = clearance(x, y)
+                    if d > best_d:
+                        best, best_d = (x, y), d
+                x += step
+            y += step
+        return best
+
+    xs = [p[0] for p in poly]; ys = [p[1] for p in poly]
+    best = search((min(xs), max(xs)), (min(ys), max(ys)), coarse)
+    if best is None:
+        return None
+    refined = search((best[0] - coarse, best[0] + coarse),
+                     (best[1] - coarse, best[1] + coarse), fine)
+    return refined or best
+
+
+def path_code_counts(path: list) -> dict:
+    """Points per "update" code; "none" for points without one."""
+    counts: dict = {}
+    for point in path:
+        if isinstance(point, dict):
+            code = point.get("update", "none")
+            key = code if isinstance(code, int) and not isinstance(code, bool) else "none"
+            counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def format_path_codes(counts: dict) -> str:
+    total = sum(counts.values())
+    parts = ", ".join(f"code {k}: {v}" for k, v in sorted(counts.items(), key=lambda i: str(i[0])))
+    return f"{total} points ({parts})"

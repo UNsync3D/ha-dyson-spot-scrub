@@ -17,7 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import battery_level
-from .entity_helpers import device_info
+from .entity_helpers import device_info, is_nurovi_r2
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,11 +28,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
+    r2 = is_nurovi_r2(entry)
     async_add_entities([
         DysonBatterySensor(coordinator, entry),
         *(DysonConsumableSensor(coordinator, entry, kind, key, name)
-          for kind, key, name in CONSUMABLES),
-        DysonCleaningSolutionSensor(coordinator, entry),
+          for kind, key, name in (R2_CONSUMABLES if r2 else CONSUMABLES)),
+        # The R2 Nurovi has no cleaning solution (not in its consumables).
+        *([] if r2 else [DysonCleaningSolutionSensor(coordinator, entry)]),
         DysonDryingCountdownSensor(coordinator, entry),
     ])
 
@@ -90,6 +92,9 @@ CONSUMABLES = (
     ("robotFilter", "robot_filter", "Robot filter usage"),
     ("dockFilter", "dock_filter", "Dock filter usage"),
 )
+# Dyson R2 Nurovi Wash+Dry: a mop pad instead of a mop roller (capture, 20 Oct 2026).
+R2_CONSUMABLES = tuple(("mopPad", "mop_pad", "Mop pad usage") if kind == "mopRoller"
+                       else (kind, key, name) for kind, key, name in CONSUMABLES)
 
 
 def consumable_record(state: dict, kind: str) -> dict:

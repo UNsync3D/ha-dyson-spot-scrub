@@ -8,7 +8,8 @@ Visible elements sections. Settings apply on the next camera refresh, including
 to a retained image, without reloading the integration or fetching another map.
 
 Path width is 1–15 source-image pixels. Glow width is its total width, 0–25
-pixels; 0 disables it. A glow no wider than the path is covered by the path.
+pixels; 0 disables it. Only mop and vacuum-and-mop paths glow, like the MyDyson
+app. A glow no wider than the path is covered by the path.
 Vacuum, mop, and simultaneous cleaning have separate RGB colors. Other existing
 rendering defaults are preserved. The optional grid, legend, and cleaning status
 fills are disabled by default. Hiding elements does not change image bounds.

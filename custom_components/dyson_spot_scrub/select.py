@@ -32,9 +32,9 @@ from .const import (
     MODE_TO_INT,
 )
 from .coordinator import DysonCoordinator
-from .entity_helpers import device_info, room_slug
+from .entity_helpers import device_info, is_nurovi_r2, room_slug
 from .station_entity import StationEntity
-from .station_settings import SELECTS
+from .station_settings import R2_SELECT_OPTIONS, SELECTS
 from .dyson_mqtt import _room_display_name, is_any_cleaning
 
 _LOGGER = logging.getLogger(__name__)
@@ -61,6 +61,8 @@ _WATER_LEVEL_OPTIONS: dict[int, str] = {
     1:  "Medium",
     2:  "High",
 }
+# The R2 Nurovi app offers Low, Medium and High only (no Very Low).
+_R2_WATER_LEVEL_OPTIONS = {k: v for k, v in _WATER_LEVEL_OPTIONS.items() if k != 99}
 _MOP_REPETITIONS_OPTIONS: dict[int, str] = {
     0: "One Pass",
     1: "Two Passes",
@@ -71,6 +73,7 @@ _INV_CLEANING_MODE     = {v: k for k, v in _CLEANING_MODE_OPTIONS.items()}
 _INV_CLEANING_STRATEGY = {v: k for k, v in _CLEANING_STRATEGY_OPTIONS.items()}
 _INV_WATER_LEVEL       = {v: k for k, v in _WATER_LEVEL_OPTIONS.items()}
 _INV_MOP_REPETITIONS   = {v: k for k, v in _MOP_REPETITIONS_OPTIONS.items()}
+_INV_R2_WATER_LEVEL    = {v: k for k, v in _R2_WATER_LEVEL_OPTIONS.items()}
 
 # Descriptor tuples: (select_type, label, icon, array_index, options_map, inverse_map)
 _ROOM_SELECT_DESCRIPTORS = [
@@ -105,8 +108,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([DysonStationSelect(coordinator, entry, key, *item)
-                        for key, item in SELECTS.items()])
+    r2 = is_nurovi_r2(entry)
+    async_add_entities([DysonStationSelect(coordinator, entry, key, name,
+                                           R2_SELECT_OPTIONS.get(key, options) if r2 else options)
+                        for key, (name, options) in SELECTS.items()])
     known_rooms: set[str] = set()
 
     # Global cleaning-mode select — created immediately, no room data needed
@@ -126,6 +131,8 @@ async def async_setup_entry(
         entities: list[SelectEntity] = []
         for room_name in new_rooms:
             for select_type, label, icon, array_index, options_map, inverse_map in _ROOM_SELECT_DESCRIPTORS:
+                if r2 and select_type == "water_level":
+                    options_map, inverse_map = _R2_WATER_LEVEL_OPTIONS, _INV_R2_WATER_LEVEL
                 entities.append(
                     DysonRoomSelectEntity(
                         coordinator=coordinator,
@@ -195,7 +202,7 @@ class DysonCleaningModeSelectEntity(SelectEntity):
         # (logs "start blocked"); the new mode applies to the next clean.
         # Left as-is pending hardware investigation of mid-clean mode changes.
         if self._coordinator.mqtt and is_any_cleaning(self._coordinator.state):
-            mode_int = MODE_TO_INT[option]
+            mode_int = MODE_TO_INT.get(option)
             await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.start_mode, mode_int
             )
@@ -344,13 +351,22 @@ class DysonStationSelect(StationEntity, SelectEntity):
 
     def __init__(self, coordinator, entry, key, name, options):
         super().__init__(coordinator, entry, key, name)
-        self._attr_options = list(options)
+        self._base_options = list(options)
+
+    @property
+    def options(self):
+        # A value the robot reports is always listed, so it never shows as
+        # invalid; only listed values can be chosen.
+        current = self.setting_value
+        if current and current not in self._base_options:
+            return [*self._base_options, current]
+        return list(self._base_options)
 
     @property
     def current_option(self):
         return self.setting_value
 
     async def async_select_option(self, option):
-        if option not in self._attr_options:
+        if option not in self.options:
             raise HomeAssistantError("Unsupported station setting")
         await self._async_set_setting(option)

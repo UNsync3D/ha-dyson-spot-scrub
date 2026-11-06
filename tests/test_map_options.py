@@ -90,7 +90,7 @@ class MapRenderingTests(unittest.TestCase):
         empty = self.render(self.hidden)
         self.assertEqual(empty.getchannel('A').getextrema(), (0, 0))
         for key in constants.MAP_VISIBILITY_DEFAULTS:
-            if key == 'map_show_waypoints':
+            if key == 'map_center_room_names':   # moves names, draws nothing itself
                 continue
             visible = self.render({**self.hidden, key: True})
             self.assertEqual(visible.size, empty.size, key)
@@ -99,14 +99,17 @@ class MapRenderingTests(unittest.TestCase):
 
     def test_mode_colors_and_glow_total_width(self):
         # Transform for this fixture: x=64+80*x, y=144-80*y.
-        live = {'cleanPath': [[0, .5], [1, .5]], '_pathModes': ['VACUUMING']}
+        live = {'cleanPath': [[0, .5], [1, .5]], '_pathModes': ['MOPPING']}
         before = copy.deepcopy((self.map, live))
-        image = self.render({**self.hidden, 'map_vacuum_color': [255, 0, 0],
+        image = self.render({**self.hidden, 'map_mop_color': [255, 0, 0],
                              'map_path_width': 3, 'map_glow_width': 9}, live)
         self.assertEqual(image.getpixel((104, 104)), (255, 0, 0, 255))
-        self.assertEqual(image.getpixel((104, 108)), (255, 0, 0, 50))
+        self.assertEqual(image.getpixel((104, 108)), (255, 0, 0, 90))
         self.assertEqual(image.getpixel((104, 109))[3], 0)
-        no_glow = self.render({**self.hidden, 'map_path_width': 3}, live)
+        vacuum = self.render({**self.hidden, 'map_path_width': 3, 'map_glow_width': 9},
+                             {**live, '_pathModes': ['VACUUMING']})
+        self.assertEqual(vacuum.getpixel((104, 108))[3], 0)   # no glow on vacuum
+        no_glow = self.render({**self.hidden, 'map_path_width': 3, 'map_glow_width': 0}, live)
         self.assertEqual(no_glow.getpixel((104, 108))[3], 0)
         smaller = self.render({**self.hidden, 'map_path_width': 15, 'map_glow_width': 1}, live)
         self.assertEqual(smaller.getpixel((104, 112))[3], 0)
@@ -119,3 +122,32 @@ class MapRenderingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def normalize(*args, **kwargs):
+    return options_module.map_options(*args, **kwargs)
+
+
+class OldDefaultUpgradeTests(unittest.TestCase):
+    """v1.5.0 saved its default colours on every form submit; v2.0.0 must
+    still show its own look unless the user picked a colour themselves."""
+
+    def test_saved_v150_defaults_become_new_defaults(self):
+        saved = {"map_vacuum_color": [250, 204, 21], "map_mop_color": [34, 211, 238],
+                 "map_combined_color": [192, 132, 252], "map_glow_width": 6}
+        result = normalize(saved)
+        for key in saved:
+            self.assertEqual(result[key], constants.MAP_DEFAULTS[key], key)
+
+    def test_user_choices_are_kept(self):
+        saved = {"map_vacuum_color": [255, 0, 0], "map_combined_color": [10, 20, 30],
+                 "map_glow_width": 0, "map_mop_color": [34, 211, 239]}
+        result = normalize(saved)
+        self.assertEqual(result["map_vacuum_color"], [255, 0, 0])
+        self.assertEqual(result["map_combined_color"], [10, 20, 30])
+        self.assertEqual(result["map_glow_width"], 0)
+        self.assertEqual(result["map_mop_color"], [34, 211, 239])
+
+    def test_explicit_submission_is_not_rewritten(self):
+        result = normalize({"map_vacuum_color": [250, 204, 21]}, upgrade_old_defaults=False)
+        self.assertEqual(result["map_vacuum_color"], [250, 204, 21])

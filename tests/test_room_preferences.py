@@ -125,6 +125,21 @@ class RoomSettingsTests(unittest.TestCase):
                                                "START"])
                     self.assertEqual(self.sent[-1][1]["cleaningProgramme"]["unorderedZones"], ["12"])
 
+    def test_room_settings_mode_keeps_each_rooms_saved_mode(self):
+        # Default Vacuum Mode is "Room settings": nothing overrides the rooms.
+        const = importlib.import_module("room_test_integration.const")
+        self.assertEqual(const.DEFAULT_MODE, "Room settings")
+        self.assertIsNone(const.MODE_TO_INT.get(const.DEFAULT_MODE))
+        saved = [room[3] for room in self.preferences["room"]]
+        self.assertTrue(self.client.start_mode(None))
+        self.assertEqual([r[3] for r in self.settings()["room_preference"]], saved)
+        self.sent.clear()
+        self.assertTrue(self.client.start_room("Flur"))
+        self.assertEqual(self.settings()["room_preference"][0][3], saved[0])
+        self.sent.clear()
+        self.assertTrue(self.client.start_room("Flur", 2))   # a chosen mode still applies
+        self.assertEqual(self.settings()["room_preference"][0][3], 2)
+
     def test_vacuum_then_mop_does_not_turn_auto_into_quick(self):
         self.assertTrue(self.client.start_room("Flur", 3))
         self.assertEqual(self.settings()["room_preference"][0][3:7], [3, 0, 2, 0])

@@ -170,6 +170,23 @@
   }
  ],
  [
+  "button",
+  "DysonDryMopButton",
+  "7VD-AU-ABC1234A_dry_mop",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
   "sensor",
   "DysonDryingCountdownSensor",
   "7VD-AU-ABC1234A_drying_remaining",
