@@ -536,7 +536,7 @@ class DysonOptionsFlow(config_entries.OptionsFlow):
                     invalid_groups.add(name)
                     continue
                 submitted.update({key: group_input[key] for key in defaults if key in group_input})
-            validated = map_options({**values, **submitted})
+            validated = map_options({**values, **submitted}, upgrade_old_defaults=False)
             for key, value in submitted.items():
                 if (validated[key] != value
                         or isinstance(values[key], bool) and not isinstance(value, bool)

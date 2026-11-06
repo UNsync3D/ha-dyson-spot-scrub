@@ -122,3 +122,32 @@ class MapRenderingTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def normalize(*args, **kwargs):
+    return options_module.map_options(*args, **kwargs)
+
+
+class OldDefaultUpgradeTests(unittest.TestCase):
+    """v1.5.0 saved its default colours on every form submit; v2.0.0 must
+    still show its own look unless the user picked a colour themselves."""
+
+    def test_saved_v150_defaults_become_new_defaults(self):
+        saved = {"map_vacuum_color": [250, 204, 21], "map_mop_color": [34, 211, 238],
+                 "map_combined_color": [192, 132, 252], "map_glow_width": 6}
+        result = normalize(saved)
+        for key in saved:
+            self.assertEqual(result[key], constants.MAP_DEFAULTS[key], key)
+
+    def test_user_choices_are_kept(self):
+        saved = {"map_vacuum_color": [255, 0, 0], "map_combined_color": [10, 20, 30],
+                 "map_glow_width": 0, "map_mop_color": [34, 211, 239]}
+        result = normalize(saved)
+        self.assertEqual(result["map_vacuum_color"], [255, 0, 0])
+        self.assertEqual(result["map_combined_color"], [10, 20, 30])
+        self.assertEqual(result["map_glow_width"], 0)
+        self.assertEqual(result["map_mop_color"], [34, 211, 239])
+
+    def test_explicit_submission_is_not_rewritten(self):
+        result = normalize({"map_vacuum_color": [250, 204, 21]}, upgrade_old_defaults=False)
+        self.assertEqual(result["map_vacuum_color"], [250, 204, 21])

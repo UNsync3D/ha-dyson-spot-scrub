@@ -14,12 +14,33 @@ from .const import (
 )
 
 
-def map_options(options: Mapping | None = None) -> dict:
-    """Return validated, independent values with defaults for invalid options."""
+# v1.5.0 defaults. Saving the options form stores every field, so most v1.5.0
+# users have these saved even though they never chose them. A saved value
+# equal to its old default is read as "not set", so v2.0.0's MyDyson-style
+# look applies; a colour the user picked themselves is kept.
+V150_DEFAULTS = {
+    "map_vacuum_color": [250, 204, 21],
+    "map_mop_color": [34, 211, 238],
+    "map_combined_color": [192, 132, 252],
+    "map_glow_width": 6,
+}
+
+
+def map_options(options: Mapping | None = None, *, upgrade_old_defaults: bool = True) -> dict:
+    """Return validated, independent values with defaults for invalid options.
+
+    upgrade_old_defaults=False is for validating what a user just submitted,
+    so an explicit choice is never rewritten.
+    """
     result = deepcopy(MAP_DEFAULTS)
     for key, value in (options or {}).items():
         if key not in result:
             continue
+        if (upgrade_old_defaults and key in V150_DEFAULTS
+                and isinstance(value, (list, tuple, int)) and not isinstance(value, bool)
+                and (list(value) if isinstance(value, (list, tuple)) else value)
+                == V150_DEFAULTS[key]):
+            continue        # an untouched v1.5.0 default: use today's default
         if key in MAP_WALL_DEFAULTS and not MAP_STYLING_ENABLED:
             continue        # styling switched off: always the default look
         if key in MAP_CHOICES:
