@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="280" viewBox="0 0 1100 280" role="img" aria-labelledby="title desc">
+  <title id="title">Dyson Spot+Scrub AI for Home Assistant</title>
+  <desc id="desc">A Home Assistant integration for Dyson robot vacuums. A robot cleans a floor map: purple vacuum lanes in one room, blue mopping lanes in another.</desc>
+  <defs>
+    <linearGradient id="background" x2="1" y2="1">
+      <stop stop-color="#171e23"/>
+      <stop offset="1" stop-color="#23333c"/>
+    </linearGradient>
+    <radialGradient id="beam" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(0 0) scale(30)">
+      <stop offset=".43" stop-color="#39ff14" stop-opacity=".9"/>
+      <stop offset="1" stop-color="#39ff14" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="1" y="1" width="1098" height="278" rx="22" fill="url(#background)" stroke="#45545d" stroke-width="2"/>
+
+  <!-- Floor map in the integration's MyDyson style. Illustrative, not a real home. -->
+  <g transform="translate(35 31)">
+    <!-- rooms: grey room fill, dark reachable floor, grey walls -->
+    <path d="M10 10H150V110H10Z" fill="#252528" stroke="#939393" stroke-width="3"/>
+    <path d="M150 10H270V110H150Z" fill="#252528" stroke="#939393" stroke-width="3"/>
+    <path d="M10 110H270V208H10Z" fill="#252528" stroke="#939393" stroke-width="3"/>
+    <path d="M18 18H142V102H18Z M158 18H262V102H158Z M18 118H262V200H18Z" fill="#121214"/>
+    <path d="M150 40V80" stroke="#121214" stroke-width="4"/>
+    <path d="M60 110H110" stroke="#121214" stroke-width="4"/>
+    <path d="M150 42V78M62 110H108" stroke="#939393" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+    <!-- vacuum lanes (purple, no glow) -->
+    <path d="M30 32H128Q136 32 136 40Q136 48 128 48H34Q26 48 26 56Q26 64 34 64H128Q136 64 136 72Q136 80 128 80H34Q26 80 26 88Q26 94 34 94H110"
+          fill="none" stroke="#825fc8" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- wash lanes (blue with soft glow) -->
+    <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M172 30V90Q172 96 180 96Q188 96 188 90V30Q188 24 196 24Q204 24 204 30V90Q204 96 212 96Q220 96 220 90V30Q220 24 228 24Q236 24 236 30V70"
+            stroke="#4880d6" stroke-opacity=".35" stroke-width="12"/>
+      <path d="M172 30V90Q172 96 180 96Q188 96 188 90V30Q188 24 196 24Q204 24 204 30V90Q204 96 212 96Q220 96 220 90V30Q220 24 228 24Q236 24 236 30V70"
+            stroke="#4880d6" stroke-width="3.5"/>
+    </g>
+
+    <!-- room names, centred -->
+    <g font-family="Arial, Helvetica, sans-serif" font-size="9" fill="#d8d8dc" text-anchor="middle" letter-spacing=".6">
+      <text x="140" y="164">LIVING ROOM</text>
+    </g>
+
+    <!-- dock -->
+    <circle cx="34" cy="186" r="8" fill="#34d399"/>
+    <text x="34" y="189.5" font-family="Arial, Helvetica, sans-serif" font-size="9" font-weight="700" fill="#06060a" text-anchor="middle">D</text>
+
+    <!-- robot: from above, heading down the last wash lane -->
+    <g transform="translate(236 70) rotate(90)">
+      <path d="M0 0L26 -15A30 30 0 0 1 26 15Z" fill="url(#beam)"/>
+      <circle r="15" fill="#000" fill-opacity=".45"/>
+      <circle r="13" fill="#3a3a40" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.8"/>
+      <path d="M6.5 -11.26A13 13 0 0 1 6.5 11.26" fill="none" stroke="#e11d2a" stroke-width="3.6"/>
+      <circle cx="5" r="3.6" fill="#c8c8cd"/>
+      <circle cx="5" r="1.6" fill="#39ff14"/>
+    </g>
+  </g>
+
+  <path d="M338 43V237" stroke="#4f626c" stroke-opacity=".5"/>
+  <g font-family="Arial, Helvetica, sans-serif">
+    <text x="374" y="77" fill="#a98ee6" font-size="15" font-weight="700" letter-spacing="3">YOUR DYSON. IN HOME ASSISTANT.</text>
+    <text x="371" y="137" fill="#f2f7f9" font-size="44" font-weight="700" letter-spacing="-.8">Dyson Spot+Scrub AI</text>
+    <text x="374" y="180" fill="#b9c8d0" font-size="23">A Home Assistant integration, with R2 Nurovi support</text>
+    <path d="M374 208H420" stroke="#4880d6" stroke-width="3" stroke-linecap="round"/>
+    <text x="434" y="214" fill="#a4bac5" font-size="17">Room cleaning. Live map. Dock controls.</text>
+  </g>
+</svg>

@@ -1,4 +1,18 @@
-# Dyson Spot+Scrub AI — Home Assistant Integration
+<p align="center">
+  <img src="docs/images/integration-banner.svg" alt="Dyson Spot+Scrub AI — a Home Assistant integration, with R2 Nurovi support" width="1100">
+</p>
+
+<p align="center">
+  <a href="https://my.home-assistant.io/redirect/marketplace_repository/?owner=UNsync3D&amp;repository=ha-dyson-spot-scrub&amp;category=integration">
+    <img src="https://my.home-assistant.io/badges/marketplace_repository.svg" alt="Open in Home Assistant Marketplace">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/UNsync3D/ha-dyson-spot-scrub/releases/latest"><img src="https://img.shields.io/github/v/release/UNsync3D/ha-dyson-spot-scrub?label=release&amp;color=825fc8" alt="Latest release"></a>
+  <a href="https://github.com/UNsync3D/ha-dyson-spot-scrub/actions/workflows/validate.yml"><img src="https://github.com/UNsync3D/ha-dyson-spot-scrub/actions/workflows/validate.yml/badge.svg?branch=main" alt="Validation status on main"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/UNsync3D/ha-dyson-spot-scrub?color=4880d6" alt="MIT licence"></a>
+</p>
 
 A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum, with support for the **Dyson R2 Nurovi Wash+Dry**. It connects through Dyson's cloud, the same way the MyDyson app does. The robot pushes status updates to Home Assistant over MQTT as they happen, so there's no constant polling. The robot doesn't accept local connections, so an internet connection is required.
 
@@ -8,7 +22,28 @@ A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum
 |---|---|
 | **Dyson Spot+Scrub AI** | Supported and tested on hardware |
 | **Dyson R2 Nurovi Wash+Dry** | Supported, built from real R2 logs; owner testing welcome ([#32](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/32)) |
-| **Dyson R1 Nurovi Dry**, **Dyson R3 Nurovi Spot+Scrub UV** | Not yet supported: owners wanted to help test ([#30](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30)) |
+| **Dyson R1 Nurovi Dry**, **Dyson R3 Nurovi Spot+Scrub UV** | Not yet supported, but can be added as **experimental**: owners wanted to help test ([#30](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30)) |
+
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="42%"><img src="docs/images/floor-map.png" alt="Floor Map camera: a kitchen being washed (blue, with a glow) after the living room was vacuumed (purple), with the robot marker and centred room names" width="360"><br>The live floor map, in the MyDyson app's style</td>
+    <td align="center" width="58%"><img src="docs/images/planner-wide.png" alt="Dyson Cleaning Planner Card, Modern layout: numbered room order beside each room's cleaning settings" width="460"><br>Planning a clean with FutuRazor's card</td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/images/planner-narrow.png" alt="The planner card on a phone, with settings expanded inside a room" width="170"><br>On a phone</td>
+    <td align="center"><img src="docs/images/station-settings.png" alt="Station switches, preferences and the Empty, Wash and Dry dock buttons" width="330"><br>Station settings</td>
+    <td align="center"><img src="docs/images/consumables.png" alt="Consumable remaining-life bars and cleaning solution status" width="330"><br>Consumables</td>
+  </tr>
+</table>
+
+<sub>Card screenshots by <a href="https://github.com/FutuRazor">@FutuRazor</a>, from the <a href="https://github.com/FutuRazor/dyson-cleaning-planner-card">Dyson Cleaning Planner Card</a>. The floor map shows an example clean.</sub>
 
 ---
 
@@ -32,9 +67,9 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 
 | Entity | Type | Notes |
 |---|---|---|
-| Robot vacuum | `vacuum` | Start, pause, resume, stop, return to dock, suction power |
-| Vacuum Mode | `select` | Vacuum / Vacuum and Mop / Mop / Vacuum then Mop |
-| Vacuum Start | `button` | Starts the rooms selected with the room switches |
+| Robot vacuum | `vacuum` | Start (whole home), pause, resume, stop, return to dock, suction power |
+| Vacuum Mode | `select` | Room settings (default), or one mode for every room: Vacuum, Vacuum and Mop, Mop, or Vacuum then Mop. See [Cleaning modes](#cleaning-modes) |
+| Vacuum Start | `button` | Cleans the rooms selected with the room switches, one at a time, returning to the dock between rooms. With none selected, cleans the whole home |
 | Floor Map | `camera` | Live map of rooms, the cleaned path and the robot |
 | Battery | `sensor` | Battery percentage |
 | Docked, Charging, Fault | `binary_sensor` | Robot on the dock, battery charging, error reported |
@@ -54,15 +89,22 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Hot water mopping, Hot water self-cleaning, Extended roller preparation, Cleaning solution | `switch` | Station settings (no cleaning solution on the R2) |
 | Self-cleaning frequency, Roller drying duration | `select` | Station settings (drying: 3–5 hours on the Spot+Scrub AI, 2–4 hours on the R2) |
 | Mop drying time remaining | `sensor` | Countdown while the mop is drying |
-| Consumable usage, Cleaning solution | `sensor` | See [Consumable monitoring](#consumable-monitoring) |
+| Consumable usage, Cleaning solution | `sensor` | See [Consumables](#consumables) |
 
-### New cleaning start readiness
+### When a clean can start
 
-New cleaning jobs are rejected while the robot is cleaning or paused, returning/finishing, mapping, washing its roller or emptying its bin. In particular, `FULL_CLEAN_FINISHED` does not mean ready: the robot may still be returning or preparing station work. Confirmed inactive states with an idle dock allow starting without requiring a preceding station cycle. Confirmed post-clean drying remains interruptible by the existing start sequence.
+A new clean only starts when the robot is ready: not while it's cleaning or paused, on its way back, mapping, or while the dock is washing the mop or emptying the bin. Mop drying is the exception: starting a clean stops the drying first, as the MyDyson app does. Start on a paused clean resumes it.
 
-The vacuum exposes `ready_to_start` (boolean) and `start_block_reason` (reason code, or `null` when ready). Dashboard cards can use these attributes to disable Start and explain why. Enforcement also applies to the integration's start button, room actions and MQTT start path, independently of dashboard support. `vacuum.start` still resumes a paused clean; a different/new room job is blocked while paused. A fan-speed command that would restart an active job is now rejected; selecting preferences without starting is unchanged.
+### Consumables
 
-See [start readiness and testing](START_READINESS.md) for the state contract, evidence and limitations.
+The usage sensors show how much of each part's life is **used** (the MyDyson app shows what's **left**, so 2% here is 98% in the app):
+
+- **Spot+Scrub AI:** brush bar, mop roller, side brushes, robot filter and dock filter, plus **Cleaning solution** (OK or Refill required).
+- **R2 Nurovi Wash+Dry:** brush bar, **mop pad**, side brushes, robot filter and dock filter. The R2 has no cleaning solution.
+
+### Mop drying
+
+While the dock dries the mop, **Mop drying time remaining** counts down, using times reported by the robot about once a minute. The `dyson_spot_scrub.cancel_drying` action, or the card's Cancel drying button, stops it.
 
 ### Floor Map
 
@@ -84,18 +126,32 @@ The map refreshes about every 5 seconds while the robot is cleaning, and every 6
 
 ### Cleaning modes
 
-Selected via the **Vacuum Mode** entity, or from any automation:
+The **Vacuum Mode** select decides the mode for cleans started from Home Assistant (the vacuum's Start, the Vacuum Start button and the `clean_room` / `clean_rooms` actions):
+
+- **Room settings** (the default): each room is cleaned with the mode saved for it in the MyDyson app.
+- **Any other mode**: every room being cleaned uses that mode, and it's saved as the room's mode, as when you change it in the app.
+
+The choice resets to Room settings when Home Assistant restarts. The [Dyson Cleaning Planner Card](#dashboard-card-dyson-cleaning-planner-card) and `start_rooms_with_settings` always use the room settings they send.
 
 | Mode | What the robot does |
 |---|---|
+| Room settings | Each room's own saved mode |
 | Vacuum | Suction only |
 | Vacuum and Mop | Both simultaneously |
 | Mop | Wet mopping only |
 | Vacuum then Mop | Full vacuum pass, then full mop pass |
 
-### Batched room settings for Lovelace cards
+### Actions
 
-Per-room select entities continue to send each changed option to the robot immediately. A custom card can keep edits locally and call `dyson_spot_scrub.save_room_settings` once when the user saves. The payload uses stable room IDs and the same option labels shown by the select entities:
+| Action | What it does |
+|---|---|
+| `dyson_spot_scrub.clean_room` | Cleans one room, by name, using the Vacuum Mode |
+| `dyson_spot_scrub.clean_rooms` | Cleans several rooms one at a time, using the Vacuum Mode |
+| `dyson_spot_scrub.save_room_settings` | Saves several rooms' settings at once, without starting |
+| `dyson_spot_scrub.start_rooms_with_settings` | Starts the given rooms with the given settings (each room keeps its own mode) |
+| `dyson_spot_scrub.cancel_drying` | Stops mop drying |
+
+The room select entities save each change straight away. `save_room_settings` saves a batch in one go, using stable room IDs and the same option labels as the select entities:
 
 ```yaml
 action: dyson_spot_scrub.save_room_settings
@@ -111,7 +167,7 @@ data:
 
 `mop_repetitions` sets the room's **Clean Repetitions** select (one or two passes). Despite its field name, the second pass also applies to vacuum-only cleans.
 
-To start with a local draft, call `dyson_spot_scrub.start_rooms_with_settings`. It applies the supplied room settings and sends the selected room IDs to the robot in the supplied order. The current Dyson protocol calls the field `unorderedZones`, so the robot may choose its own execution order until ordered cleaning is supported by the integration. Existing entities and actions keep their current behavior.
+`start_rooms_with_settings` saves the supplied settings, then starts the rooms in one clean. The rooms are sent in the order given, but Dyson's protocol calls this list `unorderedZones`, so the robot may choose its own order.
 
 ```yaml
 action: dyson_spot_scrub.start_rooms_with_settings
@@ -123,6 +179,10 @@ data:
       cleaning_mode: Vacuum then Mop
 ```
 
+### For dashboard card developers
+
+The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](START_READINESS.md) and [consumable sensors](CONSUMABLES.md).
+
 ---
 
 ## Requirements
@@ -130,7 +190,7 @@ data:
 - Home Assistant **2025.1** or newer
 - The robot already registered in the **Dyson app**
 - Your **Dyson account email and password**, with access to the email inbox for a one-time code — or, alternatively, a Dyson **bearer token** (see [Getting a bearer token](#getting-a-bearer-token))
-- Your Dyson account **country code** (e.g. `AU`, `GB`, `US`, `DE`); the token method also needs the robot's **serial number**
+- Your Dyson account's **country code** (see [Country codes](#country-codes)); the token method also needs the robot's **serial number**
 
 ---
 
@@ -171,7 +231,21 @@ Restart Home Assistant.
    - **Enter a bearer token directly** — see [Getting a bearer token](#getting-a-bearer-token)
 4. The integration finds the robot(s) on your account and creates their entities
 
-> **Country code must match your Dyson account region.** Common codes: `AU`, `GB`, `US`, `DE`, `FR`, `JP`, `NL`.
+### Country codes
+
+Enter the two-letter code of the country your Dyson account was created in, which is usually where you bought the robot. It must match the account, or sign-in fails. Setup suggests your Home Assistant country.
+
+| Region | Codes |
+|---|---|
+| Oceania | `AU` Australia, `NZ` New Zealand |
+| UK and Ireland | `GB` United Kingdom (not `UK`), `IE` Ireland |
+| North America | `US` United States, `CA` Canada, `MX` Mexico |
+| Western Europe | `DE` Germany, `AT` Austria, `CH` Switzerland, `FR` France, `BE` Belgium, `NL` Netherlands, `LU` Luxembourg, `IT` Italy, `ES` Spain, `PT` Portugal |
+| Northern and Eastern Europe | `SE` Sweden, `NO` Norway, `DK` Denmark, `FI` Finland, `PL` Poland, `CZ` Czechia |
+| Asia | `JP` Japan, `KR` South Korea, `SG` Singapore, `MY` Malaysia, `HK` Hong Kong, `TW` Taiwan, `IN` India |
+| Middle East | `AE` United Arab Emirates, `SA` Saudi Arabia, `IL` Israel |
+
+Any other two-letter country code works too. Accounts in mainland China (`CN`) use a separate Dyson service and haven't been tested.
 
 ### Email login
 
@@ -196,6 +270,9 @@ Logging in here doesn't sign you out of the MyDyson app: each login gets its own
 ## Getting a bearer token
 
 Only needed if you choose the token method instead of [Email login](#email-login). The easiest way to get your Dyson bearer token is to intercept the Dyson app's network traffic using **Proxyman** on a Mac with your iPhone on the same Wi-Fi network. This takes about 5 minutes.
+
+<details>
+<summary>Show the Proxyman steps</summary>
 
 ### Step 1 — Install Proxyman on your Mac
 
@@ -233,12 +310,14 @@ Use this token in the **Enter a bearer token directly** step of the integration 
 
 > **After setup:** Remove the proxy from your iPhone's Wi-Fi settings so normal traffic isn't routed through your Mac.
 
+</details>
+
 ---
 
 ## How it works
 
 1. **Authenticate**: email login or a pasted token gives a bearer token, which is stored in HA's config entry — your Dyson password is never stored.
-2. **IoT credentials**: on each HA start the integration fetches short-lived MQTT credentials from Dyson's cloud for your specific device.
+2. **IoT credentials**: when it starts or reconnects, the integration fetches short-lived MQTT credentials for your robot from Dyson's cloud.
 3. **MQTT**: the integration then connects to Dyson's cloud MQTT broker over a WebSocket, as the MyDyson app does. Commands go out and status updates arrive over this connection as they happen. The floor map comes from Dyson's cloud separately: about every 5 seconds while cleaning, and every 60 seconds otherwise.
 4. **Auto-recovery**: if the MQTT connection drops, the integration automatically fetches fresh credentials and reconnects with exponential backoff (15 s → 30 s → 60 s → 120 s).
 
@@ -254,7 +333,7 @@ Make sure the folder is named exactly `dyson_spot_scrub` inside `custom_componen
 - If a token stops working, sign in again with [Email login](#email-login), or capture a fresh token with Proxyman
 
 ### Floor map is blank or shows an error
-- The map is only populated after the robot has completed at least one cleaning session with room mapping enabled in the Dyson app
+- The map needs a saved floor map: let the robot map your home in the MyDyson app first
 - Check the HA logs for `dyson_spot_scrub` errors — the map entity logs rendering failures at `WARNING` level
 
 ### Robot shows as Unavailable
@@ -265,6 +344,9 @@ See [Email login](#email-login): check the password first, correct it on the cod
 
 ### "Cannot connect" during setup
 Dyson's cloud API may be temporarily unavailable. Wait a few minutes and try again.
+
+### Reporting a problem
+Open an [issue](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues) with a debug log: go to **Settings → Devices & services → Dyson Spot+Scrub AI → ⋮ → Enable debug logging**, reproduce the problem, then **Disable debug logging** to download the log. Remove your robot's serial number before posting. Passwords, tokens and the robot's local password are already hidden.
 
 ---
 
@@ -280,51 +362,9 @@ ln -s $PWD/custom_components/dyson_spot_scrub \
       ~/.homeassistant/custom_components/dyson_spot_scrub
 ```
 
-Pull requests welcome. Please open an issue before starting significant work so we can coordinate.
+Run the tests with `python -m unittest discover -s tests`. Pull requests are welcome; please open an issue before starting significant work so we can coordinate.
 
 ---
-
-## Consumable monitoring
-
-Five percentage sensors report the used lifespan of each consumable (the MyDyson app shows the remaining life instead, so 2% used here is 98% in the app):
-
-- **Spot+Scrub AI:** brush bar, mop roller, side brushes, robot filter and dock filter, plus a **Cleaning solution** sensor (OK or Refill required).
-- **R2 Nurovi Wash+Dry:** brush bar, **mop pad**, side brushes, robot filter and dock filter. The R2 has no cleaning solution. See [Consumable sensors](CONSUMABLES.md) for entity identification, card integration and testing.
-
-
-### Mop roller drying
-
-While `dock_state` is `DRYING_MOP`, the vacuum exposes `drying_total_seconds`,
-`drying_remaining_seconds`, and `drying_updated_at` (UTC reception time of the
-last valid timing packet). These are robot-reported values, not a locally
-estimated countdown. Timing packets arrive roughly once per minute; missing or
-invalid packets leave the previous sample unchanged until the next valid one.
-The timestamp is not refreshed by unrelated status messages.
-
-Timing requires a confirmed drying state and a valid `work_time` type 3 packet.
-It may therefore take about a minute to appear after startup. Times are removed
-when the dock leaves drying or MQTT disconnects. No old cycle values are restored.
-A zero remaining time alone does not change the dock state. Frontends may derive
-progress as `(total - remaining) / total` and interpolate between samples using
-the timestamp, but the live dock state determines whether drying is active.
-
-To cancel drying independently of starting a clean:
-
-```yaml
-action: dyson_spot_scrub.cancel_drying
-data:
-  entity_id: vacuum.your_dyson
-```
-
-The action resolves exactly one Dyson vacuum, requires a live connection and
-active drying, and reuses the existing `ABORT-DOCK-ACTION` / `DRY_MOP` command.
-It sends no cleaning, stop or home command and does not modify room settings.
-Successful submission is not confirmation of completion: wait for `dock_state`
-to change. The existing pre-clean drying cancellation remains unchanged.
-
-Card integration contract: detect `hass.services.dyson_spot_scrub.cancel_drying`,
-then call it with the selected vacuum's `entity_id`. The planner card's Cancel
-drying button uses this action.
 
 ---
 
