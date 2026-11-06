@@ -29,7 +29,7 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Docked | `binary_sensor` | On when robot is sitting in its dock |
 | Charging | `binary_sensor` | On while battery is actively charging |
 | Fault | `binary_sensor` | On when robot has reported an error |
-| Zone switches | `switch` | One per mapped room — enable or disable individual zones |
+| Room switches | `switch` | One per mapped room: choose which rooms the next **Start** cleans. Nothing is sent to the robot until you start |
 
 ### New cleaning start readiness
 
@@ -200,7 +200,7 @@ Use this token in the **Enter a bearer token directly** step of the integration 
 
 1. **Authenticate**: email login or a pasted token gives a bearer token, which is stored in HA's config entry — your Dyson password is never stored.
 2. **IoT credentials**: on each HA start the integration fetches short-lived MQTT credentials from Dyson's cloud for your specific device.
-3. **MQTT**: the robot is then controlled entirely over a direct MQTT-over-WebSocket connection. No further cloud calls are made during normal operation.
+3. **MQTT**: the integration then connects to Dyson's cloud MQTT broker over a WebSocket, as the MyDyson app does. Commands go out and status updates arrive over this connection as they happen. The floor map comes from Dyson's cloud separately: about every 5 seconds while cleaning, and every 60 seconds otherwise.
 4. **Auto-recovery**: if the MQTT connection drops, the integration automatically fetches fresh credentials and reconnects with exponential backoff (15 s → 30 s → 60 s → 120 s).
 
 ---
@@ -219,7 +219,7 @@ Make sure the folder is named exactly `dyson_spot_scrub` inside `custom_componen
 - Check the HA logs for `dyson_spot_scrub` errors — the map entity logs rendering failures at `WARNING` level
 
 ### Robot shows as Unavailable
-The MQTT connection to Dyson's IoT backend dropped. The integration will reconnect automatically. If it stays unavailable, try reloading the integration from **Settings → Devices & Services**.
+Either the connection to Dyson's cloud dropped, or Dyson reports the robot itself as offline (for example, it's off Wi-Fi or switched off). The integration recovers from both on its own: it reconnects automatically, and while the robot is offline it asks for its status once a minute. If the robot shows as online in the MyDyson app but stays unavailable here, reload the integration from **Settings → Devices & Services**.
 
 ### Email login code is rejected
 See [Email login](#email-login): check the password first, correct it on the code screen and resubmit the same code, and stop after two rejections.
@@ -254,7 +254,7 @@ MIT
 Five percentage sensors report used lifespan for the brush bar, mop roller, side brushes, robot filter and dock filter. A cleaning-solution sensor reports OK or Refill required. See [Consumable sensors](CONSUMABLES.md) for entity identification, card integration and testing.
 
 
-### Mop roller drying (fork build v1.4.5)
+### Mop roller drying
 
 While `dock_state` is `DRYING_MOP`, the vacuum exposes `drying_total_seconds`,
 `drying_remaining_seconds`, and `drying_updated_at` (UTC reception time of the
@@ -285,5 +285,5 @@ Successful submission is not confirmation of completion: wait for `dock_state`
 to change. The existing pre-clean drying cancellation remains unchanged.
 
 Card integration contract: detect `hass.services.dyson_spot_scrub.cancel_drying`,
-then call it with the selected vacuum's `entity_id`. The planner card's existing
-Cancel drying placeholder still needs frontend wiring in a separate card update.
+then call it with the selected vacuum's `entity_id`. The planner card's Cancel
+drying button uses this action.
