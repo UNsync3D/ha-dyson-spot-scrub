@@ -9,6 +9,7 @@
 </p>
 
 <p align="center">
+  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-Default-41BDF5" alt="Listed in HACS default"></a>
   <a href="https://github.com/UNsync3D/ha-dyson-spot-scrub/releases/latest"><img src="https://img.shields.io/github/v/release/UNsync3D/ha-dyson-spot-scrub?label=release&amp;color=825fc8" alt="Latest release"></a>
   <a href="https://github.com/UNsync3D/ha-dyson-spot-scrub/actions/workflows/validate.yml"><img src="https://github.com/UNsync3D/ha-dyson-spot-scrub/actions/workflows/validate.yml/badge.svg?branch=main" alt="Validation status on main"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/UNsync3D/ha-dyson-spot-scrub?color=4880d6" alt="MIT licence"></a>
@@ -196,19 +197,21 @@ The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason`
 
 ## Installation
 
+The integration is listed in HACS, so there's no repository to add by hand.
+
 ### Option A — Marketplace (Home Assistant 2026.11 or newer, recommended)
 
-1. Go to **Settings → Marketplace**.
-2. Select **Add from link** and enter `https://github.com/UNsync3D/ha-dyson-spot-scrub`. The first time, you're asked to connect GitHub.
-3. Open **Dyson Spot+Scrub AI** and select **Install**.
-4. Continue with [Setup](#setup).
+1. Go to **Settings → Marketplace**, or select the **Open in Home Assistant Marketplace** button at the top of this page.
+2. Search for **Dyson Spot+Scrub AI**, open it and select **Install**.
+3. Restart Home Assistant, then continue with [Setup](#setup).
 
 ### Option B — HACS (Home Assistant 2026.10 or older)
 
-1. Open **HACS**, select **⋮ → Custom repositories**.
-2. Add `https://github.com/UNsync3D/ha-dyson-spot-scrub` with the type **Integration**.
-3. Search for *Dyson Spot+Scrub AI* and select **Download**.
-4. Restart Home Assistant.
+1. Open **HACS** and search for **Dyson Spot+Scrub AI**.
+2. Open it and select **Download**.
+3. Restart Home Assistant, then continue with [Setup](#setup).
+
+> **Already installed it from a custom repository or link?** You don't need to do anything: updates keep arriving as before.
 
 ### Option C — Manual
 
@@ -326,7 +329,10 @@ Use this token in the **Enter a bearer token directly** step of the integration 
 ## Troubleshooting
 
 ### Integration not found after install
-Make sure the folder is named exactly `dyson_spot_scrub` inside `custom_components/`, then restart HA.
+Restart Home Assistant after installing. For a manual install, make sure the folder is named exactly `dyson_spot_scrub` inside `custom_components/`.
+
+### Can't find it when searching in HACS or the Marketplace
+New listings can take a few hours to appear. In HACS, select **⋮ → Update information** and search again.
 
 ### Bearer token is rejected
 - Make sure you copied the full token value — it should be 65+ characters ending in `-1` or similar
