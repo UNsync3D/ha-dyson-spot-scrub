@@ -181,7 +181,7 @@ class DysonMapCamera(Camera):
             self._map_id = map_id
 
         status = state.get("state")
-        if status in ("FULL_CLEAN_FINISHED", "ABORTED"):
+        if status in ("FULL_CLEAN_FINISHED", "ABORTED", "FULL_CLEAN_ABORTED"):
             if self._cleaning_active:
                 self._cleaning_active = False
                 self._cleaning_finished_at = time.monotonic()

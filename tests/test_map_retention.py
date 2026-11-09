@@ -156,6 +156,19 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.now += 1
         self.assertEqual(await self.camera.async_camera_image(), b'static')
 
+    async def test_full_clean_aborted_ends_the_session(self):
+        # R2 capture, 8 Nov 2026: Home after a pause reports FULL_CLEAN_ABORTED
+        # while driving back, then INACTIVE_CHARGING.
+        image = await self.start()
+        self.state('FULL_CLEAN_PAUSED')
+        self.state('FULL_CLEAN_ABORTED')
+        self.assertIsNotNone(self.camera._cleaning_finished_at)
+        self.state('INACTIVE_CHARGING')
+        self.assertEqual(await self.camera.async_camera_image(), image)
+        self.path = {'cleanPath': [[5, 5], [6, 6]]}
+        await self.start()                       # the next clean starts a fresh image
+        self.assertEqual(self.rendered[-1], self.path)
+
     async def test_vacuum_then_mop_is_one_session(self):
         image = await self.start(sweepType=7)
         generation = self.camera._cleaning_generation

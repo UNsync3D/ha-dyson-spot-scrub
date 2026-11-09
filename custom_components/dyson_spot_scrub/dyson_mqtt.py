@@ -86,6 +86,51 @@ _ROOM_SETTING_OPTIONS = {
     "mop_repetitions": (6, {"One Pass": 0, "Two Passes": 1}),
 }
 
+# Room-row slots for repetitions. The R2 Nurovi app keeps mop passes in [6]
+# and vacuum passes in [7], and writes its single "1x/2x" choice to whichever
+# the room's clean type uses (nordlead3's one-change-at-a-time capture, Nov
+# 2026). The Spot+Scrub AI uses [6] for every clean type (#35).
+_MOP_PASSES = 6
+_VACUUM_PASSES = 7
+# The R2 Nurovi app sends 11 values per room (up to [10] order) although the
+# robot reports a 12th (capture, 8 Nov 2026); set_preference copies that.
+_R2_SENT_ROOM_ROW_LEN = 11
+
+
+def room_repetitions(room: list, split: bool):
+    """The repetitions value the app would show for this room row."""
+    if not isinstance(room, list) or len(room) <= _MOP_PASSES:
+        return None
+    if not split or len(room) <= _VACUUM_PASSES:
+        return room[_MOP_PASSES]
+    mode = room[3]
+    if mode == 0:
+        return room[_VACUUM_PASSES]
+    if mode == 2:
+        return room[_MOP_PASSES]
+    values = [v for v in (room[_MOP_PASSES], room[_VACUUM_PASSES]) if isinstance(v, int)]
+    return max(values) if values else room[_MOP_PASSES]
+
+
+def set_room_repetitions(room: list, value: int, split: bool) -> None:
+    """Write repetitions the way the app does for this robot."""
+    if not split or len(room) <= _VACUUM_PASSES:
+        room[_MOP_PASSES] = value
+        return
+    mode = room[3]
+    if mode != 2:
+        room[_VACUUM_PASSES] = value
+    if mode != 0:
+        room[_MOP_PASSES] = value
+
+
+def set_room_mode(room: list, mode: int, split: bool) -> None:
+    """Change a room's clean type, keeping the repetitions it shows."""
+    passes = room_repetitions(room, split) if split else None
+    room[3] = mode
+    if passes is not None:
+        set_room_repetitions(room, passes, split)
+
 # ── State classification ──────────────────────────────────────────────────────
 
 RUNNING_STATES = {
@@ -118,7 +163,7 @@ def start_block_reason(state: dict, connected: bool = True) -> str | None:
     """
     if not connected:
         return "disconnected"
-    if has_fault(state):
+    if has_fault(state) and not _only_stale_continue_faults(state):
         return "robot_fault"
     robot = state.get("state", "")
     dock = state.get("dockState")
@@ -274,6 +319,35 @@ def _actionable_faults(state: dict):
         if fid is not None and fid in FAULT_CODE_INFORMATIONAL:
             continue
         yield fid
+
+
+def _only_stale_continue_faults(state: dict) -> bool:
+    """True when every actionable fault is USER_CONTINUE and the robot sits idle on the dock.
+
+    A refused start leaves its fault behind until the next start clears it:
+    the R2 capture of 8 Nov 2026 kept 22011 (clean water tank missing,
+    USER_CONTINUE) while INACTIVE_CHARGING, and the app's next vacuum-only
+    start ran normally and cleared it. If the cause is still there, the robot
+    refuses the new clean itself.
+    """
+    if has_freeze_fault(state) or state.get("state") not in IDLE_ON_DOCK_STATES:
+        return False
+    if state.get("dockState") not in (None, "IDLE"):
+        return False
+    faults = state.get("activeFaults")
+    if not isinstance(faults, list):
+        return False
+    severities = []
+    for f in faults:
+        if not isinstance(f, dict):
+            continue
+        severity = f.get("nextActionRequired") or f.get("status")
+        if severity is None or severity == "LOG_ONLY":
+            continue
+        if _fault_code(f) in FAULT_CODE_INFORMATIONAL:
+            continue
+        severities.append(severity)
+    return bool(severities) and all(s == "USER_CONTINUE" for s in severities)
 
 
 def has_fault(state: dict) -> bool:
@@ -451,6 +525,17 @@ class DysonMqttClient:
     @property
     def _command_topic(self) -> str:
         return f"{self._prefix}/{self.serial}/command"
+
+    @property
+    def splits_repetitions(self) -> bool:
+        """True for the R2 Nurovi (RB07), which has separate vacuum passes in [7]."""
+        return str(self._prefix).upper() == "RB07"
+
+    def _rows_to_send(self, rooms: list[list]) -> list[list]:
+        """Room rows as the app sends them: 11 values on the R2, unchanged otherwise."""
+        if not self.splits_repetitions:
+            return rooms
+        return [row[:_R2_SENT_ROOM_ROW_LEN] if isinstance(row, list) else row for row in rooms]
 
     @property
     def _jdm_command_topic(self) -> str:
@@ -866,8 +951,8 @@ class DysonMqttClient:
           [3]  cleaningMode      0=Vacuum  1=Vacuum+Mop  2=Mop  3=Vacuum then Mop
           [4]  cleaningStrategy  0=Auto  1=Boost  2=Quiet  3=Quick
           [5]  waterLevel        99=Very Low  0=Low  1=Medium  2=High
-          [6]  mopRepetitions    0=One pass  1=Two passes
-          [7]  unknown           (preserved)
+          [6]  repetitions       0=One pass  1=Two passes (mop passes on the R2)
+          [7]  vacuumPasses      R2 only: 0=One pass  1=Two passes
           [8]  selected          0=No  1=Yes  (managed by switch.py)
           [9]  unknown           (preserved)
           [10] roomOrder         int
@@ -908,7 +993,12 @@ class DysonMqttClient:
             if room is None or len(room) <= index:
                 _LOGGER.warning("[%s] Room ID %r is no longer in the map", self.serial, room_id)
                 return False
-            room[index] = value
+            if index == 3:
+                set_room_mode(room, value, self.splits_repetitions)
+            elif index == _MOP_PASSES:
+                set_room_repetitions(room, value, self.splits_repetitions)
+            else:
+                room[index] = value
             return True
         return self._edit_rooms(change)
 
@@ -966,7 +1056,7 @@ class DysonMqttClient:
             accepted = self._publish_jdm("service.set_preference", {
                 "map_id":          map_id,
                 "prefer_type":     1,
-                "room_preference": rooms,
+                "room_preference": self._rows_to_send(rooms),
                 "uv_switch":       uv_switch,
             })
         except Exception:  # noqa: BLE001 — any transport failure means "not sent"
@@ -1025,7 +1115,9 @@ class DysonMqttClient:
         input can never write arbitrary values or indices into the array.
         May partially modify ``room`` before failing — callers work on a copy.
         """
-        for key, option in settings.items():
+        # Clean type first, so repetitions land in the slots the new type uses.
+        ordered = sorted(settings.items(), key=lambda item: item[0] != "cleaning_mode")
+        for key, option in ordered:
             field = _ROOM_SETTING_OPTIONS.get(key)
             if field is None or not isinstance(option, str):
                 _LOGGER.warning("[%s] Invalid room setting %r=%r", self.serial, key, option)
@@ -1034,7 +1126,12 @@ class DysonMqttClient:
             if option not in option_values:
                 _LOGGER.warning("[%s] Unsupported value for %s: %r", self.serial, key, option)
                 return False
-            room[index] = option_values[option]
+            if key == "cleaning_mode":
+                set_room_mode(room, option_values[option], self.splits_repetitions)
+            elif key == "mop_repetitions":
+                set_room_repetitions(room, option_values[option], self.splits_repetitions)
+            else:
+                room[index] = option_values[option]
         return True
 
     # ── Single-room clean ─────────────────────────────────────────────────────
@@ -1187,7 +1284,7 @@ class DysonMqttClient:
                     enabled = str(room[0]) in selected_set
                     room[8] = int(enabled)
                     if enabled and mode is not None:
-                        room[3] = mode
+                        set_room_mode(room, mode, self.splits_repetitions)
                     settings = settings_by_id.get(str(room[0]), {})
                     if not isinstance(settings, dict):
                         _LOGGER.warning("[%s] Invalid room settings for room ID %r", self.serial, room[0])
@@ -1221,7 +1318,7 @@ class DysonMqttClient:
                     "params": {
                         "map_id": map_id,
                         "prefer_type": 1,
-                        "room_preference": updated_rooms,
+                        "room_preference": self._rows_to_send(updated_rooms),
                         "uv_switch": deepcopy(merged.get("uv_switch", [])),
                     },
                     "time": _now_iso(),

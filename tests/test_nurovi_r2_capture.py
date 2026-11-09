@@ -100,7 +100,9 @@ class R2StartTests(unittest.TestCase):
         rows = next(p for _, p in self.sent
                     if p.get("method") == "service.set_preference")["params"]["room_preference"]
         reply_rows = CAPTURE["get_preference_reply"]["room"]
-        self.assertEqual([len(r) for r in rows], [len(r) for r in reply_rows])  # 12 fields kept
+        # The robot reports 12 values per room; the app sends 11 (also 8 Nov 2026).
+        self.assertEqual([len(r) for r in reply_rows], [12] * len(reply_rows))
+        self.assertEqual([len(r) for r in rows], [len(r) for r in app_rows])
         self.assertEqual([r[8] for r in rows], [r[8] for r in app_rows])        # only room1 selected
         self.assertEqual(rows[0][:4], app_rows[0][:4])                          # room1 vacuum+mop
 

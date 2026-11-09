@@ -273,7 +273,8 @@ class DysonVacuumEntity(StateVacuumEntity):
             return VacuumActivity.PAUSED
         if robot_state in RUNNING_STATES:
             return VacuumActivity.CLEANING
-        if robot_state in {"RETURNING_TO_BASE", "MAPPING"}:
+        # FULL_CLEAN_ABORTED: driving back after Home (R2 capture, Nov 2026).
+        if robot_state in {"RETURNING_TO_BASE", "MAPPING", "FULL_CLEAN_ABORTED"}:
             return VacuumActivity.RETURNING
         if is_charging(state):
             return VacuumActivity.DOCKED

@@ -13,6 +13,8 @@ Per-room array-index mapping (confirmed from FutuRazor MQTT captures, Oct 2026):
   [4]  cleaningStrategy  0=Auto  1=Boost  2=Quiet  3=Quick
   [5]  waterLevel        99=Very Low  0=Low  1=Medium  2=High
   [6]  repetitions       0=One pass  1=Two passes (applies to vacuum-only too)
+  [7]  R2 Nurovi only: vacuum passes. On the R2 the one Repetitions select
+       reads and writes [6] and/or [7] by clean type, like the MyDyson app.
 """
 from __future__ import annotations
 
@@ -35,7 +37,7 @@ from .coordinator import DysonCoordinator
 from .entity_helpers import device_info, is_nurovi_r2, room_slug
 from .station_entity import StationEntity
 from .station_settings import R2_SELECT_OPTIONS, SELECTS
-from .dyson_mqtt import _room_display_name, is_any_cleaning
+from .dyson_mqtt import _room_display_name, is_any_cleaning, room_repetitions
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -285,6 +287,10 @@ class DysonRoomSelectEntity(SelectEntity):
         room = self._find_room_prefs()
         if room is None or len(room) <= self._array_index:
             return None
+        if self._select_type == "mop_repetitions":
+            mqtt = self._coordinator.mqtt
+            split = bool(mqtt and getattr(mqtt, "splits_repetitions", False))
+            return self._options_map.get(room_repetitions(room, split))
         return self._options_map.get(room[self._array_index])
 
     @property

@@ -1,0 +1,436 @@
+{
+ "_source": "nordlead3, R2 Nurovi Wash+Dry (RB07), Matterbridge debug log, 8 Nov 2026 (times UTC). Clean-water tank removed on purpose; app changes made one setting at a time on one room.",
+ "refused_mop_start": {
+  "current_state_after": {
+   "msg": "CURRENT-STATE",
+   "batteryChargeLevel": 100,
+   "state": "INACTIVE_CHARGING",
+   "currentCleaningStrategy": "auto",
+   "defaultCleaningStrategy": "auto",
+   "currentCleaningMode": "zoneConfigured",
+   "defaultCleaningMode": "zoneConfigured",
+   "cleanDuration": 0,
+   "persistentMapId": "1793378396",
+   "activeFaults": [
+    {
+     "faultCode": "22011",
+     "nextActionRequired": "USER_CONTINUE"
+    }
+   ],
+   "outOfBoxState": "OUT_OF_BOX_COMPLETE",
+   "hotWaterMop": false,
+   "backWashType": "TIME",
+   "hotWaterSwitch": true,
+   "volume": 30,
+   "fullCleanAction": "NONE",
+   "dockState": "IDLE",
+   "airDryFrequency": 3,
+   "backWashTime": 15,
+   "backWashFrequency": 0,
+   "alarm": true,
+   "voiceLanguage": "en-GB",
+   "consumables": [
+    {
+     "type": "brushBar",
+     "usage": 2
+    },
+    {
+     "type": "mopPad",
+     "usage": 12
+    },
+    {
+     "type": "sideBrushes",
+     "usage": 5
+    },
+    {
+     "type": "robotFilter",
+     "usage": 4
+    },
+    {
+     "type": "dockFilter",
+     "usage": 2
+    }
+   ],
+   "washMopBeforeClean": true,
+   "childLock": false,
+   "doNotDisturbMode": {
+    "isOn": true,
+    "startTime": "23:00",
+    "endTime": "9:00"
+   },
+   "emptyBinType": "time",
+   "emptyBinTime": 15,
+   "cleanWashAttachment": 1
+  },
+  "next_vacuum_start_first_state": {
+   "msg": "CURRENT-STATE",
+   "batteryChargeLevel": 100,
+   "state": "FULL_CLEAN_RUNNING",
+   "currentCleaningStrategy": "auto",
+   "defaultCleaningStrategy": "auto",
+   "currentCleaningMode": "zoneConfigured",
+   "defaultCleaningMode": "zoneConfigured",
+   "cleanDuration": 0,
+   "persistentMapId": "1793378396",
+   "activeFaults": [
+    {
+     "faultCode": "22011",
+     "nextActionRequired": "USER_CONTINUE"
+    }
+   ],
+   "outOfBoxState": "OUT_OF_BOX_COMPLETE",
+   "hotWaterMop": false,
+   "backWashType": "TIME",
+   "hotWaterSwitch": true,
+   "volume": 30,
+   "fullCleanAction": "NONE",
+   "dockState": "IDLE",
+   "airDryFrequency": 3,
+   "backWashTime": 15,
+   "backWashFrequency": 0,
+   "alarm": true,
+   "voiceLanguage": "en-GB",
+   "consumables": [
+    {
+     "type": "brushBar",
+     "usage": 2
+    },
+    {
+     "type": "mopPad",
+     "usage": 12
+    },
+    {
+     "type": "sideBrushes",
+     "usage": 5
+    },
+    {
+     "type": "robotFilter",
+     "usage": 4
+    },
+    {
+     "type": "dockFilter",
+     "usage": 2
+    }
+   ],
+   "washMopBeforeClean": true,
+   "childLock": false,
+   "doNotDisturbMode": {
+    "isOn": true,
+    "startTime": "23:00",
+    "endTime": "9:00"
+   },
+   "emptyBinType": "time",
+   "emptyBinTime": 15,
+   "cleanWashAttachment": 1
+  }
+ },
+ "after_home": {
+  "props": [
+   {
+    "work_mode": 6
+   },
+   {
+    "status": 3
+   }
+  ],
+  "current_state": {
+   "msg": "CURRENT-STATE",
+   "batteryChargeLevel": 100,
+   "state": "FULL_CLEAN_ABORTED",
+   "currentCleaningStrategy": "auto",
+   "defaultCleaningStrategy": "auto",
+   "currentCleaningMode": "zoneConfigured",
+   "defaultCleaningMode": "zoneConfigured",
+   "cleanDuration": 0,
+   "persistentMapId": "1793378396",
+   "activeFaults": [],
+   "outOfBoxState": "OUT_OF_BOX_COMPLETE",
+   "hotWaterMop": false,
+   "backWashType": "TIME",
+   "hotWaterSwitch": true,
+   "volume": 30,
+   "fullCleanAction": "NONE",
+   "dockState": "IDLE",
+   "airDryFrequency": 3,
+   "backWashTime": 15,
+   "backWashFrequency": 0,
+   "alarm": true,
+   "voiceLanguage": "en-GB",
+   "consumables": [
+    {
+     "type": "brushBar",
+     "usage": 2
+    },
+    {
+     "type": "mopPad",
+     "usage": 12
+    },
+    {
+     "type": "sideBrushes",
+     "usage": 5
+    },
+    {
+     "type": "robotFilter",
+     "usage": 4
+    },
+    {
+     "type": "dockFilter",
+     "usage": 2
+    }
+   ],
+   "washMopBeforeClean": true,
+   "childLock": false,
+   "doNotDisturbMode": {
+    "isOn": true,
+    "startTime": "23:00",
+    "endTime": "9:00"
+   },
+   "emptyBinType": "time",
+   "emptyBinTime": 15,
+   "cleanWashAttachment": 1
+  },
+  "docked_state": {
+   "msg": "CURRENT-STATE",
+   "batteryChargeLevel": 100,
+   "state": "INACTIVE_CHARGING",
+   "currentCleaningStrategy": "auto",
+   "defaultCleaningStrategy": "auto",
+   "currentCleaningMode": "zoneConfigured",
+   "defaultCleaningMode": "zoneConfigured",
+   "cleanDuration": 0,
+   "persistentMapId": "1793378396",
+   "activeFaults": [],
+   "outOfBoxState": "OUT_OF_BOX_COMPLETE",
+   "hotWaterMop": false,
+   "backWashType": "TIME",
+   "hotWaterSwitch": true,
+   "volume": 30,
+   "fullCleanAction": "NONE",
+   "dockState": "IDLE",
+   "airDryFrequency": 3,
+   "backWashTime": 15,
+   "backWashFrequency": 0,
+   "alarm": true,
+   "voiceLanguage": "en-GB",
+   "consumables": [
+    {
+     "type": "brushBar",
+     "usage": 2
+    },
+    {
+     "type": "mopPad",
+     "usage": 12
+    },
+    {
+     "type": "sideBrushes",
+     "usage": 5
+    },
+    {
+     "type": "robotFilter",
+     "usage": 4
+    },
+    {
+     "type": "dockFilter",
+     "usage": 2
+    }
+   ],
+   "washMopBeforeClean": true,
+   "childLock": false,
+   "doNotDisturbMode": {
+    "isOn": true,
+    "startTime": "23:00",
+    "endTime": "9:00"
+   },
+   "emptyBinType": "time",
+   "emptyBinTime": 15,
+   "cleanWashAttachment": 1
+  }
+ },
+ "get_preference_row": [
+  15,
+  "[room-name 7]",
+  0,
+  1,
+  0,
+  0,
+  1,
+  1,
+  0,
+  0,
+  3,
+  0
+ ],
+ "app_rows": [
+  {
+   "time": "16:57:01",
+   "app": "Vacuum, Auto, 1x",
+   "mode": 0,
+   "passes": 0,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "17:02:33",
+   "app": "Vacuum, Auto, 2x",
+   "mode": 0,
+   "passes": 1,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    0,
+    0,
+    1,
+    0,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "16:36:26",
+   "app": "Vacuum, Quick, 1x",
+   "mode": 0,
+   "passes": 0,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    0,
+    3,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "16:22:10",
+   "app": "Vacuum and Wash, medium, 1x",
+   "mode": 1,
+   "passes": 0,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "17:14:05",
+   "app": "Vacuum and Wash, medium, 2x",
+   "mode": 1,
+   "passes": 1,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    1,
+    0,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "17:05:53",
+   "app": "Wash, medium, 1x",
+   "mode": 2,
+   "passes": 0,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    2,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "17:09:39",
+   "app": "Wash, medium, 2x",
+   "mode": 2,
+   "passes": 1,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    2,
+    0,
+    1,
+    1,
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "16:47:49",
+   "app": "Vacuum then Wash, medium, 1x",
+   "mode": 3,
+   "passes": 0,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    3,
+    0,
+    1,
+    0,
+    0,
+    1,
+    0,
+    1
+   ]
+  },
+  {
+   "time": "17:12:12",
+   "app": "Vacuum then Wash, medium, 2x",
+   "mode": 3,
+   "passes": 1,
+   "row": [
+    15,
+    "[room-name 3]",
+    0,
+    3,
+    0,
+    1,
+    1,
+    1,
+    1,
+    0,
+    1
+   ]
+  }
+ ]
+}
