@@ -93,14 +93,14 @@ class ServiceTargetingTests(unittest.TestCase):
         robot.mqtt = SimpleNamespace(connected=connected, available=connected, state=dict(state),
                                      start_room=Mock(return_value=starts))
         robot.state = dict(state)
-        robot.async_clean_rooms_sequential = Mock(side_effect=lambda rooms: AsyncMock()())
+        robot.async_start_sequential = Mock(return_value=None)
         return robot
 
     def call(self, service, **data):
         return asyncio.run(self.services[service](SimpleNamespace(data=data)))
 
     def started(self):
-        return {name: (r.mqtt.start_room.call_count, r.async_clean_rooms_sequential.call_count)
+        return {name: (r.mqtt.start_room.call_count, r.async_start_sequential.call_count)
                 for name, r in self.robots.items()}
 
     def test_two_robots_without_target_start_nothing(self):
@@ -116,8 +116,15 @@ class ServiceTargetingTests(unittest.TestCase):
         self.call("clean_rooms", entity_id=["vacuum.robot_two"], rooms=["Kitchen", "Dining"])
         self.assertEqual(self.started(), {"one": (0, 0), "two": (1, 1)})
         self.robots["two"].mqtt.start_room.assert_called_once_with("Kitchen", None)
-        self.robots["two"].async_clean_rooms_sequential.assert_called_once_with(
+        self.robots["two"].async_start_sequential.assert_called_once_with(
             ["Kitchen", "Dining"])
+
+    def test_a_running_sequence_refuses_another(self):
+        # #42: one sequence at a time; the refusal is an error, not silence.
+        self.robots["two"].async_start_sequential.return_value = "sequence_running"
+        with self.assertRaises(self.HAError) as caught:
+            self.call("clean_rooms", entity_id=["vacuum.robot_two"], rooms=["Kitchen"])
+        self.assertIn("sequence running", str(caught.exception))
 
     def test_single_robot_needs_no_target(self):
         del self.robots["two"]

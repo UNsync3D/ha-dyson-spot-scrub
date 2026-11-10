@@ -79,9 +79,10 @@ class DysonStartButton(ButtonEntity):
             ordered = [r for r in map_order if r in enabled]
             ordered += [r for r in enabled if r not in ordered]
             _LOGGER.info("Start button pressed — sequential clean: %s", ordered)
-            self.hass.async_create_task(
-                self._coordinator.async_clean_rooms_sequential(ordered)
-            )
+            refused = self._coordinator.async_start_sequential(ordered)
+            if refused:
+                raise HomeAssistantError(
+                    f"Cannot start a new clean: {refused.replace('_', ' ')}")
             return
 
         # No rooms toggled — full clean in current mode

@@ -127,8 +127,10 @@ async def async_setup_entry(
         async def _handle_clean_rooms(call: ServiceCall) -> None:
             coordinator = _get_room_service_coordinator(call)
             _require_start_ready(coordinator)
-            hass.async_create_task(
-                coordinator.async_clean_rooms_sequential(call.data[ATTR_ROOMS]))
+            # One sequence at a time; the coordinator claims the task slot (#42).
+            refused = coordinator.async_start_sequential(call.data[ATTR_ROOMS])
+            if refused:
+                raise HomeAssistantError(f"Cannot start a new clean: {refused.replace('_', ' ')}")
 
         hass.services.async_register(
             DOMAIN,
