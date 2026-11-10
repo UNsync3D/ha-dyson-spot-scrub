@@ -91,6 +91,9 @@ class DysonMapCamera(Camera):
       • Historical visited paths (from live-map zones)
     """
 
+    # Calibration changes with each frame; keep it live but out of history.
+    _unrecorded_attributes = frozenset({"map_calibration"})
+
     _attr_has_entity_name = True
     _attr_name            = "Floor Map"
     _attr_icon            = "mdi:map"

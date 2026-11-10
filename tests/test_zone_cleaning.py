@@ -127,6 +127,7 @@ class ZoneCameraTests(unittest.IsolatedAsyncioTestCase):
         real_render = importlib.import_module("retention_integration.map_renderer").render_map
         with patch.object(retention.camera_module, "render_map", real_render):
             image = await self.camera.async_camera_image()
+        self.assertIn("map_calibration", self.camera._unrecorded_attributes)
         calibration = self.camera.extra_state_attributes["map_calibration"]
         self.assertEqual(calibration["image_sha256"], hashlib.sha256(image).hexdigest())
         with patch.object(retention.camera_module, "render_map", side_effect=RuntimeError("test")):
