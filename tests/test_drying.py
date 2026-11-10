@@ -27,7 +27,7 @@ class DryingTests(unittest.TestCase):
             'paho': module('paho'), 'paho.mqtt': module('paho.mqtt'),
             'paho.mqtt.client': module('paho.mqtt.client'),
             'drying_test_integration.coordinator': module('coordinator', DysonCoordinator=Coordinator),
-            'voluptuous': module('voluptuous', Schema=lambda x: x, Required=lambda x: x, Optional=lambda x, **kw: x, All=lambda *x: x),
+            'voluptuous': module('voluptuous', Schema=lambda x: x, Required=lambda x: x, Optional=lambda x, **kw: x, All=lambda *x: x, Any=lambda *x: x),
             'homeassistant': module('homeassistant'),
             'homeassistant.components': module('components'),
             'homeassistant.components.vacuum': module('vacuum', StateVacuumEntity=object, VacuumEntityFeature=features, VacuumActivity=SimpleNamespace()),

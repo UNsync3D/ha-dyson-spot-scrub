@@ -34,6 +34,7 @@ from urllib.parse import quote
 import paho.mqtt.client as mqtt
 
 from .const import DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATTERN
+from .zone_cleaning import rectangle_points, validate_map_id
 from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
 
 _LOGGER = logging.getLogger(__name__)
@@ -1135,6 +1136,49 @@ class DysonMqttClient:
         return True
 
     # ── Single-room clean ─────────────────────────────────────────────────────
+
+    def start_zone(self, map_id, rectangle) -> bool:
+        """Send one app-style vacuum zone start, without changing room preferences.
+
+        Captured 8 November 2026: the cloud translates this legacy START into
+        service.set_areas_start. Sending both would risk a duplicate start.
+        True means local transport acceptance, not robot acknowledgement.
+        """
+        try:
+            map_id = validate_map_id(map_id)
+            points = rectangle_points(rectangle)
+        except (ValueError, OverflowError):
+            return False
+        if not self._start_lock.acquire(blocking=False):
+            return False
+        try:
+            with self._room_edit_lock, self._preference_lock:
+                if not self._can_start_new_clean():
+                    return False
+                if str(self.state.get("persistentMapId")) != map_id:
+                    return False
+                if self.state.get("dockState") == "DRYING_MOP":
+                    if not self._abort_dock_action():
+                        return False
+                    # A state callback may have run while publishing the abort.
+                    if (not self._can_start_new_clean()
+                            or str(self.state.get("persistentMapId")) != map_id):
+                        return False
+                return self._publish({
+                    "msg": "START", "mode-reason": "RAPP", "time": _now_iso(),
+                    "cleaningMode": "spotZoneConfigured",
+                    "cleaningProgramme": {
+                        "persistentMapId": map_id,
+                        "spotZones": [{"id": "1", "points": points}],
+                        "defaultSpotZoneSettings": {
+                            "waterLevel": "low", "cleaningStrategy": "auto",
+                            "mopPasses": 1, "isUvScanOn": True,
+                            "cleanType": "vacuum", "dryPasses": 1,
+                        },
+                    },
+                })
+        finally:
+            self._start_lock.release()
 
     def start_room(self, room_name: str, mode: int | None = None) -> bool:
         """Start one room, matching its normalised display name.

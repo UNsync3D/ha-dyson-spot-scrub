@@ -112,3 +112,27 @@ cancel_drying:
         entity:
           integration: dyson_spot_scrub
           domain: vacuum
+
+clean_zone:
+  name: Clean zone (experimental)
+  description: Vacuum one rectangle on the currently active map, using Auto power and one pass. Does not change room preferences.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      required: true
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
+    map_id:
+      name: Map ID
+      description: Active map ID from the vacuum or calibrated camera image. A different active map rejects the start.
+      required: true
+      selector:
+        text:
+    rectangle:
+      name: Rectangle
+      description: Four robot coordinates in metres, [x_min, y_min, x_max, y_max]. Not image pixels. Verify the area before starting.
+      required: true
+      selector:
+        object:

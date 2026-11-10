@@ -31,6 +31,7 @@ We reconstruct them from the wall (type=0) presentation segments.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import math
 from functools import lru_cache
@@ -122,6 +123,7 @@ def render_map(
     options: dict | None = None,
     *,
     raise_errors: bool = False,
+    calibration: dict | None = None,
 ) -> bytes:
     """Render the Dyson floor map to PNG bytes.
 
@@ -129,12 +131,14 @@ def render_map(
     metadata  : response from get_map_metadata() (used for zone name fallback)
     live_data : response from get_live_map() (None when not cleaning)
     """
+    if calibration is not None:
+        calibration.clear()
     if not _PIL_AVAILABLE:
         return _error_image("Pillow not installed — add Pillow to requirements")
     if not map_data:
         return _error_image("No map data available")
     try:
-        return _render(map_data, metadata, live_data, map_options(options))
+        return _render(map_data, metadata, live_data, map_options(options), calibration)
     except Exception as exc:  # pylint: disable=broad-except
         if raise_errors:
             raise
@@ -149,6 +153,7 @@ def _render(
     metadata:  list[dict[str, Any]] | None,
     live_data: dict[str, Any] | None,
     options: dict,
+    calibration: dict | None = None,
 ) -> bytes:
 
     # ── 1. Collect zones ──────────────────────────────────────────────────────
@@ -427,7 +432,16 @@ def _render(
     buf = io.BytesIO()
     output = img if options["map_transparent_background"] else img.convert("RGB")
     output.save(buf, format="PNG", optimize=False)
-    return buf.getvalue()
+    image = buf.getvalue()
+    if calibration is not None and map_id is not None:
+        calibration.update({
+            "version": 1, "map_id": str(map_id), "units": "m",
+            "image_width": W, "image_height": H,
+            "pixels_per_metre": scale, "padding": PAD,
+            "min_x": min_x, "max_y": max_y,
+            "image_sha256": hashlib.sha256(image).hexdigest(),
+        })
+    return image
 
 
 # Optional layers do not change the canvas dimensions or coordinate transform.

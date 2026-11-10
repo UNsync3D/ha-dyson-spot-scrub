@@ -26,6 +26,7 @@ from .const import (
     DEFAULT_MODE,
     FAULT_CODE_MESSAGES,
 )
+from .zone_cleaning import rectangle_points, validate_map_id
 from .coordinator import DysonCoordinator
 from .entity_helpers import device_info
 from .dyson_mqtt import (
@@ -230,6 +231,32 @@ async def async_setup_entry(
             schema=_START_ROOMS_WITH_SETTINGS_SCHEMA,
         )
 
+    if not hass.services.has_service(DOMAIN, "clean_zone"):
+
+        async def _handle_clean_zone(call: ServiceCall) -> None:
+            coordinator = _get_target_coordinator(call)
+            _require_start_ready(coordinator)
+            try:
+                map_id = validate_map_id(call.data["map_id"])
+                rectangle_points(call.data["rectangle"])
+            except (ValueError, OverflowError) as exc:
+                raise HomeAssistantError(str(exc)) from exc
+            if str(coordinator.mqtt.state.get("persistentMapId")) != map_id:
+                raise HomeAssistantError("The selected map is no longer the robot's active map")
+            started = await hass.async_add_executor_job(
+                coordinator.mqtt.start_zone, map_id, call.data["rectangle"])
+            if not started:
+                raise HomeAssistantError("Could not send the zone start; check robot readiness and map")
+
+        hass.services.async_register(
+            DOMAIN, "clean_zone", _handle_clean_zone,
+            schema=vol.Schema({
+                vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+                vol.Required("map_id"): vol.Any(str, int),
+                vol.Required("rectangle"): list,
+            }),
+        )
+
 
 class DysonVacuumEntity(StateVacuumEntity):
     """Represents the Dyson Spot+Scrub AI robot vacuum."""
@@ -296,6 +323,7 @@ class DysonVacuumEntity(StateVacuumEntity):
         reason = start_block_reason(self._mqtt_state, self.available)
         attrs: dict[str, Any] = {
             "ready_to_start": reason is None,
+            "map_id": self._mqtt_state.get("persistentMapId"),
             "start_block_reason": reason,
         }
         if self._coordinator.mqtt:

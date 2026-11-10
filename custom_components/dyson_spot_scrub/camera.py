@@ -136,6 +136,7 @@ class DysonMapCamera(Camera):
         self._cleaning_listener = _CleaningStateListener(self)
         self._last_source: tuple | None = None
         self._last_image_options: dict | None = None
+        self._map_calibration: dict = {}
         self._path_history = PathHistory()
         self._path_codes: dict = {}
         self._observed_action: str | None = None
@@ -154,6 +155,7 @@ class DysonMapCamera(Camera):
         self._last_image = None
         self._last_source = None
         self._last_image_options = None
+        self._set_calibration({})
         self._path_history = PathHistory()
         self._path_codes = {}
         self._cleaning_finished_at = None
@@ -263,15 +265,29 @@ class DysonMapCamera(Camera):
         self._render_options = map_options(entry.options)
         self.async_write_ha_state()
 
-    async def _render_source(self, source: tuple) -> tuple[bytes, dict]:
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Calibration belongs to the exact PNG, and only to the active map."""
+        current = self._coordinator.mqtt.state.get("persistentMapId") if self._coordinator.mqtt else None
+        if current is None or self._map_calibration.get("map_id") != str(current):
+            return {}
+        return {"map_calibration": dict(self._map_calibration)}
+
+    def _set_calibration(self, calibration: dict) -> None:
+        if calibration != self._map_calibration:
+            self._map_calibration = calibration
+            self.async_write_ha_state()
+
+    async def _render_source(self, source: tuple) -> tuple[bytes, dict, dict]:
         """Render a stable option snapshot; changes during rendering retry locally."""
         while True:
             options = self._render_options
+            calibration = {}
             image = await self.hass.async_add_executor_job(
-                partial(render_map, raise_errors=True), *source, options
+                partial(render_map, raise_errors=True, calibration=calibration), *source, options
             )
             if options == self._render_options:
-                return image, options
+                return image, options, calibration
 
     async def _repaint_cached_image(self) -> None:
         """Repaint a retained/error-fallback frame without a cloud request.
@@ -285,7 +301,7 @@ class DysonMapCamera(Camera):
         generation = self._cleaning_generation
         cleaning_image = self._last_cleaning_image
         try:
-            image, options = await self._render_source(source)
+            image, options, calibration = await self._render_source(source)
         except Exception as exc:
             _LOGGER.warning("[%s] Map options repaint failed: %s", self._serial, exc)
             return
@@ -294,6 +310,7 @@ class DysonMapCamera(Camera):
         if generation != self._cleaning_generation:
             return
         self._last_image, self._last_image_options = image, options
+        self._set_calibration(calibration)
         if cleaning_image is not None:
             self._last_cleaning_image = image
 
@@ -451,7 +468,7 @@ class DysonMapCamera(Camera):
             return retained or self._last_image
         try:
             source = deepcopy((patched_map, self._metadata, live_data))
-            image_bytes, options = await self._render_source(source)
+            image_bytes, options, calibration = await self._render_source(source)
             self._observe_cleaning_state()
             retained = self._retained_image()
             if generation != self._cleaning_generation or retained is not None:
@@ -459,6 +476,7 @@ class DysonMapCamera(Camera):
             self._last_image = image_bytes
             self._last_source = source
             self._last_image_options = options
+            self._set_calibration(calibration)
             if has_path and image_bytes:
                 self._last_cleaning_image = image_bytes
             return image_bytes
