@@ -34,7 +34,7 @@ from urllib.parse import quote
 import paho.mqtt.client as mqtt
 
 from .const import DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATTERN
-from .zone_cleaning import rectangle_points, validate_map_id
+from .zone_cleaning import validate_zone_strategy, rectangle_points, validate_map_id
 from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
 
 _LOGGER = logging.getLogger(__name__)
@@ -1137,7 +1137,7 @@ class DysonMqttClient:
 
     # ── Single-room clean ─────────────────────────────────────────────────────
 
-    def start_zone(self, map_id, rectangle) -> bool:
+    def start_zone(self, map_id, rectangle, cleaning_strategy="auto") -> bool:
         """Send one app-style vacuum zone start, without changing room preferences.
 
         Captured 8 November 2026: the cloud translates this legacy START into
@@ -1147,6 +1147,7 @@ class DysonMqttClient:
         try:
             map_id = validate_map_id(map_id)
             points = rectangle_points(rectangle)
+            cleaning_strategy = validate_zone_strategy(cleaning_strategy)
         except (ValueError, OverflowError):
             return False
         if not self._start_lock.acquire(blocking=False):
@@ -1171,7 +1172,7 @@ class DysonMqttClient:
                         "persistentMapId": map_id,
                         "spotZones": [{"id": "1", "points": points}],
                         "defaultSpotZoneSettings": {
-                            "waterLevel": "low", "cleaningStrategy": "auto",
+                            "waterLevel": "low", "cleaningStrategy": cleaning_strategy,
                             "mopPasses": 1, "isUvScanOn": True,
                             "cleanType": "vacuum", "dryPasses": 1,
                         },

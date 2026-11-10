@@ -24,3 +24,10 @@ def validate_map_id(value):
     if not value.isascii() or not value.isdecimal() or int(value) <= 0:
         raise ValueError("Map ID must be a positive integer or numeric string")
     return str(int(value))
+
+
+def validate_zone_strategy(value):
+    """Accept only power strings verified in app zone-start captures."""
+    if not isinstance(value, str) or value not in ("auto", "boost", "quiet", "quick"):
+        raise ValueError("Unsupported zone cleaning strategy")
+    return value

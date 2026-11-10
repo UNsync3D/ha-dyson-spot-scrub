@@ -92,3 +92,5 @@ certify a selected region is reachable or belongs to a room.
 
 Offline regression command: `python -m unittest discover -s tests -v`.
 Test data uses invented identifiers; no raw personal capture is included.
+
+The optional `cleaning_strategy` field accepts `auto` (default), `boost`, `quiet`, or `quick`, verified from app zone starts. Modes, water and pass counts remain fixed; no room settings are changed.

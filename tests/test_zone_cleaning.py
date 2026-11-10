@@ -34,6 +34,15 @@ class ZoneCommandTests(unittest.TestCase):
         })
         self.assertEqual(self.client._cached_preference, before)
 
+    def test_verified_power_and_invalid_values(self):
+        for strategy in ("auto", "boost", "quiet", "quick"):
+            self.assertTrue(self.client.start_zone("123", [0, 0, 1, 1], strategy))
+            self.assertEqual(self.sent[-1][1]["cleaningProgramme"]["defaultSpotZoneSettings"]["cleaningStrategy"], strategy)
+        count = len(self.sent)
+        for invalid in ("max", "mop", None, 1, [], "Boost"):
+            self.assertFalse(self.client.start_zone("123", [0, 0, 1, 1], invalid))
+        self.assertEqual(len(self.sent), count)
+
     def test_invalid_rectangles_and_stale_map_send_nothing(self):
         for rectangle in ([], [1, 2, 3], [0, 0, 0, 1], [2, 0, 1, 2],
                           [0, 0, float("nan"), 2], [0, 0, float("inf"), 2],
@@ -81,8 +90,10 @@ class ZoneServiceTests(unittest.TestCase):
             robot.mqtt.state["persistentMapId"] = "123"
             robot.mqtt.start_zone = Mock(return_value=True)
         self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1])
-        self.robots["two"].mqtt.start_zone.assert_called_once_with("123", [0, 0, 1, 1])
+        self.robots["two"].mqtt.start_zone.assert_called_once_with("123", [0, 0, 1, 1], "auto")
         self.robots["one"].mqtt.start_zone.assert_not_called()
+        self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1], cleaning_strategy="boost")
+        self.robots["two"].mqtt.start_zone.assert_called_with("123", [0, 0, 1, 1], "boost")
         for target, map_id, rectangle in [
             (["vacuum.robot_one", "vacuum.robot_two"], "123", [0, 0, 1, 1]),
             (["vacuum.robot_one"], "456", [0, 0, 1, 1]),

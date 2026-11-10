@@ -26,7 +26,7 @@ from .const import (
     DEFAULT_MODE,
     FAULT_CODE_MESSAGES,
 )
-from .zone_cleaning import rectangle_points, validate_map_id
+from .zone_cleaning import validate_zone_strategy, rectangle_points, validate_map_id
 from .coordinator import DysonCoordinator
 from .entity_helpers import device_info
 from .dyson_mqtt import (
@@ -239,12 +239,13 @@ async def async_setup_entry(
             try:
                 map_id = validate_map_id(call.data["map_id"])
                 rectangle_points(call.data["rectangle"])
+                strategy = validate_zone_strategy(call.data.get("cleaning_strategy", "auto"))
             except (ValueError, OverflowError) as exc:
                 raise HomeAssistantError(str(exc)) from exc
             if str(coordinator.mqtt.state.get("persistentMapId")) != map_id:
                 raise HomeAssistantError("The selected map is no longer the robot's active map")
             started = await hass.async_add_executor_job(
-                coordinator.mqtt.start_zone, map_id, call.data["rectangle"])
+                coordinator.mqtt.start_zone, map_id, call.data["rectangle"], strategy)
             if not started:
                 raise HomeAssistantError("Could not send the zone start; check robot readiness and map")
 
@@ -254,6 +255,7 @@ async def async_setup_entry(
                 vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
                 vol.Required("map_id"): vol.Any(str, int),
                 vol.Required("rectangle"): list,
+                vol.Optional("cleaning_strategy"): validate_zone_strategy,
             }),
         )
 
