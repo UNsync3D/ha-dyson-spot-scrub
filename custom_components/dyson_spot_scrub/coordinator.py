@@ -83,8 +83,13 @@ class DysonCoordinator:
         # Rooms whose switch entity is toggled ON (for sequential clean)
         self.enabled_rooms: set[str] = set()
 
-        # Sequential cleaning task — retained so stop/return_to_base can cancel it
+        # Sequential cleaning task — retained so stop/return_to_base can cancel it.
+        # Only one sequence runs at a time (async_start_sequential), and only
+        # the task that owns this slot may clear it (#42).
         self._cleaning_task: asyncio.Task | None = None
+        # Bumped by Stop, Home and shutdown. A sequence started before the
+        # bump never starts another room, even if it was somehow not cancelled.
+        self._stop_generation: int = 0
 
         # Last MQTT state snapshot — captured on the paho thread and applied on the
         # HA event loop so fast transitions (e.g. FINISHED → RUNNING) are never lost.
@@ -467,6 +472,7 @@ class DysonCoordinator:
 
     async def _async_cancel_cleaning_task(self) -> None:
         """Cancel any in-flight sequential room-cleaning task."""
+        self._stop_generation += 1
         task = self._cleaning_task
         if task and not task.done():
             task.cancel()
@@ -474,7 +480,31 @@ class DysonCoordinator:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
-        self._cleaning_task = None
+        if self._cleaning_task is task:
+            self._cleaning_task = None
+
+    @property
+    def sequence_running(self) -> bool:
+        """True while a sequential room clean is scheduled or running."""
+        return self._cleaning_task is not None and not self._cleaning_task.done()
+
+    @callback
+    def async_start_sequential(self, room_names: list[str]) -> str | None:
+        """Schedule a sequential room clean; return why not, or None when scheduled.
+
+        The only entry point for the Start button and the clean_rooms action.
+        Runs on the event loop with no await, so the check, the generation
+        snapshot and claiming the slot happen together: a second request can't
+        slip in, and a Stop pressed before the task first runs still applies.
+        """
+        if not room_names:
+            return "no_rooms"
+        if self.sequence_running:
+            return "sequence_running"
+        task = self.hass.async_create_task(
+            self.async_clean_rooms_sequential(list(room_names), self._stop_generation))
+        self._cleaning_task = task
+        return None
 
     async def async_stop(self) -> None:
         """Stop cleaning and cancel any sequential room task (P1 #2)."""
@@ -499,19 +529,37 @@ class DysonCoordinator:
             return self.mqtt.room_names
         return self.cached_room_names
 
-    async def async_clean_rooms_sequential(self, room_names: list[str]) -> None:
-        """Clean a list of rooms one at a time, waiting for docking between each."""
+    async def async_clean_rooms_sequential(
+        self, room_names: list[str], generation: int | None = None,
+    ) -> None:
+        """Clean a list of rooms one at a time, waiting for docking between each.
+
+        Schedule it with async_start_sequential(), which claims the task slot.
+        """
         if not room_names:
             return
+        current = asyncio.current_task()
+        if self._cleaning_task not in (None, current) and not self._cleaning_task.done():
+            _LOGGER.warning("[%s] Sequential clean not started: another sequence is running",
+                            self.serial)
+            return
+        if generation is None:
+            generation = self._stop_generation
         reason = start_block_reason(self.mqtt.state if self.mqtt else {}, bool(self.mqtt and self.mqtt.available))
         if reason:
             _LOGGER.warning("Sequential clean blocked: %s", reason)
+            if self._cleaning_task is current:
+                self._cleaning_task = None
             return
         # P1 #2: record this task so stop/return_to_base can cancel it
-        self._cleaning_task = asyncio.current_task()
+        self._cleaning_task = current
         try:
             _LOGGER.info("[%s] Sequential clean starting — rooms: %s", self.serial, room_names)
             for room in room_names:
+                if generation != self._stop_generation:
+                    _LOGGER.info("[%s] Sequential clean stopped by Stop/Home before %r",
+                                 self.serial, room)
+                    return
                 if not self.mqtt or not self.mqtt.available:
                     _LOGGER.warning("[%s] robot not reachable — aborting sequential clean", self.serial)
                     return
@@ -526,6 +574,12 @@ class DysonCoordinator:
                     )
                     return
                 completed = await self._async_wait_for_clean_complete()
+                if completed == "aborted":
+                    _LOGGER.info(
+                        "[%s] Sequential clean ended: %r was stopped outside Home "
+                        "Assistant (app or robot)", self.serial, room,
+                    )
+                    return
                 if not completed:
                     _LOGGER.warning(
                         "[%s] Sequential clean aborted: timed out waiting for %r to dock",
@@ -534,20 +588,26 @@ class DysonCoordinator:
                     return
             _LOGGER.info("[%s] Sequential clean finished all rooms", self.serial)
         finally:
-            self._cleaning_task = None
+            if self._cleaning_task is current:
+                self._cleaning_task = None
 
-    async def _async_wait_for_clean_complete(self, timeout: float = 3600.0) -> bool:
+    async def _async_wait_for_clean_complete(self, timeout: float = 3600.0) -> bool | str:
         """Wait until the robot returns to dock after cleaning.
 
         Require both a completion state and new-job readiness. Charging alone
         can precede the end of station work. Drying after a completed job may
         be interrupted by the next room; mid-job charging remains blocked.
+
+        Returns True when the room finished, "aborted" (truthy) when the clean
+        was stopped - FULL_CLEAN_ABORTED, seen when the app or robot stops it
+        (R2 capture, 8 Nov 2026) - and False on timeout.
         """
         done_event: asyncio.Event = asyncio.Event()
         cleaning_started = False
+        aborted = False
 
         def _check() -> None:
-            nonlocal cleaning_started
+            nonlocal cleaning_started, aborted
             if not self.mqtt:
                 # Client torn down (shutdown/reconnect). Returning "complete"
                 # lets the loop's own connected-check abort the sequence.
@@ -556,6 +616,10 @@ class DysonCoordinator:
             state = self.state  # snapshot — already on HA event loop
             if is_any_cleaning(state):
                 cleaning_started = True
+            elif state.get("state") == "FULL_CLEAN_ABORTED":
+                # Stopped, not finished: end the sequence, don't start the next room.
+                aborted = True
+                done_event.set()
             elif (cleaning_started and state.get("state") in _CLEAN_COMPLETE_ROBOT_STATES
                   and start_block_reason(state, self.mqtt.available) is None):
                 done_event.set()
@@ -570,7 +634,7 @@ class DysonCoordinator:
         self.async_add_listener(watcher)
         try:
             await asyncio.wait_for(done_event.wait(), timeout=timeout)
-            return True
+            return "aborted" if aborted else True
         except asyncio.TimeoutError:
             _LOGGER.warning("[%s] Timed out waiting for robot to dock", self.serial)
             return False
