@@ -115,7 +115,7 @@ cancel_drying:
 
 clean_zone:
   name: Clean zone (experimental)
-  description: Vacuum one rectangle on the currently active map, using selectable vacuum power and one pass. Does not change room preferences.
+  description: Clean one rectangle on the active map with per-zone settings. Experimental; does not change room preferences.
   fields:
     entity_id:
       name: Dyson vacuum
@@ -147,3 +147,42 @@ clean_zone:
             - boost
             - quiet
             - quick
+
+    clean_type:
+      name: Cleaning mode
+      description: Defaults to vacuum. Captured on Spot+Scrub AI; other models need testing.
+      selector:
+        select:
+          options:
+            - vacuum
+            - vacuumAndMop
+            - mop
+            - vacuumThenMop
+    water_level:
+      name: Water level
+      description: Defaults to low. Only relevant for modes that mop.
+      selector:
+        select:
+          options:
+            - veryLow
+            - low
+            - medium
+            - high
+    mop_passes:
+      name: Mop passes
+      description: Defaults to 1. Two passes with vacuumThenMop are experimental and need hardware confirmation.
+      selector:
+        number:
+          min: 1
+          max: 2
+          step: 1
+          mode: box
+    dry_passes:
+      name: Vacuum passes
+      description: Defaults to 1. Two vacuum passes are experimental for zone cleaning.
+      selector:
+        number:
+          min: 1
+          max: 2
+          step: 1
+          mode: box

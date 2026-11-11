@@ -1,11 +1,13 @@
 # Experimental zone cleaning
 
-This test branch adds `dyson_spot_scrub.clean_zone` and camera calibration for a
-future draggable-rectangle UI. It does not add that UI to the Lovelace card yet.
+This test branch adds `dyson_spot_scrub.clean_zone` and camera calibration for
+one draggable rectangle in the matching Lovelace card test branch.
 
-The first prototype supports **one axis-aligned rectangle, Vacuum, Auto power,
-one pass**. The command follows the Spot+Scrub AI app capture from 8 November
-2026. Other models and actual robot behaviour still need hardware testing.
+All four cleaning modes, four power levels and four water levels follow
+Spot+Scrub AI app captures from 8–11 November 2026. Other models still need
+hardware testing. Two mop passes are captured for Mop and Vacuum and Mop.
+Two passes for Vacuum then Mop and vacuum-only zone cleaning are experimental;
+a valid outgoing payload does not prove that the robot executes both passes.
 Existing room actions and saved room preferences are unchanged.
 
 ## Action contract
@@ -18,6 +20,22 @@ All three fields are required:
 | `map_id` | Positive numeric string | Must match the robot's current `persistentMapId` |
 | `rectangle` | `[x_min, y_min, x_max, y_max]` | Finite numeric robot coordinates in metres; width and height must be positive |
 
+Optional settings (omitting them preserves the original vacuum-only defaults):
+
+| Field | Accepted values | Default |
+| --- | --- | --- |
+| `clean_type` | `vacuum`, `vacuumAndMop`, `mop`, `vacuumThenMop` | `vacuum` |
+| `cleaning_strategy` | `auto`, `boost`, `quiet`, `quick` | `auto` |
+| `water_level` | `veryLow`, `low`, `medium`, `high` | `low` |
+| `mop_passes` | Integer 1 or 2 | 1 |
+| `dry_passes` | Integer 1 or 2 | 1 |
+
+The counts are independent. The card's repetitions control changes `dry_passes`
+for vacuum-only mode, otherwise `mop_passes`, keeping the other count at 1.
+In particular, the experimental two-pass Vacuum then Mop request means one
+vacuum pass followed by two requested mop passes.
+
+
 The vacuum exposes its current map as the `map_id` attribute. A map change
 rejects an old selection; this action does not switch maps or relocate the robot.
 Normal start-readiness checks apply, including offline, returning, washing and
@@ -26,9 +44,8 @@ Concurrent start preparation is rejected using the existing start lock.
 
 The integration sends **one** legacy `START` with
 `cleaningMode: spotZoneConfigured`. Its `cleaningProgramme` contains the map ID,
-one `spotZones` entry, and `defaultSpotZoneSettings`. The app-captured defaults
-are retained (`waterLevel: low`, `mopPasses: 1`, `isUvScanOn: true`) even though
-the requested `cleanType` is `vacuum`; they are not exposed as prototype options.
+one `spotZones` entry, and `defaultSpotZoneSettings` containing the chosen values.
+`isUvScanOn: true` remains the captured constant; no UV control is inferred.
 The cloud generated `service.set_areas_start` in the capture, so the integration
 does not send a second JDM start or write room preferences.
 
@@ -79,12 +96,12 @@ certify a selected region is reachable or belongs to a room.
 1. Install this branch and restart Home Assistant. Open the floor-map camera so
    it renders a frame. Check `map_calibration` on the camera and `map_id` on the
    vacuum in Developer tools → States.
-2. Select a small known area from that calibrated image. The forthcoming card
-   UI will do the conversion; until then use verified robot coordinates.
+2. Select a small known area from that calibrated image. The matching card
+   test branch performs the conversion.
 3. In Developer tools → Actions, run `dyson_spot_scrub.clean_zone`, targeting
    your vacuum and supplying that map ID and rectangle. Do not copy arbitrary
    example coordinates from another home.
-4. Confirm one start announcement, vacuum-only operation in the selected area,
+4. Confirm one start announcement, the requested mode and passes in the selected area,
    and unchanged room settings. Capture debug messages around the action and
    subsequent robot telemetry for comparison with the app.
 5. Check that the existing room clean, return-to-dock and drying controls still
@@ -93,4 +110,13 @@ certify a selected region is reachable or belongs to a room.
 Offline regression command: `python -m unittest discover -s tests -v`.
 Test data uses invented identifiers; no raw personal capture is included.
 
-The optional `cleaning_strategy` field accepts `auto` (default), `boost`, `quiet`, or `quick`, verified from app zone starts. Modes, water and pass counts remain fixed; no room settings are changed.
+## Capture evidence
+
+The 11 November capture contains eight Vacuum and Mop START requests, each
+followed by its cloud-generated JDM command. `cleanType: vacuumAndMop` maps to
+mode 1; power auto/quick/quiet/boost maps to wind 0/3/2/1; water
+veryLow/low/medium/high maps to 99/0/1/2. Mop passes 1/2 map to clean_count 0/1.
+A second capture confirms mop (mode 2, two passes) and vacuumThenMop (mode 3,
+one pass). Errors deliberately prevented execution: these captures verify the
+command encoding, not completed cleaning runs. No personal identifiers or raw
+capture files are included here.

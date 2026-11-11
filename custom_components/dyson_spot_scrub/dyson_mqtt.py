@@ -34,7 +34,8 @@ from urllib.parse import quote
 import paho.mqtt.client as mqtt
 
 from .const import DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATTERN
-from .zone_cleaning import validate_zone_strategy, rectangle_points, validate_map_id
+from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
+                            validate_zone_mode, validate_zone_water, validate_zone_passes)
 from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
 
 _LOGGER = logging.getLogger(__name__)
@@ -1137,8 +1138,9 @@ class DysonMqttClient:
 
     # ── Single-room clean ─────────────────────────────────────────────────────
 
-    def start_zone(self, map_id, rectangle, cleaning_strategy="auto") -> bool:
-        """Send one app-style vacuum zone start, without changing room preferences.
+    def start_zone(self, map_id, rectangle, cleaning_strategy="auto",
+                   clean_type="vacuum", water_level="low", mop_passes=1, dry_passes=1) -> bool:
+        """Send one app-style zone start, without changing room preferences.
 
         Captured 8 November 2026: the cloud translates this legacy START into
         service.set_areas_start. Sending both would risk a duplicate start.
@@ -1148,6 +1150,10 @@ class DysonMqttClient:
             map_id = validate_map_id(map_id)
             points = rectangle_points(rectangle)
             cleaning_strategy = validate_zone_strategy(cleaning_strategy)
+            clean_type = validate_zone_mode(clean_type)
+            water_level = validate_zone_water(water_level)
+            mop_passes = validate_zone_passes(mop_passes)
+            dry_passes = validate_zone_passes(dry_passes)
         except (ValueError, OverflowError):
             return False
         if not self._start_lock.acquire(blocking=False):
@@ -1172,9 +1178,9 @@ class DysonMqttClient:
                         "persistentMapId": map_id,
                         "spotZones": [{"id": "1", "points": points}],
                         "defaultSpotZoneSettings": {
-                            "waterLevel": "low", "cleaningStrategy": cleaning_strategy,
-                            "mopPasses": 1, "isUvScanOn": True,
-                            "cleanType": "vacuum", "dryPasses": 1,
+                            "waterLevel": water_level, "cleaningStrategy": cleaning_strategy,
+                            "mopPasses": mop_passes, "isUvScanOn": True,
+                            "cleanType": clean_type, "dryPasses": dry_passes,
                         },
                     },
                 })

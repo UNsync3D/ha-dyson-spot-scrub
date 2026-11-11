@@ -26,7 +26,8 @@ from .const import (
     DEFAULT_MODE,
     FAULT_CODE_MESSAGES,
 )
-from .zone_cleaning import validate_zone_strategy, rectangle_points, validate_map_id
+from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
+                            validate_zone_mode, validate_zone_water, validate_zone_passes)
 from .coordinator import DysonCoordinator
 from .entity_helpers import device_info
 from .dyson_mqtt import (
@@ -242,12 +243,17 @@ async def async_setup_entry(
                 map_id = validate_map_id(call.data["map_id"])
                 rectangle_points(call.data["rectangle"])
                 strategy = validate_zone_strategy(call.data.get("cleaning_strategy", "auto"))
+                mode = validate_zone_mode(call.data.get("clean_type", "vacuum"))
+                water = validate_zone_water(call.data.get("water_level", "low"))
+                mop_passes = validate_zone_passes(call.data.get("mop_passes", 1))
+                dry_passes = validate_zone_passes(call.data.get("dry_passes", 1))
             except (ValueError, OverflowError) as exc:
                 raise HomeAssistantError(str(exc)) from exc
             if str(coordinator.mqtt.state.get("persistentMapId")) != map_id:
                 raise HomeAssistantError("The selected map is no longer the robot's active map")
             started = await hass.async_add_executor_job(
-                coordinator.mqtt.start_zone, map_id, call.data["rectangle"], strategy)
+                coordinator.mqtt.start_zone, map_id, call.data["rectangle"], strategy,
+                mode, water, mop_passes, dry_passes)
             if not started:
                 raise HomeAssistantError("Could not send the zone start; check robot readiness and map")
 
@@ -258,6 +264,10 @@ async def async_setup_entry(
                 vol.Required("map_id"): vol.Any(str, int),
                 vol.Required("rectangle"): list,
                 vol.Optional("cleaning_strategy"): validate_zone_strategy,
+                vol.Optional("clean_type"): validate_zone_mode,
+                vol.Optional("water_level"): validate_zone_water,
+                vol.Optional("mop_passes"): validate_zone_passes,
+                vol.Optional("dry_passes"): validate_zone_passes,
             }),
         )
 

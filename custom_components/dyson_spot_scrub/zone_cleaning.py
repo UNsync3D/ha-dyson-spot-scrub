@@ -1,4 +1,4 @@
-"""Validated, single-rectangle vacuum prototype (robot coordinates in metres)."""
+"""Validated, single-rectangle zone cleaning (robot coordinates in metres)."""
 import math
 
 
@@ -31,3 +31,24 @@ def validate_zone_strategy(value):
     if not isinstance(value, str) or value not in ("auto", "boost", "quiet", "quick"):
         raise ValueError("Unsupported zone cleaning strategy")
     return value
+
+
+def validate_zone_mode(value):
+    """Accept the four cleanType strings captured from app zone starts."""
+    if not isinstance(value, str) or value not in ("vacuum", "vacuumAndMop", "mop", "vacuumThenMop"):
+        raise ValueError("Unsupported zone cleaning mode")
+    return value
+
+
+def validate_zone_water(value):
+    """Accept the four captured waterLevel strings."""
+    if not isinstance(value, str) or value not in ("veryLow", "low", "medium", "high"):
+        raise ValueError("Unsupported zone water level")
+    return value
+
+
+def validate_zone_passes(value):
+    """Keep independent dry/mop counts bounded, including experimental repeats."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value not in (1, 2):
+        raise ValueError("Zone passes must be 1 or 2")
+    return int(value)

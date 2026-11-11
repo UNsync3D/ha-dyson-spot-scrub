@@ -43,6 +43,23 @@ class ZoneCommandTests(unittest.TestCase):
             self.assertFalse(self.client.start_zone("123", [0, 0, 1, 1], invalid))
         self.assertEqual(len(self.sent), count)
 
+    def test_captured_mopping_settings_and_experimental_repeats(self):
+        for mode in ("vacuum", "vacuumAndMop", "mop", "vacuumThenMop"):
+            for water in ("veryLow", "low", "medium", "high"):
+                self.assertTrue(self.client.start_zone("123", [0, 0, 1, 1], "auto", mode, water, 2, 1))
+                settings = self.sent[-1][1]["cleaningProgramme"]["defaultSpotZoneSettings"]
+                self.assertEqual(settings, dict(waterLevel=water, cleaningStrategy="auto",
+                    cleanType=mode, mopPasses=2, dryPasses=1, isUvScanOn=True))
+        self.assertTrue(self.client.start_zone("123", [0, 0, 1, 1], "boost", "vacuum", "low", 1, 2))
+        settings = self.sent[-1][1]["cleaningProgramme"]["defaultSpotZoneSettings"]
+        self.assertEqual((settings["dryPasses"], settings["mopPasses"]), (2, 1))
+        count = len(self.sent)
+        for kwargs in (dict(clean_type="wash"), dict(water_level="off"),
+                       dict(mop_passes=True), dict(mop_passes=3), dict(dry_passes=0),
+                       dict(dry_passes="2"), dict(mop_passes=1.5)):
+            self.assertFalse(self.client.start_zone("123", [0, 0, 1, 1], **kwargs))
+        self.assertEqual(len(self.sent), count)
+
     def test_invalid_rectangles_and_stale_map_send_nothing(self):
         for rectangle in ([], [1, 2, 3], [0, 0, 0, 1], [2, 0, 1, 2],
                           [0, 0, float("nan"), 2], [0, 0, float("inf"), 2],
@@ -90,10 +107,13 @@ class ZoneServiceTests(unittest.TestCase):
             robot.mqtt.state["persistentMapId"] = "123"
             robot.mqtt.start_zone = Mock(return_value=True)
         self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1])
-        self.robots["two"].mqtt.start_zone.assert_called_once_with("123", [0, 0, 1, 1], "auto")
+        self.robots["two"].mqtt.start_zone.assert_called_once_with("123", [0, 0, 1, 1], "auto", "vacuum", "low", 1, 1)
         self.robots["one"].mqtt.start_zone.assert_not_called()
         self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1], cleaning_strategy="boost")
-        self.robots["two"].mqtt.start_zone.assert_called_with("123", [0, 0, 1, 1], "boost")
+        self.robots["two"].mqtt.start_zone.assert_called_with("123", [0, 0, 1, 1], "boost", "vacuum", "low", 1, 1)
+        self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1],
+                  clean_type="vacuumThenMop", water_level="high", mop_passes=2, dry_passes=1)
+        self.robots["two"].mqtt.start_zone.assert_called_with("123", [0, 0, 1, 1], "auto", "vacuumThenMop", "high", 2, 1)
         for target, map_id, rectangle in [
             (["vacuum.robot_one", "vacuum.robot_two"], "123", [0, 0, 1, 1]),
             (["vacuum.robot_one"], "456", [0, 0, 1, 1]),
