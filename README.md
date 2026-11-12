@@ -204,7 +204,7 @@ data:
 
 ### For dashboard card developers
 
-The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](START_READINESS.md) and [consumable sensors](CONSUMABLES.md).
+The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](docs/START_READINESS.md) and [consumable sensors](docs/CONSUMABLES.md).
 
 ---
 
