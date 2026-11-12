@@ -1,0 +1,36 @@
+{
+ "_source": "Spot+Scrub AI hardware test, 12 Nov 2026 (times UTC). Whole-home START sent from a test build; the robot's own button gives the same robot-side messages. Serial removed.",
+ "sent": {
+  "msg": "START",
+  "mode-reason": "RAPP",
+  "cleaningMode": "global",
+  "fullCleanType": "immediate",
+  "time": "2026-11-12T04:08:55Z"
+ },
+ "cloud_jdm": {
+  "method": "service.set_room_clean",
+  "params": {
+   "ctrl_value": 1,
+   "clean_type": 0,
+   "room_ids": []
+  }
+ },
+ "robot_event": {
+  "method": "event.startClean.post",
+  "params": {}
+ },
+ "robot_props": {
+  "work_mode": 36,
+  "status": 6,
+  "cleaning_area": 125,
+  "cleaning_time": 0
+ },
+ "current_state": {
+  "state": "FULL_CLEAN_RUNNING",
+  "currentCleaningMode": "global",
+  "defaultCleaningMode": "zoneConfigured",
+  "fullCleanAction": "VACUUMING_AND_MOPPING",
+  "dockState": "IDLE",
+  "persistentMapId": "1792911875"
+ }
+}

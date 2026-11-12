@@ -25,6 +25,13 @@ def is_nurovi_r2(entry) -> bool:
             or str(data.get(CONF_MQTT_PREFIX, "")).upper() == "RB07")
 
 
+def supports_whole_home(entry) -> bool:
+    """Whole-home clean: confirmed on the Spot+Scrub AI (804 / RB05) only."""
+    data = getattr(entry, "data", {}) or {}
+    return (str(data.get(CONF_PRODUCT_TYPE, "")) == "804"
+            or str(data.get(CONF_MQTT_PREFIX, "")).upper() == "RB05")
+
+
 def room_slug(room_name: str) -> str:
     """unique_id fragment for a room.
 

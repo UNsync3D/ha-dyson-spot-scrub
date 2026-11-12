@@ -112,3 +112,15 @@ cancel_drying:
         entity:
           integration: dyson_spot_scrub
           domain: vacuum
+
+clean_whole_home:
+  name: Clean whole home
+  description: Start a whole-home clean, the same as pressing the robot's own button. Room settings are not changed. Spot+Scrub AI only for now.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      required: true
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum

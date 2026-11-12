@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_SERIAL, MODE_TO_INT
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import dock_action_blocker, start_block_reason
-from .entity_helpers import device_info
+from .entity_helpers import device_info, supports_whole_home
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -23,12 +23,15 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([
+    entities: list[ButtonEntity] = [
         DysonStartButton(coordinator, entry),
         DysonEmptyBinButton(coordinator, entry),
         DysonWashMopButton(coordinator, entry),
         DysonDryMopButton(coordinator, entry),
-    ])
+    ]
+    if supports_whole_home(entry):
+        entities.append(DysonWholeHomeButton(coordinator, entry))
+    async_add_entities(entities)
 
 
 class DysonStartButton(ButtonEntity):
@@ -91,6 +94,37 @@ class DysonStartButton(ButtonEntity):
         await self.hass.async_add_executor_job(
             self._coordinator.mqtt.start_mode, mode_int
         )
+
+
+class DysonWholeHomeButton(ButtonEntity):
+    """Start a whole-home clean, like the robot's own button."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Clean Whole Home"
+    _attr_icon = "mdi:home-floor-a"
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_clean_whole_home"
+        self._attr_device_info = device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        self._coordinator.async_add_listener(self)
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._coordinator.async_remove_listener(self)
+
+    @callback
+    def async_write_ha_state(self) -> None:
+        super().async_write_ha_state()
+
+    @property
+    def available(self) -> bool:
+        return self._coordinator.mqtt is not None and self._coordinator.mqtt.available
+
+    async def async_press(self) -> None:
+        await self._coordinator.async_clean_whole_home()
 
 
 class DysonDockActionButton(ButtonEntity):
