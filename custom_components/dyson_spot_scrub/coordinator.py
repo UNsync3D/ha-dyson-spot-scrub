@@ -518,6 +518,22 @@ class DysonCoordinator:
         if self.mqtt and self.mqtt.available:
             await self.hass.async_add_executor_job(self.mqtt.return_to_base)
 
+    async def async_clean_whole_home(self) -> None:
+        """Start a whole-home clean; raise with the reason when it can't start."""
+        from homeassistant.exceptions import HomeAssistantError
+        if self.sequence_running:
+            raise HomeAssistantError("Cannot start a new clean: sequence running")
+        reason = start_block_reason(self.mqtt.state if self.mqtt else {},
+                                    bool(self.mqtt and self.mqtt.available))
+        if reason:
+            raise HomeAssistantError(f"Cannot start a new clean: {reason.replace('_', ' ')}")
+        if not self.mqtt.supports_whole_home:
+            raise HomeAssistantError(
+                "Whole-home cleaning isn't confirmed on this robot model yet")
+        started = await self.hass.async_add_executor_job(self.mqtt.start_whole_home)
+        if not started:
+            raise HomeAssistantError("Could not start the whole-home clean")
+
     @property
     def room_names(self) -> list[str]:
         """Live room names from MQTT, falling back to the names persisted at last run.

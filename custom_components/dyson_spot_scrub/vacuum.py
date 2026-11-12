@@ -174,6 +174,17 @@ async def async_setup_entry(
             raise HomeAssistantError("The selected Dyson vacuum is disconnected")
         return coordinator
 
+    if not hass.services.has_service(DOMAIN, "clean_whole_home"):
+
+        async def _handle_clean_whole_home(call: ServiceCall) -> None:
+            coordinator = _get_target_coordinator(call)
+            await coordinator.async_clean_whole_home()
+
+        hass.services.async_register(
+            DOMAIN, "clean_whole_home", _handle_clean_whole_home,
+            schema=vol.Schema({vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA}),
+        )
+
     if not hass.services.has_service(DOMAIN, SERVICE_CANCEL_DRYING):
 
         async def _handle_cancel_drying(call: ServiceCall) -> None:
