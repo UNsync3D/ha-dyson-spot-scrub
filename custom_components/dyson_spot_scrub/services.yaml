@@ -99,7 +99,6 @@ start_rooms_with_settings:
       selector:
         object:
 
-
 cancel_drying:
   name: Cancel drying
   description: Cancel mop roller drying for one connected Dyson vacuum. The dock state updates when the robot confirms the change.
@@ -112,6 +111,78 @@ cancel_drying:
         entity:
           integration: dyson_spot_scrub
           domain: vacuum
+
+clean_zone:
+  name: Clean zone (experimental)
+  description: Clean one rectangle on the active map with per-zone settings. Experimental; does not change room preferences.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      required: true
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
+    map_id:
+      name: Map ID
+      description: Active map ID from the vacuum or calibrated camera image. A different active map rejects the start.
+      required: true
+      selector:
+        text:
+    rectangle:
+      name: Rectangle
+      description: Four robot coordinates in metres, [x_min, y_min, x_max, y_max]. Not image pixels. Verify the area before starting.
+      required: true
+      selector:
+        object:
+    cleaning_strategy:
+      name: Vacuum power
+      description: Verified zone power setting. Defaults to auto.
+      selector:
+        select:
+          options:
+            - auto
+            - boost
+            - quiet
+            - quick
+    clean_type:
+      name: Cleaning mode
+      description: Defaults to vacuum. Captured on Spot+Scrub AI; other models need testing.
+      selector:
+        select:
+          options:
+            - vacuum
+            - vacuumAndMop
+            - mop
+            - vacuumThenMop
+    water_level:
+      name: Water level
+      description: Defaults to low. Only relevant for modes that mop.
+      selector:
+        select:
+          options:
+            - veryLow
+            - low
+            - medium
+            - high
+    mop_passes:
+      name: Mop passes
+      description: Defaults to 1. Two passes with vacuumThenMop are experimental and need hardware confirmation.
+      selector:
+        number:
+          min: 1
+          max: 2
+          step: 1
+          mode: box
+    dry_passes:
+      name: Vacuum passes
+      description: Defaults to 1. Two vacuum passes are experimental for zone cleaning.
+      selector:
+        number:
+          min: 1
+          max: 2
+          step: 1
+          mode: box
 
 clean_whole_home:
   name: Clean whole home
