@@ -34,6 +34,23 @@
   }
  ],
  [
+  "button",
+  "DysonWholeHomeButton",
+  "7VD-AU-ABC1234A_clean_whole_home",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
   "select",
   "DysonCleaningModeSelectEntity",
   "7VD-AU-ABC1234A_cleaning_mode",

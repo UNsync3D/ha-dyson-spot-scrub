@@ -533,6 +533,11 @@ class DysonMqttClient:
         """True for the R2 Nurovi (RB07), which has separate vacuum passes in [7]."""
         return str(self._prefix).upper() == "RB07"
 
+    @property
+    def supports_whole_home(self) -> bool:
+        """Whole-home START confirmed on the Spot+Scrub AI (RB05) only (12 Nov 2026)."""
+        return str(self._prefix).upper() == "RB05"
+
     def _rows_to_send(self, rooms: list[list]) -> list[list]:
         """Room rows as the app sends them: 11 values on the R2, unchanged otherwise."""
         if not self.splits_repetitions:
@@ -649,6 +654,38 @@ class DysonMqttClient:
         })
         self.request_current_state()
         return accepted
+
+    def start_whole_home(self) -> bool:
+        """Start a whole-home clean: the legacy global START.
+
+        Hardware test, 12 Nov 2026 (Spot+Scrub AI): the robot's own button
+        starts a clean reported as currentCleaningMode "global" (work_mode 36).
+        This START gives the same; Dyson's cloud turns it into
+        service.set_room_clean {ctrl_value: 1, clean_type: 0, room_ids: []}.
+        The MyDyson app has no whole-home button, so there is no app capture.
+        Room settings are not written. Never retried.
+        """
+        if not self.supports_whole_home:
+            _LOGGER.warning("[%s] Whole-home clean isn't confirmed on this model yet",
+                            self.serial)
+            return False
+        if not self._start_lock.acquire(blocking=False):
+            _LOGGER.warning("[%s] Cannot start: another start is pending", self.serial)
+            return False
+        try:
+            if not self._can_start_new_clean():
+                return False
+            if self.state.get("dockState") == "DRYING_MOP":
+                # As for room starts: the app stops roller drying first.
+                self._abort_dock_action()
+            _LOGGER.info("[%s] → START (whole home)", self.serial)
+            return self._publish({
+                "msg": "START", "mode-reason": "RAPP",
+                "cleaningMode": "global", "fullCleanType": "immediate",
+                "time": _now_iso(),
+            })
+        finally:
+            self._start_lock.release()
 
     def start_mode(self, mode: int | None) -> bool:
         """Start all rooms; mode 0-3 replaces each room's saved mode, None keeps it."""

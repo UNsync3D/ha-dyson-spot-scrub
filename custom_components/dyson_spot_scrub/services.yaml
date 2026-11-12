@@ -99,7 +99,6 @@ start_rooms_with_settings:
       selector:
         object:
 
-
 cancel_drying:
   name: Cancel drying
   description: Cancel mop roller drying for one connected Dyson vacuum. The dock state updates when the robot confirms the change.
@@ -136,7 +135,6 @@ clean_zone:
       required: true
       selector:
         object:
-
     cleaning_strategy:
       name: Vacuum power
       description: Verified zone power setting. Defaults to auto.
@@ -147,7 +145,6 @@ clean_zone:
             - boost
             - quiet
             - quick
-
     clean_type:
       name: Cleaning mode
       description: Defaults to vacuum. Captured on Spot+Scrub AI; other models need testing.
@@ -186,3 +183,15 @@ clean_zone:
           max: 2
           step: 1
           mode: box
+
+clean_whole_home:
+  name: Clean whole home
+  description: Start a whole-home clean, the same as pressing the robot's own button. Room settings are not changed. Spot+Scrub AI only for now.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      required: true
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
