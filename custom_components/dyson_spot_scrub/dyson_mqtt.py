@@ -538,6 +538,11 @@ class DysonMqttClient:
         """Whole-home START confirmed on the Spot+Scrub AI (RB05) only (12 Nov 2026)."""
         return str(self._prefix).upper() == "RB05"
 
+    @property
+    def supports_zone_clean(self) -> bool:
+        """Zone START captured and hardware-tested on the Spot+Scrub AI (RB05) only."""
+        return str(self._prefix).upper() == "RB05"
+
     def _rows_to_send(self, rooms: list[list]) -> list[list]:
         """Room rows as the app sends them: 11 values on the R2, unchanged otherwise."""
         if not self.splits_repetitions:
@@ -1192,6 +1197,9 @@ class DysonMqttClient:
             mop_passes = validate_zone_passes(mop_passes)
             dry_passes = validate_zone_passes(dry_passes)
         except (ValueError, OverflowError):
+            return False
+        if not self.supports_zone_clean:
+            _LOGGER.warning("[%s] Zone cleaning isn't confirmed on this model yet", self.serial)
             return False
         if not self._start_lock.acquire(blocking=False):
             return False

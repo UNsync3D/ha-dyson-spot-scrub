@@ -91,7 +91,9 @@ class ServiceTargetingTests(unittest.TestCase):
     def robot(self, connected=True, state=READY, starts=True):
         robot = self.Coordinator()
         robot.mqtt = SimpleNamespace(connected=connected, available=connected, state=dict(state),
-                                     start_room=Mock(return_value=starts))
+                                     start_room=Mock(return_value=starts),
+                                     supports_zone_clean=True)
+        robot.sequence_running = False
         robot.state = dict(state)
         robot.async_start_sequential = Mock(return_value=None)
         return robot

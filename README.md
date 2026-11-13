@@ -150,6 +150,7 @@ The choice resets to Room settings when Home Assistant restarts. The [Dyson Clea
 | `dyson_spot_scrub.clean_rooms` | Cleans several rooms one at a time, using the Vacuum Mode |
 | `dyson_spot_scrub.save_room_settings` | Saves several rooms' settings at once, without starting |
 | `dyson_spot_scrub.start_rooms_with_settings` | Starts the given rooms with the given settings (each room keeps its own mode) |
+| `dyson_spot_scrub.clean_zone` | Cleans one rectangle on the map with its own settings (Spot+Scrub AI) |
 | `dyson_spot_scrub.clean_whole_home` | Starts a whole-home clean, like the robot's own button (Spot+Scrub AI) |
 | `dyson_spot_scrub.cancel_drying` | Stops mop drying |
 
@@ -181,6 +182,18 @@ data:
       cleaning_mode: Vacuum then Mop
 ```
 
+`clean_zone` cleans one rectangle, like the MyDyson app's **Target** mode: the [Dyson Cleaning Planner Card](https://github.com/FutuRazor/dyson-cleaning-planner-card) lets you draw it on the map. The rectangle is in robot coordinates (metres), on the map the robot is using now. Optional settings are `clean_type` (`vacuum`, `vacuumAndMop`, `mop`, `vacuumThenMop`), `cleaning_strategy` (`auto`, `boost`, `quiet`, `quick`), `water_level` (`veryLow`, `low`, `medium`, `high`) and `mop_passes` (1 or 2; 2 repeats the clean for every cleaning mode). Room settings aren't changed. See [zone cleaning](docs/ZONE_CLEANING.md) for the details and the map calibration the card uses.
+
+```yaml
+action: dyson_spot_scrub.clean_zone
+data:
+  entity_id: vacuum.dyson_spot_scrub
+  map_id: "1234567890"
+  rectangle: [-1.5, 0.5, 1.0, 2.5]
+  clean_type: vacuumAndMop
+  water_level: medium
+```
+
 `clean_whole_home` starts the same whole-home clean as the button on the robot. The MyDyson app has no equivalent: there you select every room. It doesn't change any room settings. It's also available as the **Clean Whole Home** button. It's confirmed on the Spot+Scrub AI only so far; on the Dyson R2 Nurovi Wash+Dry it isn't offered yet.
 
 ```yaml
@@ -191,7 +204,7 @@ data:
 
 ### For dashboard card developers
 
-The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](START_READINESS.md) and [consumable sensors](CONSUMABLES.md).
+The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](docs/START_READINESS.md) and [consumable sensors](docs/CONSUMABLES.md).
 
 ---
 
