@@ -56,13 +56,32 @@ _ROBOT_TELEMETRY = {"CURRENT-STATE", "STATE-CHANGE"}
 # Fields that must never reach the log (seen in UPDATE-LOCAL-BROKER-CONFIG,
 # which the robot sends when it reconnects).
 _SECRET_FIELDS = {"localpwd", "password", "token", "secret"}
+# A clean ID's second half is the robot's serial in hexadecimal (seen in R1, R2
+# and Spot+Scrub AI logs, Nov 2026), so debug logs keep only the first block,
+# which still tells cleans apart: "1ebb0400-3438-…" → "1ebb0400-***".
+_CLEAN_ID_FIELDS = {"clean_id", "cleanid"}
+
+
+def _mask_clean_id(value):
+    if not isinstance(value, str):
+        return "***"
+    head = value.split("-", 1)[0]
+    return f"{head}-***" if head and head != value else "***"
 
 
 def _redact(data):
-    """Copy of a payload with secret fields masked, for debug logging."""
+    """Copy of a payload with secret fields and clean IDs masked, for debug logging."""
     if isinstance(data, dict):
-        return {k: ("***" if str(k).lower() in _SECRET_FIELDS else _redact(v))
-                for k, v in data.items()}
+        out = {}
+        for k, v in data.items():
+            key = str(k).lower()
+            if key in _SECRET_FIELDS:
+                out[k] = "***"
+            elif key in _CLEAN_ID_FIELDS:
+                out[k] = _mask_clean_id(v)
+            else:
+                out[k] = _redact(v)
+        return out
     if isinstance(data, list):
         return [_redact(v) for v in data]
     return data
