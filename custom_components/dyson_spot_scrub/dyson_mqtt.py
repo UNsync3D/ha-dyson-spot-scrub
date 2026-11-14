@@ -33,7 +33,8 @@ from urllib.parse import quote
 
 import paho.mqtt.client as mqtt
 
-from .const import DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATTERN
+from .const import (DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATTERN,
+                    MOP_CONSUMABLES, MOP_STATE_FIELDS)
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
 from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
@@ -67,6 +68,25 @@ def _mask_clean_id(value):
         return "***"
     head = value.split("-", 1)[0]
     return f"{head}-***" if head and head != value else "***"
+
+
+def reports_mop(message: dict) -> bool | None:
+    """Whether one full CURRENT-STATE message shows a mop; None if it can't tell.
+
+    Judged on a single full message, never on merged state: some of these
+    fields are cleared on reconnect. The R1's CURRENT-STATE has none of the
+    mop fields and no mop consumable (13 Nov 2026); every Spot+Scrub AI and R2
+    message has them.
+    """
+    if not isinstance(message, dict) or "state" not in message:
+        return None
+    consumables = message.get("consumables")
+    if not isinstance(consumables, list):
+        return None
+    if any(field in message for field in MOP_STATE_FIELDS):
+        return True
+    kinds = {c.get("type") for c in consumables if isinstance(c, dict)}
+    return bool(kinds & MOP_CONSUMABLES)
 
 
 def _redact(data):
@@ -503,6 +523,8 @@ class DysonMqttClient:
         # second quick edit build on the first instead of reverting it. See
         # room_preferences_for_edit().
         self._pending_rooms: list | None = None
+        # Mop or not, from the latest full CURRENT-STATE; None until one arrives.
+        self.has_mop: bool | None = None
         # Serialises each complete read -> merge -> publish of room settings,
         # so overlapping edits (two selects, a select and a card batch save,
         # automations) each build on the previous one instead of on the same
@@ -1663,6 +1685,10 @@ class DysonMqttClient:
         if msg_type in _ROBOT_TELEMETRY and not self.robot_online:
             self._mark_robot_online()
         if msg_type in {"CURRENT-STATE", "STATE-CHANGE", "PRODUCT_INFO", "INITIAL_STATE"}:
+            if msg_type == "CURRENT-STATE":
+                mop = reports_mop(data)
+                if mop is not None:
+                    self.has_mop = mop
             self.state = {**self.state, **data}
             if "dockState" in data and data["dockState"] != "DRYING_MOP":
                 self._clear_drying_time()

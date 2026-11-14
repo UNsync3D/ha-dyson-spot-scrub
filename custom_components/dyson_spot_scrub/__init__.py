@@ -19,6 +19,7 @@ from .const import (
     ISSUES_URL,
 )
 from .coordinator import DysonCoordinator
+from .entity_helpers import has_mop, is_mop_only_entity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +98,16 @@ def _purge_orphan_entities(hass: HomeAssistant, entry: ConfigEntry, serial: str)
         if entity_id:
             _LOGGER.info("Removing obsolete entity %s", entity_id)
             reg.async_remove(entity_id)
+    if not has_mop(entry):
+        _purge_mop_entities(reg, entry, serial)
+
+
+def _purge_mop_entities(reg, entry: ConfigEntry, serial: str) -> None:
+    """Remove mop-only entities once the robot has said it has no mop."""
+    for ent in list(er.async_entries_for_config_entry(reg, entry.entry_id)):
+        if is_mop_only_entity(ent.unique_id, serial):
+            _LOGGER.info("Removing %s: this robot has no mop", ent.entity_id)
+            reg.async_remove(ent.entity_id)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
