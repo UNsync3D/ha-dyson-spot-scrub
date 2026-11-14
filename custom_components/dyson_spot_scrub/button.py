@@ -12,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .const import DOMAIN, CONF_SERIAL, MODE_TO_INT
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import dock_action_blocker, start_block_reason
-from .entity_helpers import device_info, supports_whole_home
+from .entity_helpers import device_info, has_mop, supports_whole_home
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,9 +26,9 @@ async def async_setup_entry(
     entities: list[ButtonEntity] = [
         DysonStartButton(coordinator, entry),
         DysonEmptyBinButton(coordinator, entry),
-        DysonWashMopButton(coordinator, entry),
-        DysonDryMopButton(coordinator, entry),
     ]
+    if has_mop(entry):               # no mop to wash or dry on the R1 (#49)
+        entities += [DysonWashMopButton(coordinator, entry), DysonDryMopButton(coordinator, entry)]
     if supports_whole_home(entry):
         entities.append(DysonWholeHomeButton(coordinator, entry))
     async_add_entities(entities)

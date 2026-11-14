@@ -133,6 +133,16 @@ COUNTRY_PATTERN     = r"[A-Z]{2}"
 # when MQTT hasn't connected yet (e.g. robot is drying or briefly offline).
 CONF_CACHED_ROOMS   = "cached_rooms"
 
+# Whether the robot has a mop, learnt from its first full CURRENT-STATE and
+# saved so entities are right from start-up (#49). Missing = assume a mop.
+# The Dyson R1 Nurovi Dry shares the R2's prefix (RB07) and product type (914),
+# so only what the robot reports tells them apart.
+CONF_HAS_MOP        = "has_mop"
+# CURRENT-STATE fields only robots with a mop report (Spot+Scrub AI and R2 always do).
+MOP_STATE_FIELDS = ("hotWaterMop", "hotWaterSwitch", "washMopBeforeClean",
+                    "airDryFrequency", "backWashType", "detergent")
+MOP_CONSUMABLES = frozenset({"mopRoller", "mopPad", "cleaningSolution"})
+
 # Cleaning mode names (displayed in HA)
 # "Room settings" leaves each room's own saved mode alone (no override).
 MODE_ROOM_SETTINGS   = "Room settings"
@@ -143,6 +153,8 @@ MODE_VACUUM_THEN_MOP = "Vacuum then Mop"
 
 CLEANING_MODES = [MODE_ROOM_SETTINGS, MODE_VACUUM, MODE_VACUUM_AND_MOP, MODE_MOP,
                   MODE_VACUUM_THEN_MOP]
+# For a robot without a mop (Dyson R1 Nurovi Dry, #49).
+CLEANING_MODES_NO_MOP = [MODE_ROOM_SETTINGS, MODE_VACUUM]
 
 MODE_TO_INT: dict[str, int] = {
     MODE_VACUUM:          0,

@@ -23,7 +23,10 @@ A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum
 |---|---|
 | **Dyson Spot+Scrub AI** | Supported and tested on hardware |
 | **Dyson R2 Nurovi Wash+Dry** | Supported, built from real R2 logs; owner testing welcome ([#32](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/32)) |
-| **Dyson R1 Nurovi Dry**, **Dyson R3 Nurovi Spot+Scrub UV** | Not yet supported, but can be added as **experimental**: owners wanted to help test ([#30](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30)) |
+| **Dyson R1 Nurovi Dry** | Supported as a vacuum-only robot, built from a real R1 log; owner testing welcome ([#31](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/31)) |
+| **Dyson R3 Nurovi Spot+Scrub UV** | Not yet supported, but can be added as **experimental**: owners wanted to help test ([#30](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30)) |
+
+A robot without a mop is recognised from its first status report. Home Assistant then reloads the integration once and hides the mop controls: station settings, Wash Mop and Dry Mop, the mop consumable, mop drying, and each room's Water Level. The cleaning modes become **Room settings** and **Vacuum**.
 
 ---
 
@@ -102,6 +105,7 @@ The usage sensors show how much of each part's life is **used** (the MyDyson app
 
 - **Spot+Scrub AI:** brush bar, mop roller, side brushes, robot filter and dock filter, plus **Cleaning solution** (OK or Refill required).
 - **R2 Nurovi Wash+Dry:** brush bar, **mop pad**, side brushes, robot filter and dock filter. The R2 has no cleaning solution.
+- **R1 Nurovi Dry:** brush bar, side brushes, robot filter and dock filter.
 
 ### Mop drying
 

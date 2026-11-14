@@ -22,6 +22,7 @@ from .const import (
     DOMAIN,
     CONF_SERIAL,
     CLEANING_MODES,
+    CLEANING_MODES_NO_MOP,
     MODE_TO_INT,
     DEFAULT_MODE,
     FAULT_CODE_MESSAGES,
@@ -29,7 +30,7 @@ from .const import (
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
 from .coordinator import DysonCoordinator
-from .entity_helpers import device_info
+from .entity_helpers import device_info, has_mop
 from .dyson_mqtt import (
     is_any_cleaning,
     is_docked,
@@ -297,6 +298,8 @@ class DysonVacuumEntity(StateVacuumEntity):
         self._entry         = entry
         self._serial        = entry.data[CONF_SERIAL]
         self._attr_unique_id = f"{self._serial}_vacuum"
+        if not has_mop(entry):      # Dyson R1 Nurovi Dry: vacuum only (#49)
+            self._attr_fan_speed_list = CLEANING_MODES_NO_MOP
 
         self._attr_device_info = device_info(entry)
 
@@ -420,7 +423,7 @@ class DysonVacuumEntity(StateVacuumEntity):
 
     async def async_set_fan_speed(self, fan_speed: str, **kwargs: Any) -> None:
         """Select a cleaning mode. If already cleaning, starts the new mode immediately."""
-        if fan_speed not in CLEANING_MODES:
+        if fan_speed not in self._attr_fan_speed_list:
             _LOGGER.warning("Unknown fan speed/mode: %s", fan_speed)
             return
         if is_any_cleaning(self._mqtt_state):
