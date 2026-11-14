@@ -223,3 +223,32 @@ class PurgeTests(unittest.TestCase):
                     "test_room_salon_cleaning_mode", "test_room_salon_mop_repetitions",
                     "test_cleaning_mode", "test_clean_whole_home", "other_wash_mop"):
             self.assertFalse(is_mop(uid, "test"), uid)
+
+
+class DockingFaultTests(unittest.TestCase):
+    """Fonsos's second R1 log (#31, 14 Nov 2026): it failed to dock twice."""
+    setUp = test_drying.DryingTests.setUp
+
+    STOPPED = {"state": "INACTIVE_DISCHARGING", "dockState": "IDLE", "persistentMapId": "65537",
+               "activeFaults": [{"faultCode": "5005", "nextActionRequired": "USER_CONTINUE"}]}
+    RETRYING = {"state": "ABORTED", "dockState": "IDLE", "persistentMapId": "65537",
+                "activeFaults": []}
+
+    def activity(self, state):
+        act = SimpleNamespace(ERROR="error", PAUSED="paused", CLEANING="cleaning",
+                              RETURNING="returning", DOCKED="docked", IDLE="idle")
+        with patch.object(self.vacuum, "VacuumActivity", act):
+            self.coord.state = state
+            return self.entities[0].activity
+
+    def test_5005_is_an_error_with_a_message(self):
+        const = importlib.import_module("drying_test_integration.const")
+        self.assertEqual(self.mqtt.active_fault_code(self.STOPPED), 5005)
+        self.assertEqual(const.FAULT_CODE_MESSAGES[5005], "Couldn't return to the dock")
+        self.assertEqual(self.activity(self.STOPPED), "error")
+        # Off the dock, so it isn't the stale on-dock case: starts stay blocked.
+        self.assertEqual(self.mqtt.start_block_reason(self.STOPPED), "robot_fault")
+
+    def test_aborted_is_returning(self):
+        self.assertEqual(self.activity(self.RETRYING), "returning")
+        self.assertEqual(self.mqtt.start_block_reason(self.RETRYING), "returning_or_finishing")

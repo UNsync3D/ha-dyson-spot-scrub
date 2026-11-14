@@ -329,7 +329,8 @@ class DysonVacuumEntity(StateVacuumEntity):
         if robot_state in RUNNING_STATES:
             return VacuumActivity.CLEANING
         # FULL_CLEAN_ABORTED: driving back after Home (R2 capture, Nov 2026).
-        if robot_state in {"RETURNING_TO_BASE", "MAPPING", "FULL_CLEAN_ABORTED"}:
+        # ABORTED: the R1 retrying the dock after a clean ended (#31, Nov 2026).
+        if robot_state in {"RETURNING_TO_BASE", "MAPPING", "FULL_CLEAN_ABORTED", "ABORTED"}:
             return VacuumActivity.RETURNING
         if is_charging(state):
             return VacuumActivity.DOCKED

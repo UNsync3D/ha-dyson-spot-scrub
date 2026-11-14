@@ -268,6 +268,9 @@ FAULT_CODE_MESSAGES: dict[int, str] = {
     2131: "Battery temperature too low",
     2132: "Battery temperature too high",
     2133: "Battery temperature too low",
+    # 5005: the R1 Nurovi Dry stopped off the dock after heading back to it,
+    # twice in one run (Fonsos's capture on #31, 14 Nov 2026). USER_CONTINUE.
+    5005: "Couldn't return to the dock",
     # ── 5-digit codes (R2 Nurovi) ─────────────────────────────────────────────────────
     # 22011: raised when a mopping clean starts with the dock's clean-water
     # tank removed (nordlead3's R2 capture, Nov 2026). USER_CONTINUE.
