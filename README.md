@@ -23,10 +23,10 @@ A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum
 |---|---|
 | **Dyson Spot+Scrub AI** | Supported and tested on hardware |
 | **Dyson R2 Nurovi Wash+Dry** | Supported, built from real R2 logs; owner testing welcome ([#32](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/32)) |
-| **Dyson R1 Nurovi Dry** | Supported as a vacuum-only robot, built from a real R1 log; owner testing welcome ([#31](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/31)) |
+| **Dyson R1 Nurovi Dry** | Supported as a vacuum-only robot, built from real R1 logs and tested by an owner ([#31](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/31)) |
 | **Dyson R3 Nurovi Spot+Scrub UV** | Supported: the same model as the Spot+Scrub AI (804), confirmed by an owner in the US ([#33](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/33)) |
 
-Other Dyson robots can still be added as **experimental** during setup; see [#30](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30) to help test one.
+Other Dyson robots can still be added as **experimental** during setup. To help support one, open a new issue with a debug log from one clean; [these steps](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/30) show how to capture it.
 
 A robot without a mop is recognised from its first status report. Home Assistant then reloads the integration once and hides the mop controls: station settings, Wash Mop and Dry Mop, the mop consumable, mop drying, and each room's Water Level. The cleaning modes become **Room settings** and **Vacuum**.
 
