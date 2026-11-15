@@ -442,6 +442,108 @@
   }
  ],
  [
+  "switch",
+  "DysonDeviceSettingSwitch",
+  "7VD-AU-ABC1234A_setting_child_lock",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonDeviceSettingSwitch",
+  "7VD-AU-ABC1234A_setting_do_not_disturb",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "time",
+  "DysonDoNotDisturbTime",
+  "7VD-AU-ABC1234A_setting_do_not_disturb_end",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "time",
+  "DysonDoNotDisturbTime",
+  "7VD-AU-ABC1234A_setting_do_not_disturb_start",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "switch",
+  "DysonDeviceSettingSwitch",
+  "7VD-AU-ABC1234A_setting_voice_prompts",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
+  "number",
+  "DysonVolumeNumber",
+  "7VD-AU-ABC1234A_setting_volume",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
   "button",
   "DysonStartButton",
   "7VD-AU-ABC1234A_start_button",

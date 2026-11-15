@@ -169,7 +169,10 @@ class PlatformTests(unittest.TestCase):
         return {e._attr_unique_id for e in entities if hasattr(e, "_attr_unique_id")}
 
     def test_switches(self):
-        self.assertEqual(self.ids(self.setup_platform("switch", entry(has_mop=False))), set())
+        # Only the robot's own settings (#50) stay; no mop station switches.
+        self.assertEqual(self.ids(self.setup_platform("switch", entry(has_mop=False))),
+                         {"test_setting_voice_prompts", "test_setting_child_lock",
+                          "test_setting_do_not_disturb"})
         self.assertTrue(any(u.startswith("test_station_")
                             for u in self.ids(self.setup_platform("switch", entry()))))
 
@@ -220,6 +223,8 @@ class PurgeTests(unittest.TestCase):
                     "test_wash_mop", "test_dry_mop", "test_room_salon_water_level"):
             self.assertTrue(is_mop(uid, "test"), uid)
         for uid in ("test_vacuum", "test_battery", "test_consumable_brush_bar_usage",
+                    "test_setting_voice_prompts", "test_setting_volume",
+                    "test_setting_do_not_disturb_start",
                     "test_room_salon_cleaning_mode", "test_room_salon_mop_repetitions",
                     "test_cleaning_mode", "test_clean_whole_home", "other_wash_mop"):
             self.assertFalse(is_mop(uid, "test"), uid)
