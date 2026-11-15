@@ -124,6 +124,47 @@ class ZoneServiceTests(unittest.TestCase):
         self.robots["one"].mqtt.start_zone.assert_not_called()
 
 
+class ZoneFollowUpTests(unittest.TestCase):
+    """Follow-up to #44: Spot+Scrub AI only, and never during a room sequence."""
+    setUp = targeting.ServiceTargetingTests.setUp
+    robot = targeting.ServiceTargetingTests.robot
+    call = targeting.ServiceTargetingTests.call
+
+    def ready(self):
+        for robot in self.robots.values():
+            robot.mqtt.state["persistentMapId"] = "123"
+            robot.mqtt.start_zone = Mock(return_value=True)
+
+    def test_unconfirmed_model_is_refused(self):
+        self.ready()
+        self.robots["two"].mqtt.supports_zone_clean = False
+        with self.assertRaises(self.HAError) as caught:
+            self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1])
+        self.assertIn("isn't confirmed", str(caught.exception))
+        self.robots["two"].mqtt.start_zone.assert_not_called()
+
+    def test_running_room_sequence_is_refused(self):
+        self.ready()
+        self.robots["two"].sequence_running = True
+        with self.assertRaises(self.HAError) as caught:
+            self.call("clean_zone", entity_id=["vacuum.robot_two"], map_id="123", rectangle=[0, 0, 1, 1])
+        self.assertIn("sequence running", str(caught.exception))
+        self.robots["two"].mqtt.start_zone.assert_not_called()
+
+
+class ZoneModelTests(unittest.TestCase):
+    setUp = rooms.RoomSettingsTests.setUp
+    publish = rooms.RoomSettingsTests.publish
+    reply = rooms.RoomSettingsTests.reply
+
+    def test_client_refuses_on_the_r2(self):
+        self.assertTrue(self.client.supports_zone_clean)
+        self.client._prefix = "RB07"
+        self.assertFalse(self.client.supports_zone_clean)
+        self.assertFalse(self.client.start_zone("123", [0, 0, 1, 1]))
+        self.assertEqual(self.sent, [])
+
+
 class ZoneCalibrationTests(unittest.TestCase):
     def test_round_trip_and_exact_png_dimensions(self):
         from PIL import Image

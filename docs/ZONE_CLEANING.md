@@ -1,14 +1,15 @@
-# Experimental zone cleaning
+# Zone cleaning
 
-This test branch adds `dyson_spot_scrub.clean_zone` and camera calibration for
-one draggable rectangle in the matching Lovelace card test branch.
+`dyson_spot_scrub.clean_zone` cleans one rectangle on the active map, like the
+MyDyson app's **Target** mode. The floor-map camera publishes a calibration so a
+card can turn a rectangle drawn on the map into robot coordinates, with no user
+calibration. The [Dyson Cleaning Planner Card](https://github.com/FutuRazor/dyson-cleaning-planner-card)
+uses both. Built and hardware-tested by FutuRazor (#39, #44).
 
 All four cleaning modes, four power levels and four water levels follow
-Spot+Scrub AI app captures from 8–11 November 2026. Other models still need
-hardware testing. Two mop passes are captured for Mop and Vacuum and Mop.
-Two passes for Vacuum then Mop and vacuum-only zone cleaning are experimental;
-a valid outgoing payload does not prove that the robot executes both passes.
-Existing room actions and saved room preferences are unchanged.
+Spot+Scrub AI app captures from 8–11 November 2026 and live runs. The action is
+offered on the **Spot+Scrub AI only** until an owner of another model confirms
+the same payload. Room actions and saved room settings are unchanged.
 
 ## Action contract
 
@@ -30,16 +31,17 @@ Optional settings (omitting them preserves the original vacuum-only defaults):
 | `mop_passes` | Integer 1 or 2 | 1 |
 | `dry_passes` | Integer 1 or 2 | 1 |
 
-The counts are independent. The card's repetitions control changes `dry_passes`
-for vacuum-only mode, otherwise `mop_passes`, keeping the other count at 1.
-In particular, the experimental two-pass Vacuum then Mop request means one
-vacuum pass followed by two requested mop passes.
+**Passes:** in hardware tests, `mop_passes: 2` repeats the clean for every
+cleaning mode: two passes in vacuum-only mode, and one vacuum pass followed by
+two mop passes with `vacuumThenMop`. `dry_passes: 2` had no effect, so leave it
+at 1. This matches the Spot+Scrub AI's room settings, where one passes setting
+covers every cleaning mode.
 
 
 The vacuum exposes its current map as the `map_id` attribute. A map change
 rejects an old selection; this action does not switch maps or relocate the robot.
 Normal start-readiness checks apply, including offline, returning, washing and
-emptying. Drying is cancelled before starting, using the existing command.
+emptying, and a zone is refused while a room sequence is running. Drying is cancelled before starting, using the existing command.
 Concurrent start preparation is rejected using the existing start lock.
 
 The integration sends **one** legacy `START` with
@@ -91,13 +93,13 @@ Calibration follows retained images and rendering failures; a map change or
 image reset clears it. This is geometry, not obstacle detection: it does not
 certify a selected region is reachable or belongs to a room.
 
-## First hardware test
+## Testing on hardware
 
-1. Install this branch and restart Home Assistant. Open the floor-map camera so
+1. Install the integration and restart Home Assistant. Open the floor-map camera so
    it renders a frame. Check `map_calibration` on the camera and `map_id` on the
    vacuum in Developer tools → States.
-2. Select a small known area from that calibrated image. The matching card
-   test branch performs the conversion.
+2. Select a small known area from that calibrated image. The card performs the
+   conversion.
 3. In Developer tools → Actions, run `dyson_spot_scrub.clean_zone`, targeting
    your vacuum and supplying that map ID and rectangle. Do not copy arbitrary
    example coordinates from another home.

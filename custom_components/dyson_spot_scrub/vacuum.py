@@ -249,6 +249,12 @@ async def async_setup_entry(
 
         async def _handle_clean_zone(call: ServiceCall) -> None:
             coordinator = _get_target_coordinator(call)
+            if not coordinator.mqtt.supports_zone_clean:
+                raise HomeAssistantError(
+                    "Zone cleaning isn't confirmed on this robot model yet")
+            # One clean at a time: never start a zone between a sequence's rooms (#42).
+            if coordinator.sequence_running:
+                raise HomeAssistantError("Cannot start a new clean: sequence running")
             _require_start_ready(coordinator)
             try:
                 map_id = validate_map_id(call.data["map_id"])
