@@ -141,5 +141,64 @@ class ClientTests(unittest.TestCase):
                          {"isOn": True, "startTime": "22:00", "endTime": "9:00"})
 
 
+class QuickChangeTests(unittest.TestCase):
+    """FutuRazor's test of v2.1.0b2 (#50): controls bounced back for a second."""
+    setUp = test_drying.DryingTests.setUp
+
+    def test_second_dnd_change_builds_on_the_first(self):
+        self.client.state["doNotDisturbMode"] = dict(DND)
+        with patch.object(self.client, "_publish_raw", return_value=True) as raw:
+            self.client.set_station_setting("do_not_disturb_start", time(23, 0))
+            self.client.set_station_setting("do_not_disturb_end", time(9, 0))   # before confirmation
+        self.assertEqual(raw.call_args.args[1]["params"],
+                         {"is_open": 1, "quiet_begin_time": 1380, "quiet_end_time": 540})
+
+    def test_quick_toggle_back_is_still_sent(self):
+        self.client.state["alarm"] = True
+        with patch.object(self.client, "_publish_raw", return_value=True) as raw:
+            self.client.set_station_setting("voice_prompts", False)
+            self.client.set_station_setting("voice_prompts", True)   # robot still reports True
+        self.assertEqual([c.args[1]["params"] for c in raw.call_args_list],
+                         [{"alarm": 0}, {"alarm": 1}])
+
+    def test_repeat_of_the_last_sent_value_is_not_resent(self):
+        self.client.state["volume"] = 50
+        with patch.object(self.client, "_publish_raw", return_value=True) as raw:
+            self.client.set_station_setting("volume", 60)
+            self.client.set_station_setting("volume", 60)
+        self.assertEqual(raw.call_count, 1)
+
+    def test_slider_shows_the_sent_value_until_confirmed(self):
+        class Entity:
+            async def async_added_to_hass(self): pass
+            async def async_will_remove_from_hass(self): pass
+        import asyncio
+        from types import SimpleNamespace
+        from test_drying import module
+        with patch.dict("sys.modules", {
+            "homeassistant.components.number": module("number", NumberEntity=Entity,
+                                                      NumberMode=SimpleNamespace(SLIDER="slider")),
+            "homeassistant.const": module("const", PERCENTAGE="%")}):
+            number = importlib.import_module("drying_test_integration.number")
+            station_entity = importlib.import_module("drying_test_integration.station_entity")
+            volume = number.DysonVolumeNumber(self.coord, self.entry, "volume", "Volume")
+            volume.hass = self.hass
+            self.client.state["volume"] = 50
+            with patch.object(self.client, "set_station_setting", return_value=True):
+                asyncio.run(volume.async_set_native_value(60))
+            self.assertEqual(volume.native_value, 60)
+            self.client.state["volume"] = 50          # an old status reply: no bounce
+            self.assertEqual(volume.native_value, 60)
+            self.client.state["volume"] = 60          # confirmed
+            self.assertEqual(volume.native_value, 60)
+            self.assertIsNone(volume._pending)
+            # Not confirmed within the window: the robot's value is shown.
+            with patch.object(self.client, "set_station_setting", return_value=True):
+                asyncio.run(volume.async_set_native_value(80))
+            later = station_entity.time.monotonic() + station_entity.PENDING_SECONDS + 1
+            with patch.object(station_entity.time, "monotonic", return_value=later):
+                self.assertEqual(volume.native_value, 60)
+
+
 if __name__ == "__main__":
     unittest.main()

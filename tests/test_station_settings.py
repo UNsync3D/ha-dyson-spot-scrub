@@ -107,7 +107,12 @@ class StationTests(unittest.TestCase):
             with patch.object(self.client, 'set_station_setting', return_value=True) as setter:
                 asyncio.run(entity.async_turn_on())
                 setter.assert_called_once_with('hot_water_mopping', True)
-                self.assertFalse(entity.is_on)
+                # Shown as sent until the robot confirms it (#50), never longer.
+                self.assertTrue(entity.is_on)
+                station_entity = importlib.import_module('drying_test_integration.station_entity')
+                later = station_entity.time.monotonic() + station_entity.PENDING_SECONDS + 1
+                with patch.object(station_entity.time, 'monotonic', return_value=later):
+                    self.assertFalse(entity.is_on)
             asyncio.run(entity.async_added_to_hass())
             asyncio.run(entity.async_will_remove_from_hass())
             self.coord.async_add_listener.assert_called_once_with(entity)

@@ -37,8 +37,8 @@ from .const import (DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATT
                     MOP_CONSUMABLES, MOP_STATE_FIELDS)
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
-from .station_settings import (JDM_METHODS, STATE_FIELDS, current_setting, setting_payloads,
-                               reported_properties)
+from .station_settings import (DND_FIELD, DND_KEYS, JDM_METHODS, STATE_FIELDS, current_setting,
+                               setting_payloads, reported_properties)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -69,6 +69,10 @@ def _mask_clean_id(value):
         return "***"
     head = value.split("-", 1)[0]
     return f"{head}-***" if head and head != value else "***"
+
+
+# How long a sent setting counts as the latest value before the robot confirms it.
+_SENT_FRESH_SECONDS = 5.0
 
 
 def reports_mop(message: dict) -> bool | None:
@@ -526,6 +530,10 @@ class DysonMqttClient:
         self._pending_rooms: list | None = None
         # Mop or not, from the latest full CURRENT-STATE; None until one arrives.
         self.has_mop: bool | None = None
+        # Last Do Not Disturb sent and when (monotonic), so a second quick
+        # change builds on the first before the robot has confirmed it (#50).
+        self._dnd_sent: tuple[dict, float] | None = None
+        self._settings_sent: dict[str, tuple] = {}   # key -> (value, monotonic)
         # Serialises each complete read -> merge -> publish of room settings,
         # so overlapping edits (two selects, a select and a card batch save,
         # automations) each build on the previous one instead of on the same
@@ -684,8 +692,16 @@ class DysonMqttClient:
         """
         if not self.available or current_setting(self.state, key) is None:
             return False
-        state_fields, props = setting_payloads(key, value, self.state)
-        if current_setting(self.state, key) == value:
+        # A change sent in the last few seconds may not be confirmed yet:
+        # compare with, and for Do Not Disturb build on, what was sent.
+        now = time.monotonic()
+        base = self.state
+        if key in DND_KEYS and self._dnd_sent and now - self._dnd_sent[1] < _SENT_FRESH_SECONDS:
+            base = {**self.state, DND_FIELD: self._dnd_sent[0]}
+        state_fields, props = setting_payloads(key, value, base)
+        sent = self._settings_sent.get(key)
+        latest = sent[0] if sent and now - sent[1] < _SENT_FRESH_SECONDS else current_setting(base, key)
+        if latest == value:
             return True
         if not self._publish({"msg": "STATE-SET", "mode-reason": "RAPP",
                               "time": _now_iso(), **state_fields}):
@@ -694,6 +710,9 @@ class DysonMqttClient:
             "msgId": _rand_msg_id(), "version": "1.0.1",
             "method": JDM_METHODS.get(key, "prop.set"), "params": props,
         })
+        self._settings_sent[key] = (value, now)
+        if key in DND_KEYS:
+            self._dnd_sent = (state_fields[DND_FIELD], now)
         self.request_current_state()
         return accepted
 
