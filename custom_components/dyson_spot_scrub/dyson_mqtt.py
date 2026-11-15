@@ -73,6 +73,9 @@ def _mask_clean_id(value):
 
 # How long a sent setting counts as the latest value before the robot confirms it.
 _SENT_FRESH_SECONDS = 5.0
+# After a setting change, ask for the robot's state only if it hasn't
+# confirmed the new value by then.
+_SETTING_CONFIRM_SECONDS = 3.0
 
 
 def reports_mop(message: dict) -> bool | None:
@@ -713,8 +716,21 @@ class DysonMqttClient:
         self._settings_sent[key] = (value, now)
         if key in DND_KEYS:
             self._dnd_sent = (state_fields[DND_FIELD], now)
-        self.request_current_state()
+        # No status request now: its reply can be a snapshot from just before
+        # the robot applied the change, arriving right after the robot's own
+        # prop.post confirmation (FutuRazor's log, #50). Ask only if the robot
+        # hasn't confirmed within a few seconds.
+        timer = threading.Timer(_SETTING_CONFIRM_SECONDS, self._check_setting_confirmed,
+                                args=(key, value))
+        timer.daemon = True
+        timer.start()
         return accepted
+
+    def _check_setting_confirmed(self, key: str, value) -> None:
+        if self._closing or not self.connected:
+            return
+        if current_setting(self.state, key) != value:
+            self.request_current_state()
 
     def start_whole_home(self) -> bool:
         """Start a whole-home clean: the legacy global START.

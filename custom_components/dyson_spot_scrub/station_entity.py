@@ -7,9 +7,9 @@ from .const import CONF_SERIAL
 from .entity_helpers import device_info
 from .station_settings import current_setting
 
-# How long a sent value is shown before the robot has confirmed it (#50).
-# A status reply can still carry the old value for about a second, which
-# made controls jump back before settling.
+# How long a sent value is shown after a change (#50). A status reply can
+# still carry the old value for a moment, even after the robot has confirmed
+# the new one, which made controls jump back before settling.
 PENDING_SECONDS = 5.0
 
 
@@ -51,12 +51,12 @@ class StationEntity:
         reported = current_setting(self._coordinator.state, self._setting_key)
         if self._pending is not None:
             value, deadline = self._pending
-            if reported is not None and reported == value:
-                self._pending = None            # confirmed
-            elif reported is not None and time.monotonic() < deadline:
-                return value                    # sent, not confirmed yet
-            else:
-                self._pending = None            # never confirmed: show the robot's value
+            # Held for the whole window, even after the robot confirms: an
+            # older status reply can still arrive just after the confirmation
+            # (FutuRazor's log, #50). Afterwards only the robot's value counts.
+            if reported is not None and time.monotonic() < deadline:
+                return value
+            self._pending = None
         return reported
 
     def _cancel_pending_timer(self):
