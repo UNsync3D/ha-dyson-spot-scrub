@@ -364,6 +364,9 @@ class DysonVacuumEntity(StateVacuumEntity):
         if self._coordinator.mqtt:
             state = self._coordinator.state
 
+            # Where the robot is now (#53); None when docked or unknown.
+            attrs["current_room"] = getattr(self._coordinator, "current_room", None)
+
             # Room list
             rooms = self._coordinator.mqtt.room_names
             if rooms:

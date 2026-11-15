@@ -188,7 +188,7 @@ class PlatformTests(unittest.TestCase):
         self.assertTrue(consumables <= r1)
         self.assertFalse({"test_consumable_mop_roller_usage", "test_consumable_mop_pad_usage",
                           "test_consumable_cleaning_solution", "test_drying_remaining"} & r1)
-        self.assertEqual(len(r1), len(consumables) + 1)      # plus the battery
+        self.assertEqual(r1 - consumables, {"test_battery", "test_current_room"})
         self.assertIn("test_drying_remaining", self.ids(self.setup_platform("sensor", entry())))
 
     def test_selects(self):

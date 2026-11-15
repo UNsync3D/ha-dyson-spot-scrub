@@ -78,6 +78,7 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Vacuum Start | `button` | Cleans the rooms selected with the room switches, one at a time, returning to the dock between rooms. With none selected, cleans the whole home |
 | Floor Map | `camera` | Live map of rooms, the cleaned path and the robot |
 | Battery | `sensor` | Battery percentage |
+| Current room | `sensor` | The room the robot is in, "Docked" on the dock. See [Current room](#current-room) |
 | Docked, Charging, Fault | `binary_sensor` | Robot on the dock, battery charging, error reported |
 
 **Rooms** (one set per room on the current map)
@@ -120,6 +121,27 @@ The usage sensors show how much of each part's life is **used** (the MyDyson app
 ### Mop drying
 
 While the dock dries the mop, **Mop drying time remaining** counts down, using times reported by the robot about once a minute. The `dyson_spot_scrub.cancel_drying` action, or the card's Cancel drying button, stops it.
+
+### Current room
+
+The robot doesn't report which room it's in, so the integration works it out from its position on the map and the room outlines. The **Current room** sensor shows the room's name, as on the room entities, while the robot is off the dock, and **Docked** on the dock. It updates about once a second while the robot moves, and the vacuum has the same value as its `current_room` attribute.
+
+Right after leaving the dock, while the robot is still finding its position, it shows the room the dock is in. Near a doorway it keeps the room the robot was in until the robot is properly inside the next one, so it doesn't flicker. It needs the map's room outlines: it fetches the map once if the Floor Map hasn't already.
+
+For example, to light the room the robot is cleaning:
+
+```yaml
+automation:
+  - alias: "Light the room the robot is in"
+    triggers:
+      - trigger: state
+        entity_id: sensor.dyson_robot_current_room   # use your Current room sensor
+        to: "Kitchen"
+    actions:
+      - action: light.turn_on
+        target:
+          entity_id: light.kitchen
+```
 
 ### Floor Map
 

@@ -499,13 +499,18 @@ class DysonMapCamera(Camera):
         try:
             _LOGGER.debug("[%s] Refreshing persistent map data", self._serial)
             session = self._coordinator.http_session
-            _, map_data = await get_current_map(self._token, self._serial, session=session)
+            current_map_id, map_data = await get_current_map(self._token, self._serial,
+                                                             session=session)
             metadata    = await get_map_metadata(self._token, self._serial, session=session)
             self._observe_cleaning_state()
             if generation != self._cleaning_generation:
                 return
             self._map_data  = map_data
             self._metadata  = metadata
+            # The same outlines tell which room the robot is in (#53).
+            set_outlines = getattr(self._coordinator, "set_room_outlines", None)
+            if set_outlines:
+                set_outlines(current_map_id, map_data)
             self._cache_ts  = time.monotonic()
             # Same metadata is the authoritative room list for the MQTT client.
             apply_inventory = getattr(self._coordinator, "apply_map_inventory", None)

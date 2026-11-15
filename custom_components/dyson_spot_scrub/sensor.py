@@ -36,6 +36,7 @@ async def async_setup_entry(
             DysonBatterySensor(coordinator, entry),
             *(DysonConsumableSensor(coordinator, entry, kind, key, name)
               for kind, key, name in CONSUMABLES if kind not in MOP_CONSUMABLES),
+            DysonCurrentRoomSensor(coordinator, entry),
         ])
         return
     async_add_entities([
@@ -45,6 +46,7 @@ async def async_setup_entry(
         # The R2 Nurovi has no cleaning solution (not in its consumables).
         *([] if r2 else [DysonCleaningSolutionSensor(coordinator, entry)]),
         DysonDryingCountdownSensor(coordinator, entry),
+        DysonCurrentRoomSensor(coordinator, entry),       # every model (#53)
     ])
 
 
@@ -219,3 +221,32 @@ class DysonDryingCountdownSensor(DysonBatterySensor):
         if updated_at is not None:
             attrs["updated_at"] = updated_at
         return attrs
+
+
+class DysonCurrentRoomSensor(DysonBatterySensor):
+    """The room the robot is in, worked out from its position on the map (#53).
+
+    Shows the room's name (as on the room entities) while the robot is off the
+    dock, "Docked" on the dock, and unknown until a position and the map's room
+    outlines are known. Updates about once a second while the robot moves.
+    """
+
+    _attr_name = "Current room"
+    _attr_icon = "mdi:map-marker"
+    _attr_device_class = None
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_current_room"
+
+    @property
+    def native_value(self) -> str | None:
+        if not self._coordinator.mqtt:
+            return None
+        return getattr(self._coordinator, "current_room_state", None)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"room_id": getattr(self._coordinator, "current_room_id", None)}

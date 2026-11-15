@@ -43,8 +43,9 @@ class ConsumableTests(unittest.TestCase):
         self.drying = self.entities[7]
 
     def test_registration_and_discovery_contract(self):
-        self.assertEqual(len(self.entities), 8)
-        self.assertEqual(len({e._attr_unique_id for e in self.entities}), 8)
+        self.assertEqual(len(self.entities), 9)          # with Current room (#53)
+        self.assertEqual(len({e._attr_unique_id for e in self.entities}), 9)
+        self.assertEqual(self.entities[8]._attr_unique_id, "TEST_current_room")
         self.assertEqual(self.drying._attr_unique_id, "TEST_drying_remaining")
         self.assertEqual(self.entities[0]._attr_unique_id, "TEST_battery")
         for sensor in self.usage:
@@ -124,7 +125,7 @@ class R2ConsumableTests(ConsumableTests):
         self.assertIn("mopPad", kinds)
         self.assertNotIn("mopRoller", kinds)
         self.assertNotIn("cleaningSolution", kinds)
-        self.assertEqual(len(self.entities), 7)
+        self.assertEqual(len(self.entities), 8)          # with Current room (#53)
         pad = next(e for e in self.entities
                    if getattr(e, "_attr_extra_state_attributes", {}).get("consumable_type") == "mopPad")
         self.assertEqual(pad._attr_unique_id, "TEST_consumable_mop_pad_usage")
