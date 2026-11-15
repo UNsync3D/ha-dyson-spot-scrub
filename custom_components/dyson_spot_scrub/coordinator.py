@@ -25,6 +25,7 @@ from .dyson_api import (
     get_map_metadata,
 )
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
+from .room_locator import latest_position, locate, room_outlines
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +42,14 @@ _CLEAN_COMPLETE_ROBOT_STATES: frozenset[str] = frozenset({"CHARGING", "INACTIVE_
 
 # Minimum seconds between upstream live-map API calls (shared across all viewers)
 _LIVE_MAP_MIN_INTERVAL = 5.0
+# Room outlines for the current room (#53): at most one map fetch this often.
+_OUTLINE_RETRY_SECONDS = 600.0
+
+
+def _docked(state: dict) -> bool:
+    """On the dock (dyson_mqtt.is_docked, imported late for the test stubs)."""
+    from .dyson_mqtt import is_docked
+    return is_docked(state)
 
 
 class DysonCoordinator:
@@ -110,6 +119,12 @@ class DysonCoordinator:
         self._live_map_backoff_until: float = 0.0
         self._live_map_lock: asyncio.Lock = asyncio.Lock()
         self._live_map_generation = 0
+        # Current room (#53): room outlines of one map, fetched when needed.
+        self._room_outlines: list | None = None
+        self._room_outlines_map: str | None = None
+        self._outline_fetch_at = -_OUTLINE_RETRY_SECONDS
+        self._outline_task = None
+        self.current_room_id: str | None = None
 
     # ── Setup / teardown ──────────────────────────────────────────────────────
 
@@ -461,10 +476,74 @@ class DysonCoordinator:
                          self.serial, "a mop" if reported else "no mop")
             self.hass.config_entries.async_schedule_reload(self._config_entry.entry_id)
 
+    # ── Current room (#53) ────────────────────────────────────────────────────
+
+    @property
+    def current_room(self) -> str | None:
+        """Name of the room the robot is in; None if docked or unknown."""
+        if self.current_room_id is None or self.mqtt is None:
+            return None
+        from .dyson_mqtt import _room_display_name
+        for row in self.mqtt.room_preferences or []:
+            if isinstance(row, (list, tuple)) and len(row) > 1 and str(row[0]) == self.current_room_id:
+                return _room_display_name(row[1])
+        return None
+
+    @property
+    def current_room_state(self) -> str | None:
+        """For the Current room sensor: the room, "Docked", or None if unknown."""
+        if _docked(self.state):
+            return "Docked"
+        return self.current_room
+
+    def set_room_outlines(self, map_id, map_data) -> None:
+        """Room outlines from a persistent map (the camera passes on what it fetches)."""
+        outlines = room_outlines(map_data)
+        if map_id is not None and outlines:
+            self._room_outlines, self._room_outlines_map = outlines, str(map_id)
+
+    @callback
+    def _async_update_current_room(self) -> None:
+        state = self.state
+        if _docked(state):
+            self.current_room_id = None
+            return
+        position = latest_position(state)
+        map_id = state.get("persistentMapId")
+        if position is None or map_id is None:
+            return
+        map_id = str(map_id)
+        if self._room_outlines_map != map_id:
+            self._async_fetch_room_outlines(map_id)
+            return
+        self.current_room_id = locate(self._room_outlines, *position, self.current_room_id)
+
+    @callback
+    def _async_fetch_room_outlines(self, map_id: str) -> None:
+        now = time.monotonic()
+        if (self._shutting_down or now - self._outline_fetch_at < _OUTLINE_RETRY_SECONDS
+                or (self._outline_task is not None and not self._outline_task.done())):
+            return
+        self._outline_fetch_at = now
+
+        async def fetch() -> None:
+            try:
+                from .dyson_api import get_map
+                data = await get_map(self._token, self.serial, map_id, session=self.http_session)
+            except Exception as exc:  # noqa: BLE001 - best effort; retried later
+                _LOGGER.debug("[%s] Room outlines fetch failed: %s", self.serial, exc)
+                return
+            self.set_room_outlines(map_id, data)
+            if self._room_outlines_map == map_id:
+                self._async_update_current_room()
+                self._async_notify_listeners()
+        self._outline_task = self.hass.async_create_task(fetch())
+
     @callback
     def _async_update_rooms_and_notify(self) -> None:
         """Check for new room names from MQTT, persist if changed, then notify."""
         self._async_check_mop()
+        self._async_update_current_room()
         if self.mqtt:
             new_rooms = self.mqtt.room_names
             if new_rooms and set(new_rooms) != set(self.cached_room_names):
