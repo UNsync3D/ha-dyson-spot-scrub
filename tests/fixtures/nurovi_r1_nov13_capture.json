@@ -1,0 +1,66 @@
+{
+  "_note": "Dyson R1 Nurovi Dry (RB07, product type 914), shared on #31, 13 Nov 2026. Serial and clean IDs removed.",
+  "current_state": {
+    "msg": "CURRENT-STATE",
+    "time": "2026-11-13T15:38:04.4186623Z",
+    "batteryChargeLevel": 100,
+    "state": "INACTIVE_CHARGING",
+    "currentCleaningStrategy": "auto",
+    "defaultCleaningStrategy": "auto",
+    "currentCleaningMode": "zoneConfigured",
+    "defaultCleaningMode": "zoneConfigured",
+    "cleanDuration": 0,
+    "persistentMapId": "65537",
+    "activeFaults": [
+      {
+        "faultCode": "5001",
+        "nextActionRequired": "LOG_ONLY"
+      }
+    ],
+    "outOfBoxState": "OUT_OF_BOX_COMPLETE",
+    "volume": 70,
+    "fullCleanAction": "NONE",
+    "dockState": "IDLE",
+    "alarm": true,
+    "voiceLanguage": "es-ES",
+    "consumables": [
+      {
+        "type": "brushBar",
+        "usage": 0
+      },
+      {
+        "type": "sideBrushes",
+        "usage": 0
+      },
+      {
+        "type": "robotFilter",
+        "usage": 0
+      },
+      {
+        "type": "dockFilter",
+        "usage": 0
+      }
+    ],
+    "childLock": false,
+    "doNotDisturbMode": {
+      "isOn": false,
+      "startTime": "22:00",
+      "endTime": "8:00"
+    },
+    "emptyBinType": "time",
+    "emptyBinTime": 8,
+    "taskBeginTime": 1794581965
+  },
+  "partial_current_state": {
+    "msg": "CURRENT-STATE",
+    "globalPosition": [
+      {
+        "id": 0,
+        "x": -0.01,
+        "y": -0.04,
+        "angle": -0.06,
+        "update": 0
+      }
+    ]
+  }
+}

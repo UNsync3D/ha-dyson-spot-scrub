@@ -14,10 +14,10 @@ from homeassistant.const import PERCENTAGE, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN, CONF_SERIAL
+from .const import DOMAIN, CONF_SERIAL, MOP_CONSUMABLES
 from .coordinator import DysonCoordinator
 from .dyson_mqtt import battery_level
-from .entity_helpers import device_info, is_nurovi_r2
+from .entity_helpers import device_info, has_mop, is_nurovi_r2
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +29,15 @@ async def async_setup_entry(
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
     r2 = is_nurovi_r2(entry)
+    if not has_mop(entry):
+        # Dyson R1 Nurovi Dry (#49): no mop, so no mop consumable, cleaning
+        # solution or mop drying.
+        async_add_entities([
+            DysonBatterySensor(coordinator, entry),
+            *(DysonConsumableSensor(coordinator, entry, kind, key, name)
+              for kind, key, name in CONSUMABLES if kind not in MOP_CONSUMABLES),
+        ])
+        return
     async_add_entities([
         DysonBatterySensor(coordinator, entry),
         *(DysonConsumableSensor(coordinator, entry, kind, key, name)

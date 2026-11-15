@@ -14,6 +14,7 @@ from .const import (
     CONF_MQTT_PREFIX,
     DEFAULT_MODE,
     CONF_CACHED_ROOMS,
+    CONF_HAS_MOP,
     MODE_TO_INT,
 )
 from .dyson_api import (
@@ -440,8 +441,30 @@ class DysonCoordinator:
         self._async_update_rooms_and_notify()
 
     @callback
+    def _async_check_mop(self) -> None:
+        """Save whether the robot has a mop; reload once when that changes (#49).
+
+        Entities are created from the saved value, so a reload is what adds or
+        removes the mop-only ones. Nothing happens until a full CURRENT-STATE
+        says, and only when the answer differs from what's saved.
+        """
+        reported = getattr(self.mqtt, "has_mop", None) if self.mqtt else None
+        if reported is None:
+            return
+        saved = self._config_entry.data.get(CONF_HAS_MOP, True) is not False
+        if reported == saved and CONF_HAS_MOP in self._config_entry.data:
+            return
+        self.hass.config_entries.async_update_entry(
+            self._config_entry, data={**self._config_entry.data, CONF_HAS_MOP: reported})
+        if reported != saved:
+            _LOGGER.info("[%s] Robot reports %s; reloading to update its controls",
+                         self.serial, "a mop" if reported else "no mop")
+            self.hass.config_entries.async_schedule_reload(self._config_entry.entry_id)
+
+    @callback
     def _async_update_rooms_and_notify(self) -> None:
         """Check for new room names from MQTT, persist if changed, then notify."""
+        self._async_check_mop()
         if self.mqtt:
             new_rooms = self.mqtt.room_names
             if new_rooms and set(new_rooms) != set(self.cached_room_names):

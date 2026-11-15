@@ -30,11 +30,12 @@ from .const import (
     DOMAIN,
     CONF_SERIAL,
     CLEANING_MODES,
+    CLEANING_MODES_NO_MOP,
     DEFAULT_MODE,
     MODE_TO_INT,
 )
 from .coordinator import DysonCoordinator
-from .entity_helpers import device_info, is_nurovi_r2, room_slug
+from .entity_helpers import device_info, has_mop, is_nurovi_r2, room_slug
 from .station_entity import StationEntity
 from .station_settings import R2_SELECT_OPTIONS, SELECTS
 from .dyson_mqtt import _room_display_name, is_any_cleaning, room_repetitions
@@ -76,6 +77,9 @@ _INV_CLEANING_STRATEGY = {v: k for k, v in _CLEANING_STRATEGY_OPTIONS.items()}
 _INV_WATER_LEVEL       = {v: k for k, v in _WATER_LEVEL_OPTIONS.items()}
 _INV_MOP_REPETITIONS   = {v: k for k, v in _MOP_REPETITIONS_OPTIONS.items()}
 _INV_R2_WATER_LEVEL    = {v: k for k, v in _R2_WATER_LEVEL_OPTIONS.items()}
+# A robot without a mop (Dyson R1 Nurovi Dry, #49) only vacuums.
+_NO_MOP_CLEANING_MODE_OPTIONS = {0: "Vacuum"}
+_INV_NO_MOP_CLEANING_MODE     = {"Vacuum": 0}
 
 # Descriptor tuples: (select_type, label, icon, array_index, options_map, inverse_map)
 _ROOM_SELECT_DESCRIPTORS = [
@@ -111,9 +115,12 @@ async def async_setup_entry(
 ) -> None:
     coordinator: DysonCoordinator = hass.data[DOMAIN][entry.entry_id]
     r2 = is_nurovi_r2(entry)
-    async_add_entities([DysonStationSelect(coordinator, entry, key, name,
-                                           R2_SELECT_OPTIONS.get(key, options) if r2 else options)
-                        for key, (name, options) in SELECTS.items()])
+    mop = has_mop(entry)
+    # Both station selects are mop settings, so a robot without a mop has none (#49).
+    if mop:
+        async_add_entities([DysonStationSelect(coordinator, entry, key, name,
+                                               R2_SELECT_OPTIONS.get(key, options) if r2 else options)
+                            for key, (name, options) in SELECTS.items()])
     known_rooms: set[str] = set()
 
     # Global cleaning-mode select — created immediately, no room data needed
@@ -133,6 +140,11 @@ async def async_setup_entry(
         entities: list[SelectEntity] = []
         for room_name in new_rooms:
             for select_type, label, icon, array_index, options_map, inverse_map in _ROOM_SELECT_DESCRIPTORS:
+                if not mop and select_type == "water_level":
+                    continue
+                if not mop and select_type == "cleaning_mode":
+                    options_map, inverse_map = (_NO_MOP_CLEANING_MODE_OPTIONS,
+                                                _INV_NO_MOP_CLEANING_MODE)
                 if r2 and select_type == "water_level":
                     options_map, inverse_map = _R2_WATER_LEVEL_OPTIONS, _INV_R2_WATER_LEVEL
                 entities.append(
@@ -172,6 +184,8 @@ class DysonCleaningModeSelectEntity(SelectEntity):
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
         self._coordinator = coordinator
+        if not has_mop(entry):
+            self._attr_options = CLEANING_MODES_NO_MOP
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_cleaning_mode"
         self._attr_device_info = device_info(entry)
         self._attr_current_option = coordinator.current_mode or DEFAULT_MODE
@@ -192,7 +206,7 @@ class DysonCleaningModeSelectEntity(SelectEntity):
 
     async def async_select_option(self, option: str) -> None:
         """Update the coordinator's mode; if cleaning now, switch the robot immediately."""
-        if option not in CLEANING_MODES:
+        if option not in self._attr_options:
             _LOGGER.warning("Unknown cleaning mode: %s", option)
             return
 
