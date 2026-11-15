@@ -11,11 +11,15 @@ class StationEntity:
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    # Unique ID group: "station" for mop station settings, "setting" for the
+    # robot's own settings (#50), so removing a no-mop robot's station
+    # entities (#49) never touches them.
+    _id_group = "station"
 
     def __init__(self, coordinator, entry, key, name):
         self._coordinator = coordinator
         self._setting_key = key
-        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_station_{key}"
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_{self._id_group}_{key}"
         self._attr_name = name
         self._attr_device_info = device_info(entry)
 

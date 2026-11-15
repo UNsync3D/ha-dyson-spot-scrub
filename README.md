@@ -95,6 +95,14 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Mop drying time remaining | `sensor` | Countdown while the mop is drying |
 | Consumable usage, Cleaning solution | `sensor` | See [Consumables](#consumables) |
 
+**Robot settings** (every model, including the R1)
+
+| Entity | Type | Notes |
+|---|---|---|
+| Voice prompts, Child lock, Do not disturb | `switch` | As in the MyDyson app's robot settings |
+| Volume | `number` | Voice and sound volume, 0–100 % in steps of 10 |
+| Do not disturb start, Do not disturb end | `time` | Quiet hours. Changing one keeps the other and the on/off setting |
+
 ### When a clean can start
 
 A new clean only starts when the robot is ready: not while it's cleaning or paused, on its way back, mapping, or while the dock is washing the mop or emptying the bin. Mop drying is the exception: starting a clean stops the drying first, as the MyDyson app does. Start on a paused clean resumes it.

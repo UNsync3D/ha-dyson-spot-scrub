@@ -110,7 +110,8 @@ MAP_PATH_ACTIONS = {
     "MOPPING": "map_mop_color",
     "VACUUMING_AND_MOPPING": "map_combined_color",
 }
-PLATFORMS = ["vacuum", "binary_sensor", "sensor", "select", "button", "switch", "camera"]
+PLATFORMS = ["vacuum", "binary_sensor", "sensor", "select", "button", "switch", "camera",
+             "number", "time"]
 
 # Config entry keys
 CONF_COUNTRY    = "country"

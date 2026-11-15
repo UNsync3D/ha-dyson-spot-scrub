@@ -16,7 +16,7 @@ from .const import DOMAIN, CONF_SERIAL
 from .coordinator import DysonCoordinator
 from .station_entity import StationEntity
 from .entity_helpers import device_info, has_mop, is_nurovi_r2, room_slug
-from .station_settings import R2_MISSING_SWITCHES, SWITCHES
+from .station_settings import DEVICE_SWITCHES, R2_MISSING_SWITCHES, SWITCHES
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +32,12 @@ async def async_setup_entry(
         skip = set(SWITCHES)
     async_add_entities([DysonStationSwitch(coordinator, entry, key, item[0])
                         for key, item in SWITCHES.items() if key not in skip])
+    # Robot settings every model has (#50).
+    async_add_entities([
+        *(DysonDeviceSettingSwitch(coordinator, entry, key, item[0])
+          for key, item in DEVICE_SWITCHES.items()),
+        DysonDeviceSettingSwitch(coordinator, entry, "do_not_disturb", "Do not disturb"),
+    ])
     known_rooms: set[str] = set()
 
     @callback
@@ -121,3 +127,15 @@ class DysonStationSwitch(StationEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         await self._async_set_setting(False)
+
+
+class DysonDeviceSettingSwitch(DysonStationSwitch):
+    """Voice prompts, child lock and Do Not Disturb (#50)."""
+
+    _id_group = "setting"
+    _ICONS = {"voice_prompts": "mdi:account-voice", "child_lock": "mdi:lock",
+              "do_not_disturb": "mdi:sleep"}
+
+    def __init__(self, coordinator, entry, key, name):
+        super().__init__(coordinator, entry, key, name)
+        self._attr_icon = self._ICONS.get(key, "mdi:tune")

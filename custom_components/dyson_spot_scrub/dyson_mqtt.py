@@ -37,7 +37,8 @@ from .const import (DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATT
                     MOP_CONSUMABLES, MOP_STATE_FIELDS)
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
-from .station_settings import STATE_FIELDS, current_setting, setting_payloads, reported_properties
+from .station_settings import (JDM_METHODS, STATE_FIELDS, current_setting, setting_payloads,
+                               reported_properties)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -681,9 +682,9 @@ class DysonMqttClient:
         Publish success only means transport acceptance, not device confirmation.
         No automatic retries: a partial send may already have changed the robot.
         """
-        state_fields, props = setting_payloads(key, value)
         if not self.available or current_setting(self.state, key) is None:
             return False
+        state_fields, props = setting_payloads(key, value, self.state)
         if current_setting(self.state, key) == value:
             return True
         if not self._publish({"msg": "STATE-SET", "mode-reason": "RAPP",
@@ -691,7 +692,7 @@ class DysonMqttClient:
             return False
         accepted = self._publish_raw(self._jdm_command_topic, {
             "msgId": _rand_msg_id(), "version": "1.0.1",
-            "method": "prop.set", "params": props,
+            "method": JDM_METHODS.get(key, "prop.set"), "params": props,
         })
         self.request_current_state()
         return accepted

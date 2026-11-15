@@ -31,6 +31,8 @@ def collect(root):
     mod('homeassistant.components.sensor', SensorEntity=object, SensorDeviceClass=NS(BATTERY='b', ENUM='e', DURATION='d'), SensorStateClass=NS(MEASUREMENT='m'))
     for p, c in [('select','SelectEntity'),('button','ButtonEntity'),('switch','SwitchEntity'),('camera','Camera')]:
         mod(f'homeassistant.components.{p}', **{c: object})
+    mod('homeassistant.components.number', NumberEntity=object, NumberMode=NS(SLIDER='slider'))
+    mod('homeassistant.components.time', TimeEntity=object)
     mod('homeassistant.config_entries', ConfigEntry=object)
     mod('homeassistant.const', PERCENTAGE='%', UnitOfTime=NS(SECONDS='s'))
     mod('homeassistant.core', HomeAssistant=object, ServiceCall=object, callback=lambda f: f)
@@ -54,7 +56,8 @@ def collect(root):
         hass = NS(data={'dyson_spot_scrub': {'e': coord}},
                   services=NS(has_service=lambda d, n: True, async_register=None))
         out = []
-        for platform in ['vacuum', 'binary_sensor', 'sensor', 'select', 'button', 'switch', 'camera']:
+        for platform in ['vacuum', 'binary_sensor', 'sensor', 'select', 'button', 'switch', 'camera',
+                         'number', 'time']:
             m = importlib.import_module(f'compat_integration.{platform}')
             ents = []
             asyncio.run(m.async_setup_entry(hass, entry, ents.extend))
