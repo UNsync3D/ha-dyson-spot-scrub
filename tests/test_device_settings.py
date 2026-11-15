@@ -187,11 +187,13 @@ class QuickChangeTests(unittest.TestCase):
             with patch.object(self.client, "set_station_setting", return_value=True):
                 asyncio.run(volume.async_set_native_value(60))
             self.assertEqual(volume.native_value, 60)
-            self.client.state["volume"] = 50          # an old status reply: no bounce
+            # FutuRazor's log (#50): the robot confirms, then an older status
+            # reply still says 50. Neither makes the slider jump back.
+            self.client.state["volume"] = 60
             self.assertEqual(volume.native_value, 60)
-            self.client.state["volume"] = 60          # confirmed
+            self.client.state["volume"] = 50
             self.assertEqual(volume.native_value, 60)
-            self.assertIsNone(volume._pending)
+            self.client.state["volume"] = 60
             # Not confirmed within the window: the robot's value is shown.
             with patch.object(self.client, "set_station_setting", return_value=True):
                 asyncio.run(volume.async_set_native_value(80))

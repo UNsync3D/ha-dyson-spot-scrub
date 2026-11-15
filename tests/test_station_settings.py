@@ -45,15 +45,23 @@ class StationTests(unittest.TestCase):
 
     def test_send_pair_without_optimistic_update_or_repeats(self):
         self.client.state['hotWaterMop'] = False
-        with patch.object(self.client, '_publish_raw', return_value=True) as raw:
+        with patch.object(self.client, '_publish_raw', return_value=True) as raw, \
+                patch.object(self.mqtt.threading, 'Timer') as timer:
             self.assertTrue(self.client.set_station_setting('hot_water_mopping', True))
             self.assertFalse(self.client.state['hotWaterMop'])
             self.assertEqual(raw.call_count, 1)
             self.assertEqual(raw.call_args.args[1]['params'], {'hot_water_mop': 1})
+            # Only the STATE-SET: no status request straight away (#50).
+            self.assertEqual(self.sent.call_count, 1)
             self.assertEqual(self.sent.call_args_list[0].args[0]['hotWaterMop'], True)
+            self.assertEqual(timer.call_args.args[0], 3.0)
+            check = timer.call_args.args[1]
+            check(*timer.call_args.kwargs['args'])        # not confirmed after 3 s: ask
             self.assertEqual(self.sent.call_args_list[1].args[0]['msg'], 'REQUEST-CURRENT-STATE')
             self.sent.reset_mock(); raw.reset_mock()
             self.client._handle_status({'msg': 'CURRENT-STATE', 'hotWaterMop': True})
+            check(*timer.call_args.kwargs['args'])        # confirmed: nothing to ask
+            self.sent.assert_not_called()
             self.assertTrue(self.client.set_station_setting('hot_water_mopping', True))
             self.sent.assert_not_called(); raw.assert_not_called()
 
