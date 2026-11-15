@@ -25,7 +25,7 @@ from .dyson_api import (
     get_map_metadata,
 )
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
-from .room_locator import latest_position, locate, room_outlines
+from .room_locator import dock_room, latest_position, locate, room_outlines
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,6 +125,13 @@ class DysonCoordinator:
         self._outline_fetch_at = -_OUTLINE_RETRY_SECONDS
         self._outline_task = None
         self.current_room_id: str | None = None
+        self._dock_room_id: str | None = None
+        # Leaving the dock (FutuRazor's idea, #53): until the robot reports a
+        # new position, it is in the dock's room. The last position from the
+        # previous clean is kept so it isn't mistaken for a new one.
+        self._seen_docked = False
+        self._position_at_dock = None
+        self._fresh_position = False
 
     # ── Setup / teardown ──────────────────────────────────────────────────────
 
@@ -501,22 +508,31 @@ class DysonCoordinator:
         outlines = room_outlines(map_data)
         if map_id is not None and outlines:
             self._room_outlines, self._room_outlines_map = outlines, str(map_id)
+            self._dock_room_id = dock_room(map_data, outlines)
 
     @callback
     def _async_update_current_room(self) -> None:
         state = self.state
+        position = latest_position(state)
         if _docked(state):
             self.current_room_id = None
+            self._seen_docked = True
+            self._position_at_dock = position
+            self._fresh_position = False
             return
-        position = latest_position(state)
         map_id = state.get("persistentMapId")
-        if position is None or map_id is None:
+        if map_id is None:
             return
         map_id = str(map_id)
         if self._room_outlines_map != map_id:
             self._async_fetch_room_outlines(map_id)
             return
-        self.current_room_id = locate(self._room_outlines, *position, self.current_room_id)
+        if position is not None and (self._fresh_position or position != self._position_at_dock):
+            self._fresh_position = True
+            self.current_room_id = locate(self._room_outlines, *position, self.current_room_id)
+        elif not self._fresh_position and self._seen_docked:
+            # Just left the dock; the robot is still finding its position.
+            self.current_room_id = self._dock_room_id
 
     @callback
     def _async_fetch_room_outlines(self, map_id: str) -> None:

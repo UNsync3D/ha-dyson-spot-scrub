@@ -65,6 +65,13 @@ class LocatorTests(unittest.TestCase):
         p = zone["nameLocation"]
         self.assertEqual(locator.locate(outlines, p["x"], p["y"]), str(zone["id"]))
 
+    def test_dock_room(self):
+        self.assertEqual(locator.dock_room(MAP, self.outlines), "12")      # the dock is in Dining
+        against_wall = {**MAP, "dockLocation": {"x": -1.2, "y": 0.11, "angle": 0}}
+        self.assertEqual(locator.dock_room(against_wall, self.outlines), "12")   # just outside
+        self.assertIsNone(locator.dock_room({**MAP, "dockLocation": {"x": 40, "y": 40}}, self.outlines))
+        self.assertIsNone(locator.dock_room({}, self.outlines))
+
     def test_latest_position(self):
         self.assertEqual(locator.latest_position({"globalPosition": [
             {"id": 1, "x": 0.1, "y": 0.2}, {"id": 2, "x": 0.3, "y": -0.4}]}), (0.3, -0.4))
@@ -129,6 +136,53 @@ class CoordinatorTests(unittest.TestCase):
             self.assertIsNone(c.current_room)
             self.assertEqual(c.current_room_state, "Docked")
             self.get_map.assert_not_awaited()           # the camera's map was used
+        asyncio.run(run())
+
+    def docked(self, x, y):
+        return {**self.moving(x, y), "state": "INACTIVE_CHARGING"}
+
+    def test_leaving_the_dock_shows_the_docks_room(self):
+        """FutuRazor's idea (#53): no position yet just after undocking."""
+        async def run():
+            c = self.make(asyncio.get_running_loop())
+            c.set_room_outlines("1792911875", MAP)
+            c._state_snapshot = self.docked(1.5, 1.0)      # last position of the previous clean
+            c._async_update_current_room()
+            self.assertEqual(c.current_room_state, "Docked")
+            c._state_snapshot = self.moving(1.5, 1.0)      # same old position: not a new one
+            c._async_update_current_room()
+            self.assertEqual(c.current_room, "Dining")     # the dock's room
+            c._state_snapshot = self.moving(1.5, 1.1)      # first real position, in Kitchen
+            c._async_update_current_room()
+            self.assertEqual(c.current_room, "Kitchen")
+            c._state_snapshot = {k: v for k, v in self.moving(0, 0).items() if k != "globalPosition"}
+            c._async_update_current_room()
+            self.assertEqual(c.current_room, "Kitchen")    # no new position: unchanged
+        asyncio.run(run())
+
+    def test_no_dock_room_when_started_mid_clean(self):
+        async def run():
+            c = self.make(asyncio.get_running_loop())
+            c.set_room_outlines("1792911875", MAP)
+            state = self.moving(0, 0)
+            del state["globalPosition"]
+            c._state_snapshot = state                      # Home Assistant restarted mid-clean
+            c._async_update_current_room()
+            self.assertIsNone(c.current_room_state)
+        asyncio.run(run())
+
+    def test_outlines_are_fetched_before_the_first_position(self):
+        async def run():
+            c = self.make(asyncio.get_running_loop())
+            c._state_snapshot = self.docked(0, 0)
+            c._async_update_current_room()
+            state = self.moving(0, 0)
+            del state["globalPosition"]
+            c._state_snapshot = state
+            c._async_update_current_room()
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            self.assertEqual(c.current_room, "Dining")
         asyncio.run(run())
 
     def test_failed_fetch_is_not_retried_straight_away(self):

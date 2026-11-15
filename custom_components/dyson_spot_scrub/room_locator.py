@@ -60,6 +60,25 @@ def locate(outlines, x: float, y: float, previous: str | None = None) -> str | N
     return previous
 
 
+# A dock stands against a wall, so its point can fall just outside every
+# outline; the nearest room within this distance is taken as its room.
+DOCK_ROOM_REACH = 1.0   # metres
+
+
+def dock_room(map_data: Any, outlines) -> str | None:
+    """Zone id of the room the dock is in, from the map's dockLocation."""
+    dock = map_data.get("dockLocation") if isinstance(map_data, dict) else None
+    pts = _points([dock])
+    if not pts or not outlines:
+        return None
+    x, y = pts[0]
+    room = locate(outlines, x, y)
+    if room is not None:
+        return room
+    distance, nearest = min((_edge_distance(poly, x, y), zone_id) for zone_id, poly in outlines)
+    return nearest if distance <= DOCK_ROOM_REACH else None
+
+
 def _number(v) -> bool:
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
