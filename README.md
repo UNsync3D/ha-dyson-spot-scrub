@@ -187,7 +187,7 @@ The choice resets to Room settings when Home Assistant restarts. The [Dyson Clea
 | `dyson_spot_scrub.save_room_settings` | Saves several rooms' settings at once, without starting |
 | `dyson_spot_scrub.start_rooms_with_settings` | Starts the given rooms with the given settings (each room keeps its own mode) |
 | `dyson_spot_scrub.clean_zone` | Cleans one rectangle on the map with its own settings (Spot+Scrub AI) |
-| `dyson_spot_scrub.clean_whole_home` | Starts a whole-home clean, like the robot's own button (Spot+Scrub AI) |
+| `dyson_spot_scrub.clean_whole_home` | **Experimental.** Starts the same clean as the button on the robot (Spot+Scrub AI) |
 | `dyson_spot_scrub.cancel_drying` | Stops mop drying |
 
 The room select entities save each change straight away. `save_room_settings` saves a batch in one go, using stable room IDs and the same option labels as the select entities:
@@ -230,7 +230,7 @@ data:
   water_level: medium
 ```
 
-`clean_whole_home` starts the same whole-home clean as the button on the robot. The MyDyson app has no equivalent: there you select every room. It doesn't change any room settings. It's also available as the **Clean Whole Home** button. It's confirmed on the Spot+Scrub AI only so far; on the Dyson R2 Nurovi Wash+Dry it isn't offered yet.
+`clean_whole_home` is **experimental**. It starts the same clean as pressing the button on the robot, and the robot reports it the same way. It doesn't change any room settings. What that clean covers isn't confirmed yet: it may clean every room with its saved settings, or repeat the last clean the robot ran. Until that's tested, use **Vacuum Start** with no rooms selected to be sure every room is cleaned. It's also available as the **Clean Whole Home** button, on the Spot+Scrub AI only; on the Dyson R2 Nurovi Wash+Dry it isn't offered yet.
 
 ```yaml
 action: dyson_spot_scrub.clean_whole_home
