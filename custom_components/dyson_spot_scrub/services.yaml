@@ -186,7 +186,7 @@ clean_zone:
 
 clean_whole_home:
   name: Clean whole home
-  description: Start a whole-home clean, the same as pressing the robot's own button. Room settings are not changed. Spot+Scrub AI only for now.
+  description: Experimental. Start the same clean as pressing the button on the robot. It isn't confirmed yet whether this cleans every room with its saved settings or repeats the robot's last clean. Room settings are not changed. Spot+Scrub AI only for now.
   fields:
     entity_id:
       name: Dyson vacuum
