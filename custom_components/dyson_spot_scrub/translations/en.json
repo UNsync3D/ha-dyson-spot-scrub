@@ -13,9 +13,9 @@
         "title": "Dyson Account Login",
         "description": "Enter your Dyson account credentials. An OTP code will be emailed to you if your account requires it.",
         "data": {
-          "email":    "Email address",
+          "email": "Email address",
           "password": "Password",
-          "country":  "Country code (e.g. AU, GB, US)"
+          "country": "Country code (e.g. AU, GB, US)"
         }
       },
       "otp": {
@@ -30,8 +30,8 @@
         "title": "Dyson Spot+Scrub AI",
         "description": "Enter a Dyson bearer token (captured via a proxy tool such as Proxyman, or copied from another integration), your robot's serial number, and your Dyson account country code.",
         "data": {
-          "token":   "Bearer token",
-          "serial":  "Robot serial number",
+          "token": "Bearer token",
+          "serial": "Robot serial number",
           "country": "Country code (e.g. AU, GB, US)"
         }
       },
@@ -48,19 +48,19 @@
       }
     },
     "abort": {
-      "no_robots_found":    "No supported robot vacuums were found in your Dyson account. Devices found: {devices}. If one of these is a Dyson robot vacuum, please open an issue with this list at {issues_url} so we can add it.",
-      "cannot_connect":     "Could not connect to Dyson's cloud API.",
+      "no_robots_found": "No supported robot vacuums were found in your Dyson account. Devices found: {devices}. If one of these is a Dyson robot vacuum, please open an issue with this list at {issues_url} so we can add it.",
+      "cannot_connect": "Could not connect to Dyson's cloud API.",
       "already_configured": "This device is already configured.",
-      "invalid_serial":     "The device reported an invalid serial number."
+      "invalid_serial": "The device reported an invalid serial number."
     },
     "error": {
-      "cannot_connect":  "Could not reach Dyson's servers. Check your internet connection.",
-      "invalid_auth":    "Invalid email or password. Please check your credentials.",
-      "invalid_otp":     "Dyson rejected the code or password. Check both (you can correct the password below without requesting a new code) and try once more. If it is rejected again, stop: Dyson gives the same answer for a locked account, and repeated attempts can extend a lock.",
+      "cannot_connect": "Could not reach Dyson's servers. Check your internet connection.",
+      "invalid_auth": "Invalid email or password. Please check your credentials.",
+      "invalid_otp": "Dyson rejected the code or password. Check both (you can correct the password below without requesting a new code) and try once more. If it is rejected again, stop: Dyson gives the same answer for a locked account, and repeated attempts can extend a lock.",
       "serial_not_found": "That serial number was not found in your Dyson account.",
-      "invalid_serial":   "The serial number contains invalid characters. Use letters, digits and hyphens only.",
-      "invalid_country":  "Enter a two-letter country code, e.g. GB or AU.",
-      "rate_limited":     "Dyson is limiting login attempts for this account. Wait a while before trying again rather than retrying straight away.",
+      "invalid_serial": "The serial number contains invalid characters. Use letters, digits and hyphens only.",
+      "invalid_country": "Enter a two-letter country code, e.g. GB or AU.",
+      "rate_limited": "Dyson is limiting login attempts for this account. Wait a while before trying again rather than retrying straight away.",
       "account_not_active": "Dyson reports this account is not active, so no login code was requested. Check the account in the MyDyson app.",
       "unsupported_auth_method": "This Dyson account uses a sign-in method the integration doesn't support yet. No login code was requested; use a bearer token instead.",
       "app_version_unsupported": "Dyson now requires a newer MyDyson app version than this integration reports. No login code was requested; the integration needs updating.",
@@ -68,21 +68,120 @@
     }
   },
   "services": {
+    "clean_room": {
+      "name": "Clean Room",
+      "description": "Start a single-room clean on the Dyson Spot+Scrub AI robot. The robot will clean only the named room, then return to its dock.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum to clean with. Optional when only one Dyson robot is set up; required when there are several."
+        },
+        "room": {
+          "name": "Room",
+          "description": "The display name of the room to clean, exactly as reported in the vacuum entity's \"rooms\" attribute (e.g. \"Living Room\", \"Kitchen\", \"Dining\", \"Toilet\"). Matching is case-insensitive."
+        }
+      }
+    },
+    "clean_rooms": {
+      "name": "Clean Rooms (Sequential)",
+      "description": "Clean multiple rooms one at a time. The robot finishes each room and returns to its dock before moving on to the next. Rooms are cleaned in the order listed.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum to clean with. Optional when only one Dyson robot is set up; required when there are several."
+        },
+        "rooms": {
+          "name": "Rooms",
+          "description": "List of room names to clean, in order. Each name must match the vacuum entity's \"rooms\" attribute exactly (case-insensitive), e.g. [\"Living Room\", \"Kitchen\", \"Dining\"]."
+        }
+      }
+    },
     "save_room_settings": {
       "name": "Save Room Settings",
       "description": "Apply multiple per-room settings in one update without starting a cleaning run.",
       "fields": {
-        "entity_id": {"name": "Dyson vacuum", "description": "The vacuum whose room settings should be updated."},
-        "room_settings": {"name": "Room settings", "description": "Object keyed by stable room ID with select option labels."}
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum whose room settings should be updated."
+        },
+        "room_settings": {
+          "name": "Room settings",
+          "description": "Object keyed by stable room ID. Each room can include cleaning_mode, cleaning_strategy, water_level, and mop_repetitions using the same option labels shown by the select entities. Example: {\"12\":{\"cleaning_mode\":\"Vacuum then Mop\",\"mop_repetitions\":\"Two Passes\"}}."
+        }
       }
     },
     "start_rooms_with_settings": {
       "name": "Start Rooms With Settings",
-      "description": "Apply a room-settings draft and send selected room IDs to the robot in the supplied order. The robot may choose its own execution order.",
+      "description": "Apply a room-settings draft and send the selected room IDs to the robot in the supplied order. The robot may choose its own execution order.",
       "fields": {
-        "entity_id": {"name": "Dyson vacuum", "description": "The vacuum to start."},
-        "room_ids": {"name": "Ordered room IDs", "description": "Stable room IDs in the requested cleaning order."},
-        "room_settings": {"name": "Room settings", "description": "Optional select option labels to apply before starting, keyed by stable room ID."}
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum to start."
+        },
+        "room_ids": {
+          "name": "Ordered room IDs",
+          "description": "Stable room IDs in the requested cleaning order."
+        },
+        "room_settings": {
+          "name": "Room settings",
+          "description": "Optional object keyed by stable room ID with select option labels to apply before starting."
+        }
+      }
+    },
+    "cancel_drying": {
+      "name": "Cancel drying",
+      "description": "Cancel mop roller drying for one connected Dyson vacuum. The dock state updates when the robot confirms the change.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum currently drying its mop roller."
+        }
+      }
+    },
+    "clean_zone": {
+      "name": "Clean zone",
+      "description": "Clean one rectangle on the active map with its own settings, like the MyDyson app's Target mode. Room settings are not changed. Spot+Scrub AI only for now.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum"
+        },
+        "map_id": {
+          "name": "Map ID",
+          "description": "Active map ID from the vacuum or calibrated camera image. A different active map rejects the start."
+        },
+        "rectangle": {
+          "name": "Rectangle",
+          "description": "Four robot coordinates in metres, [x_min, y_min, x_max, y_max]. Not image pixels. Verify the area before starting."
+        },
+        "cleaning_strategy": {
+          "name": "Vacuum power",
+          "description": "Defaults to auto."
+        },
+        "clean_type": {
+          "name": "Cleaning mode",
+          "description": "Defaults to vacuum."
+        },
+        "water_level": {
+          "name": "Water level",
+          "description": "Defaults to low. Only relevant for modes that mop."
+        },
+        "mop_passes": {
+          "name": "Mop passes",
+          "description": "Defaults to 1. 2 repeats the clean for every cleaning mode, including vacuum-only. With vacuumThenMop it gives one vacuum pass and two mop passes."
+        },
+        "dry_passes": {
+          "name": "Vacuum passes",
+          "description": "Defaults to 1. Sent as the app does, but 2 had no effect in hardware tests; use mop passes for a second pass."
+        }
+      }
+    },
+    "clean_whole_home": {
+      "name": "Clean whole home",
+      "description": "Experimental. Start the same clean as pressing the button on the robot. It isn't confirmed yet whether this cleans every room with its saved settings or repeats the robot's last clean. Room settings are not changed. Spot+Scrub AI only for now.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum"
+        }
       }
     }
   },

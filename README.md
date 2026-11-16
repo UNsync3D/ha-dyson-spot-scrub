@@ -244,6 +244,10 @@ data:
 
 The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](docs/START_READINESS.md) and [consumable sensors](docs/CONSUMABLES.md).
 
+### Languages
+
+The setup and options screens, error messages and action descriptions are available in **English** and **Dutch**, following your Home Assistant language. Entity names are in English for now. The select entities' option labels, such as *Vacuum* or *Two Passes*, stay in English, because automations, the card and the actions use them as values.
+
 ---
 
 ## Requirements
