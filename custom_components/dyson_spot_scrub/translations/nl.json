@@ -106,7 +106,7 @@
         },
         "room_settings": {
           "name": "Kamerinstellingen",
-          "description": "Object met de vaste kamer-ID als sleutel. Elke kamer kan cleaning_mode, cleaning_strategy, water_level en mop_repetitions bevatten, met dezelfde optielabels als de select-entiteiten (in het Engels). Voorbeeld: {\"12\":{\"cleaning_mode\":\"Vacuum then Mop\",\"mop_repetitions\":\"Two Passes\"}}."
+          "description": "Object met de vaste kamer-ID als sleutel. Elke kamer kan cleaning_mode, cleaning_strategy, water_level en mop_repetitions bevatten, met dezelfde optielabels als de select-entiteiten (in het Engels). Bijvoorbeeld kamer 12 met cleaning_mode \"Vacuum then Mop\" en mop_repetitions \"Two Passes\"."
         }
       }
     },

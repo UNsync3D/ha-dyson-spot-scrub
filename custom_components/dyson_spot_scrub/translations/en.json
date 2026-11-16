@@ -106,7 +106,7 @@
         },
         "room_settings": {
           "name": "Room settings",
-          "description": "Object keyed by stable room ID. Each room can include cleaning_mode, cleaning_strategy, water_level, and mop_repetitions using the same option labels shown by the select entities. Example: {\"12\":{\"cleaning_mode\":\"Vacuum then Mop\",\"mop_repetitions\":\"Two Passes\"}}."
+          "description": "Object keyed by stable room ID. Each room can include cleaning_mode, cleaning_strategy, water_level, and mop_repetitions using the same option labels shown by the select entities. For example, room 12 with cleaning_mode \"Vacuum then Mop\" and mop_repetitions \"Two Passes\"."
         }
       }
     },
