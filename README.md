@@ -15,7 +15,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/UNsync3D/ha-dyson-spot-scrub?color=4880d6" alt="MIT licence"></a>
 </p>
 
-A custom Home Assistant integration for the **Dyson Spot+Scrub AI** robot vacuum, with support for the **Dyson R2 Nurovi Wash+Dry**. It connects through Dyson's cloud, the same way the MyDyson app does. The robot pushes status updates to Home Assistant over MQTT as they happen, so there's no constant polling. The robot doesn't accept local connections, so an internet connection is required.
+A custom Home Assistant integration for Dyson's robot vacuums: the **Dyson Spot+Scrub AI**, the **Dyson R2 Nurovi Wash+Dry**, the **Dyson R1 Nurovi Dry** and the **Dyson R3 Nurovi Spot+Scrub UV**. It connects through Dyson's cloud, the same way the MyDyson app does. The robot pushes status updates to Home Assistant over MQTT as they happen, so there's no constant polling. The robot doesn't accept local connections, so an internet connection is required.
 
 ### Supported robots
 
@@ -58,12 +58,13 @@ A robot without a mop is recognised from its first status report. Home Assistant
 This integration and **[FutuRazor's Dyson Cleaning Planner Card](https://github.com/FutuRazor/dyson-cleaning-planner-card)** are designed to work together. The integration connects Home Assistant to your robot and provides its entities and actions; the card turns them into one dashboard view built for the Spot+Scrub AI:
 
 - **Plan a clean:** pick rooms, choose each room's settings and start, all in one place.
+- **Clean a zone:** draw a rectangle on the map, move, resize or rotate it, and clean just that area (Spot+Scrub AI).
 - **Follow the session:** see the cleaning status, the selected rooms and the live map.
 - **No YAML needed:** select your Dyson vacuum in the card editor, and its rooms and supported controls are detected automatically.
 
-The card needs **v1.5.0 or newer** of this integration. On Home Assistant 2026.11 or newer, install it from **Settings → Marketplace → Add from link** with `https://github.com/FutuRazor/dyson-cleaning-planner-card`; on older versions, add it in HACS as a custom repository (type **Dashboard**). The [card's README](https://github.com/FutuRazor/dyson-cleaning-planner-card#installation) has the details. You can also [try the interactive preview](https://futurazor.github.io/dyson-cleaning-planner-card/preview/index.html), which uses simulated data.
+The card needs **v1.5.0 or newer** of this integration, and zone cleaning (card v1.4.0) needs **v2.1.0 or newer**. On Home Assistant 2026.11 or newer, install it from **Settings → Marketplace → Add from link** with `https://github.com/FutuRazor/dyson-cleaning-planner-card`; on older versions, add it in HACS as a custom repository (type **Dashboard**). The [card's README](https://github.com/FutuRazor/dyson-cleaning-planner-card#installation) has the details. You can also [try the interactive preview](https://futurazor.github.io/dyson-cleaning-planner-card/preview/index.html), which uses simulated data.
 
-The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRazor)**, who has also contributed much of this integration: the station controls, consumable sensors, mop drying controls, start readiness checks, map display options and card actions, along with extensive hardware testing, MQTT captures and code reviews. Thank you, FutuRazor! Please report card issues in the [card's repository](https://github.com/FutuRazor/dyson-cleaning-planner-card/issues).
+The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRazor)**, who has also contributed much of this integration: zone cleaning, the station controls, consumable sensors, mop drying controls, start readiness checks, map display options and card actions, along with extensive hardware testing, MQTT captures (including the robot settings) and code reviews. Thank you, FutuRazor! Please report card issues in the [card's repository](https://github.com/FutuRazor/dyson-cleaning-planner-card/issues).
 
 ---
 
@@ -76,6 +77,7 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Robot vacuum | `vacuum` | Start (whole home), pause, resume, stop, return to dock, suction power |
 | Vacuum Mode | `select` | Room settings (default), or one mode for every room: Vacuum, Vacuum and Mop, Mop, or Vacuum then Mop. See [Cleaning modes](#cleaning-modes) |
 | Vacuum Start | `button` | Cleans the rooms selected with the room switches, one at a time, returning to the dock between rooms. With none selected, cleans the whole home |
+| Clean Whole Home | `button` | **Experimental.** The same clean as the button on the robot (Spot+Scrub AI). See [Actions](#actions) |
 | Floor Map | `camera` | Live map of rooms, the cleaned path and the robot |
 | Battery | `sensor` | Battery percentage |
 | Current room | `sensor` | The room the robot is in, "Docked" on the dock. See [Current room](#current-room) |
@@ -88,7 +90,7 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Room *name* | `switch` | Chooses whether the next **Start** cleans this room. Nothing is sent to the robot until you start |
 | Room *name* Cleaning Mode, Cleaning Strategy, Water Level, Clean Repetitions | `select` | The room's saved settings, as in the MyDyson app |
 
-**Dock and station**
+**Dock and station** (robots with a mop: not the R1)
 
 | Entity | Type | Notes |
 |---|---|---|
