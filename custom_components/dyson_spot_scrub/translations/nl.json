@@ -1,0 +1,343 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "**Privacy:** deze integratie maakt verbinding met de cloud-API van Dyson om je robot te bedienen en kaartgegevens op te halen. Je accountgegevens of bearer-token worden in Home Assistant opgeslagen. Houd ze buiten versiebeheer en gedeelde configuratiebestanden, en behandel ze als een wachtwoord.",
+        "menu_options": {
+          "login": "Inloggen met je Dyson-account (e-mail + eenmalige code)",
+          "token": "Rechtstreeks een bearer-token invoeren"
+        }
+      },
+      "login": {
+        "title": "Inloggen bij Dyson",
+        "description": "Voer de gegevens van je Dyson-account in. Als je account dat vereist, ontvang je een eenmalige code per e-mail.",
+        "data": {
+          "email": "E-mailadres",
+          "password": "Wachtwoord",
+          "country": "Landcode (bijv. NL, BE, GB)"
+        }
+      },
+      "otp": {
+        "title": "Eenmalige code",
+        "description": "Er is een code van 6 cijfers verstuurd naar **{email}**. Vul die hieronder in.",
+        "data": {
+          "otp_code": "Eenmalige code",
+          "password": "Wachtwoord (alleen om het te corrigeren)"
+        }
+      },
+      "token": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "Voer een Dyson bearer-token in (vastgelegd met een proxytool zoals Proxyman, of overgenomen uit een andere integratie), het serienummer van je robot en de landcode van je Dyson-account.",
+        "data": {
+          "token": "Bearer-token",
+          "serial": "Serienummer van de robot",
+          "country": "Landcode (bijv. NL, BE, GB)"
+        }
+      },
+      "select_robot": {
+        "title": "Robot kiezen",
+        "description": "Er zijn meerdere robots gevonden. Kies er één om toe te voegen.",
+        "data": {
+          "serial": "Robot"
+        }
+      },
+      "experimental": {
+        "title": "Experimentele robot",
+        "description": "**{name}** ({summary}) is een Dyson-robot die deze integratie nog niet ondersteunt. Je kunt hem toch toevoegen als experimentele robot: hij gebruikt dezelfde code als de Spot+Scrub AI en de R2 Nurovi, dus veel functies werken mogelijk, maar sommige misschien niet.\n\nHelp ons volledige ondersteuning toe te voegen: schakel debuglogging in voor deze integratie, laat één schoonmaakbeurt uitvoeren en deel het logboek op de pagina met issues: {issues_url} (verwijder eerst je serienummer).\n\nKies **Verzenden** om hem toe te voegen."
+      }
+    },
+    "abort": {
+      "no_robots_found": "Er zijn geen ondersteunde robotstofzuigers gevonden in je Dyson-account. Gevonden apparaten: {devices}. Als een daarvan een Dyson-robotstofzuiger is, open dan een issue met deze lijst op {issues_url}, zodat we hem kunnen toevoegen.",
+      "cannot_connect": "Kan geen verbinding maken met de cloud-API van Dyson.",
+      "already_configured": "Dit apparaat is al geconfigureerd.",
+      "invalid_serial": "Het apparaat gaf een ongeldig serienummer door."
+    },
+    "error": {
+      "cannot_connect": "Kan de servers van Dyson niet bereiken. Controleer je internetverbinding.",
+      "invalid_auth": "Ongeldig e-mailadres of wachtwoord. Controleer je gegevens.",
+      "invalid_otp": "Dyson heeft de code of het wachtwoord geweigerd. Controleer beide (je kunt het wachtwoord hieronder corrigeren zonder een nieuwe code aan te vragen) en probeer het nog één keer. Wordt het opnieuw geweigerd, stop dan: Dyson geeft hetzelfde antwoord bij een geblokkeerd account, en herhaalde pogingen kunnen een blokkering verlengen.",
+      "serial_not_found": "Dat serienummer is niet gevonden in je Dyson-account.",
+      "invalid_serial": "Het serienummer bevat ongeldige tekens. Gebruik alleen letters, cijfers en koppeltekens.",
+      "invalid_country": "Voer een landcode van twee letters in, bijv. NL of BE.",
+      "rate_limited": "Dyson beperkt het aantal inlogpogingen voor dit account. Wacht een tijdje voordat je het opnieuw probeert, in plaats van het meteen nog eens te doen.",
+      "account_not_active": "Volgens Dyson is dit account niet actief, dus er is geen inlogcode aangevraagd. Controleer het account in de MyDyson-app.",
+      "unsupported_auth_method": "Dit Dyson-account gebruikt een inlogmethode die de integratie nog niet ondersteunt. Er is geen inlogcode aangevraagd; gebruik in plaats daarvan een bearer-token.",
+      "app_version_unsupported": "Dyson vereist nu een nieuwere versie van de MyDyson-app dan deze integratie doorgeeft. Er is geen inlogcode aangevraagd; de integratie moet worden bijgewerkt.",
+      "too_many_attempts": "Inloggen is 15 minuten gepauzeerd na twee geweigerde pogingen, om je Dyson-account te beschermen. Worden pogingen met de juiste code en het juiste wachtwoord steeds geweigerd, dan heeft Dyson het account mogelijk geblokkeerd: stop en wacht enkele uren, of neem contact op met Dyson-support, in plaats van het opnieuw te proberen."
+    }
+  },
+  "services": {
+    "clean_room": {
+      "name": "Kamer schoonmaken",
+      "description": "Start een schoonmaakbeurt van één kamer. De robot maakt alleen de genoemde kamer schoon en keert daarna terug naar het dock.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger die moet schoonmaken. Optioneel als er maar één Dyson-robot is ingesteld; verplicht als er meerdere zijn."
+        },
+        "room": {
+          "name": "Kamer",
+          "description": "De naam van de kamer, precies zoals in het kenmerk \"rooms\" van de stofzuiger (bijv. \"Living Room\", \"Kitchen\"). Hoofdletters maken niet uit."
+        }
+      }
+    },
+    "clean_rooms": {
+      "name": "Kamers schoonmaken (na elkaar)",
+      "description": "Maak meerdere kamers één voor één schoon. De robot maakt elke kamer af en keert terug naar het dock voordat hij aan de volgende begint. De kamers worden in de opgegeven volgorde schoongemaakt.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger die moet schoonmaken. Optioneel als er maar één Dyson-robot is ingesteld; verplicht als er meerdere zijn."
+        },
+        "rooms": {
+          "name": "Kamers",
+          "description": "Lijst met kamernamen, in volgorde. Elke naam moet precies overeenkomen met het kenmerk \"rooms\" van de stofzuiger (hoofdletters maken niet uit), bijv. [\"Living Room\", \"Kitchen\"]."
+        }
+      }
+    },
+    "save_room_settings": {
+      "name": "Kamerinstellingen opslaan",
+      "description": "Sla de instellingen van meerdere kamers in één keer op, zonder een schoonmaakbeurt te starten.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger waarvan de kamerinstellingen moeten worden bijgewerkt."
+        },
+        "room_settings": {
+          "name": "Kamerinstellingen",
+          "description": "Object met de vaste kamer-ID als sleutel. Elke kamer kan cleaning_mode, cleaning_strategy, water_level en mop_repetitions bevatten, met dezelfde optielabels als de select-entiteiten (in het Engels). Bijvoorbeeld kamer 12 met cleaning_mode \"Vacuum then Mop\" en mop_repetitions \"Two Passes\"."
+        }
+      }
+    },
+    "start_rooms_with_settings": {
+      "name": "Kamers starten met instellingen",
+      "description": "Pas een concept met kamerinstellingen toe en stuur de gekozen kamer-ID's in de opgegeven volgorde naar de robot. De robot kan zelf een andere volgorde kiezen.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger die moet starten."
+        },
+        "room_ids": {
+          "name": "Kamer-ID's in volgorde",
+          "description": "Vaste kamer-ID's in de gewenste schoonmaakvolgorde."
+        },
+        "room_settings": {
+          "name": "Kamerinstellingen",
+          "description": "Optioneel object met de vaste kamer-ID als sleutel, met optielabels die vóór het starten worden toegepast."
+        }
+      }
+    },
+    "cancel_drying": {
+      "name": "Drogen annuleren",
+      "description": "Stop het drogen van de dweilrol voor een verbonden Dyson-stofzuiger. De status van het dock wordt bijgewerkt zodra de robot de wijziging bevestigt.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger die zijn dweilrol aan het drogen is."
+        }
+      }
+    },
+    "clean_zone": {
+      "name": "Zone schoonmaken",
+      "description": "Maak één rechthoek op de actieve kaart schoon met eigen instellingen, zoals de modus Doel in de MyDyson-app. Kamerinstellingen worden niet gewijzigd. Voorlopig alleen voor de Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger"
+        },
+        "map_id": {
+          "name": "Kaart-ID",
+          "description": "ID van de actieve kaart, van de stofzuiger of de gekalibreerde camerafoto. Bij een andere actieve kaart wordt de start geweigerd."
+        },
+        "rectangle": {
+          "name": "Rechthoek",
+          "description": "Vier robotcoördinaten in meters, [x_min, y_min, x_max, y_max]. Geen beeldpixels. Controleer het gebied voordat je start."
+        },
+        "cleaning_strategy": {
+          "name": "Zuigkracht",
+          "description": "Standaard auto."
+        },
+        "clean_type": {
+          "name": "Schoonmaakmodus",
+          "description": "Standaard vacuum (alleen stofzuigen)."
+        },
+        "water_level": {
+          "name": "Waterniveau",
+          "description": "Standaard low. Alleen van belang voor modi waarin gedweild wordt."
+        },
+        "mop_passes": {
+          "name": "Dweilrondes",
+          "description": "Standaard 1. Met 2 wordt de beurt herhaald in elke schoonmaakmodus, ook bij alleen stofzuigen. Met vacuumThenMop geeft dit één stofzuigronde en twee dweilrondes."
+        },
+        "dry_passes": {
+          "name": "Stofzuigrondes",
+          "description": "Standaard 1. Wordt verstuurd zoals de app het doet, maar 2 had geen effect in tests op de robot; gebruik dweilrondes voor een tweede ronde."
+        }
+      }
+    },
+    "clean_whole_home": {
+      "name": "Hele huis schoonmaken",
+      "description": "Experimenteel. Start dezelfde schoonmaakbeurt als de knop op de robot. Het is nog niet bevestigd of daarbij elke kamer met haar opgeslagen instellingen wordt schoongemaakt, of dat de laatste beurt van de robot wordt herhaald. Kamerinstellingen worden niet gewijzigd. Voorlopig alleen voor de Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cleaning_solution": {
+        "name": "Reinigingsmiddel",
+        "state": {
+          "ok": "OK",
+          "refill_required": "Bijvullen nodig"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Kaartinstellingen",
+        "description": "Wijzigingen gelden vanaf de volgende verversing van de camera, ook terwijl de laatste schoonmaakkaart wordt bewaard.",
+        "data": {
+          "map_retention_minutes": "Bewaartijd",
+          "map_keep_last": "Laatste schoonmaakkaart bewaren",
+          "map_transparent_background": "Transparante achtergrond"
+        },
+        "data_description": {
+          "map_retention_minutes": "Tijd na het einde of annuleren van de schoonmaakbeurt. Stel in op 0 om bewaren op tijd uit te schakelen. Pauzes en overgangen tussen stofzuigen en dweilen houden de kaart vast zonder deze timer te starten.",
+          "map_keep_last": "Bewaar de laatste schoonmaakkaart tot er een nieuwe beurt start, de kaart verandert of de integratie herstart. Gaat vóór de bewaartijd. Als dit uit staat, telt de tijd vanaf het oorspronkelijke einde van de beurt.",
+          "map_transparent_background": "Verwijder de achtergrond van de kaart, om hem over een plattegrond te leggen."
+        },
+        "sections": {
+          "line_settings_section": {
+            "name": "Uiterlijk",
+            "data": {
+              "map_vacuum_color": "Kleur stofzuigpad",
+              "map_mop_color": "Kleur dweilpad",
+              "map_combined_color": "Kleur pad stofzuigen en dweilen",
+              "map_path_width": "Padbreedte",
+              "map_glow_width": "Gloedbreedte",
+              "map_room_colors": "Kamerkleuren"
+            },
+            "data_description": {
+              "map_combined_color": "Voor tegelijk stofzuigen en dweilen. Bij na elkaar schoonmaken blijven de aparte kleuren voor stofzuigen en dweilen gelden.",
+              "map_path_width": "Lijndikte in pixels van het bronbeeld. Schalen op het dashboard beïnvloedt de getoonde grootte.",
+              "map_glow_width": "Totale breedte van de doorschijnende band achter dweilpaden en paden van stofzuigen en dweilen, zoals in de MyDyson-app. Paden van alleen stofzuigen hebben geen gloed. Kies een waarde groter dan de padbreedte voor een zichtbare gloed. Stel in op 0 om uit te schakelen.",
+              "map_room_colors": "Geef elke kamer een eigen kleur voor de vloer, de omtrek, de naam, de oppervlakte en de legenda, vast per kaart en kamer. Muren worden wit; de kleuren van de schoonmaakpaden blijven gelijk."
+            }
+          },
+          "outside_walls_section": {
+            "name": "Buitenmuren",
+            "description": "Een rand van een kamer die niet met een andere kamer wordt gedeeld.",
+            "data": {
+              "map_wall_style": "Stijl",
+              "map_wall_thickness_cm": "Dikte",
+              "map_wall_color": "Kleur"
+            },
+            "data_description": {
+              "map_wall_thickness_cm": "In centimeters op de echte vloer, zodat muren meeschalen met de kaart.",
+              "map_wall_color": "Het standaardgrijs wordt wit als Kamerkleuren aan staat of de vloervulling uit. Elke andere kleur wordt gebruikt zoals gekozen."
+            }
+          },
+          "inner_walls_section": {
+            "name": "Muren tussen kamers",
+            "description": "Een dichte muur die twee kamers delen.",
+            "data": {
+              "map_inner_wall_style": "Stijl",
+              "map_inner_wall_thickness_cm": "Dikte",
+              "map_inner_wall_color": "Kleur"
+            },
+            "data_description": {
+              "map_inner_wall_thickness_cm": "In centimeters op de echte vloer.",
+              "map_inner_wall_color": "Het standaardgrijs wordt wit als Kamerkleuren aan staat of de vloervulling uit. Elke andere kleur wordt gebruikt zoals gekozen."
+            }
+          },
+          "doors_section": {
+            "name": "Deuren en doorgangen",
+            "description": "Waar de robot van de ene kamer naar de volgende kan, ook bij open indelingen.",
+            "data": {
+              "map_door_style": "Stijl",
+              "map_door_thickness_cm": "Dikte",
+              "map_door_color": "Kleur"
+            },
+            "data_description": {
+              "map_door_thickness_cm": "In centimeters op de echte vloer.",
+              "map_door_color": "Het standaardgrijs wordt lichtgrijs als Kamerkleuren aan staat of de vloervulling uit. Elke andere kleur wordt gebruikt zoals gekozen."
+            }
+          },
+          "floor_section": {
+            "name": "Vloer",
+            "data": {
+              "map_floor_color": "Kleur bereikbare vloer",
+              "map_room_fill_color": "Kleur rest van de kamer"
+            },
+            "data_description": {
+              "map_floor_color": "Alleen gebruikt als Kamerkleuren uit staat. Met Kamerkleuren aan krijgt de vloer van elke kamer haar kamerkleur.",
+              "map_room_fill_color": "Meubels en andere delen van een kamer die de robot niet kan bereiken."
+            }
+          },
+          "keepout_section": {
+            "name": "Verboden zones",
+            "description": "Tonen of verbergen kan onder Zichtbare elementen.",
+            "data": {
+              "map_keepout_style": "Stijl",
+              "map_keepout_thickness_cm": "Dikte",
+              "map_keepout_color": "Kleur"
+            },
+            "data_description": {
+              "map_keepout_thickness_cm": "Dikte van de omtrek in centimeters op de echte vloer.",
+              "map_keepout_color": "Kleur van de omtrek; de zone wordt gevuld met een lichte tint ervan."
+            }
+          },
+          "visibility_settings_section": {
+            "name": "Zichtbare elementen",
+            "description": "Ingeschakelde elementen zijn zichtbaar. Verborgen elementen tellen nog mee voor de afmetingen van het beeld, zodat een overlay goed blijft uitgelijnd.",
+            "data": {
+              "map_show_furniture": "Meubels tonen",
+              "map_show_room_names": "Kamernamen tonen",
+              "map_center_room_names": "Kamernamen centreren",
+              "map_show_room_areas": "Oppervlakte van kamers tonen (m²)",
+              "map_show_legend": "Legenda tonen",
+              "map_show_status_areas": "Schoonmaakstatus per gebied tonen",
+              "map_show_perimeter": "Muren en kamerscheidingen tonen",
+              "map_show_visited_paths": "Omtrek van bereikbare vloer tonen",
+              "map_show_grid": "Raster tonen",
+              "map_show_dock": "Laadstation tonen",
+              "map_show_restrictions": "Verboden zones tonen",
+              "map_floor_fill": "Vloerarcering tonen"
+            },
+            "data_description": {
+              "map_center_room_names": "Zet elke kamernaam in het midden van de muren van de kamer. Uit gebruikt de posities van de MyDyson-app.",
+              "map_floor_fill": "Donker voor de vloer die de robot kan bereiken, grijs voor meubels en andere plekken die hij niet kan bereiken. Zet uit om de kaart over je eigen plattegrond te leggen.",
+              "map_show_status_areas": "Gekleurde kamervlakken die de voortgang van het schoonmaken tonen.",
+              "map_show_perimeter": "Muren als doorgetrokken lijnen, en deuren of doorgangen tussen kamers als stippellijnen, zoals in de MyDyson-app.",
+              "map_show_visited_paths": "Omtrek van de vloer die de robot in elke kamer kan bereiken. Gaat om meubels heen.",
+              "map_show_grid": "Inclusief afstandslabels en de markering van de kaartoorsprong.",
+              "map_show_legend": "De legenda heeft eigen kamerlabels, los van Kamernamen tonen."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "invalid_map_option": "Voer een geldige waarde binnen het toegestane bereik in."
+    }
+  },
+  "selector": {
+    "line_style": {
+      "options": {
+        "solid": "Doorgetrokken",
+        "dashed": "Gestippeld"
+      }
+    }
+  },
+  "issues": {
+    "experimental_robot": {
+      "title": "Help ondersteuning voor je Dyson-robot toe te voegen",
+      "description": "**{name}** (producttype {product_type}, prefix {prefix}) is ingesteld als **experimentele** robot: dit model wordt nog niet volledig ondersteund, dus sommige functies werken mogelijk niet.\n\nJe kunt helpen: schakel debuglogging in voor deze integratie (Instellingen → Apparaten & diensten → Dyson Spot+Scrub AI → ⋮ → Debuglogging inschakelen), laat één schoonmaakbeurt uitvoeren, schakel debuglogging weer uit om het logboek te downloaden en deel het op de pagina met issues: {issues_url}. Verwijder eerst het serienummer van je robot uit het logboek. Kies **Meer informatie** om een nieuw issue te openen."
+    }
+  }
+}
