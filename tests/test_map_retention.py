@@ -140,6 +140,22 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.camera.frame_interval, 60)
         self.assertIsNone(self.camera._last_cleaning_image)
 
+    async def test_bumper_colour_attribute(self):
+        """#60: the card reads the map's bumper colour from the camera."""
+        writes = []
+        self.camera.hass = object()
+        self.camera.entity_id = 'camera.test_floor_map'
+        self.camera.async_write_ha_state = lambda: writes.append(
+            self.camera.extra_state_attributes['robot_bumper_color'])
+        self.state('FULL_CLEAN_RUNNING', 'VACUUMING')
+        self.state('FULL_CLEAN_RUNNING', 'VACUUMING')         # unchanged: no extra write
+        self.state('FULL_CLEAN_PAUSED', 'VACUUMING')
+        self.state('FULL_CLEAN_RUNNING', 'VACUUMING',
+                   activeFaults=[{'faultCode': '586', 'nextActionRequired': 'USER_RECOVERABLE'}])
+        vacuum = '#%02x%02x%02x' % tuple(self.camera._render_options['map_vacuum_color'])
+        self.assertEqual(writes, [vacuum, '#cdcdd4', '#e11d2a'])
+        self.assertIn('robot_bumper_color', self.camera._unrecorded_attributes)
+
     async def test_robot_state_for_the_bumper(self):
         """#60: the action while cleaning, grey when paused or between areas, red on a fault."""
         for status, action, extra, expected in (
