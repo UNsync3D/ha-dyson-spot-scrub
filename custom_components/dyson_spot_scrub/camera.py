@@ -34,9 +34,9 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN, CONF_SERIAL, CONF_AUTH_TOKEN
 from .coordinator import DysonCoordinator
 from .dyson_api import get_current_map, get_map_metadata, DysonApiError
-from .dyson_mqtt import RUNNING_STATES, is_any_cleaning
+from .dyson_mqtt import RUNNING_STATES, has_fault, is_any_cleaning
 from .entity_helpers import device_info
-from .map_renderer import format_path_codes, path_code_counts, render_map
+from .map_renderer import format_path_codes, path_code_counts, render_map, robot_bumper_color
 from .map_options import map_options
 from .map_path import PathHistory
 
@@ -65,6 +65,7 @@ class _CleaningStateListener:
 
     def async_write_ha_state(self) -> None:
         self._camera._observe_cleaning_state()
+        self._camera._update_bumper_color()
 
 
 async def async_setup_entry(
@@ -92,7 +93,8 @@ class DysonMapCamera(Camera):
     """
 
     # Calibration changes with each frame; keep it live but out of history.
-    _unrecorded_attributes = frozenset({"map_calibration"})
+    # Both change with the robot and are only useful live.
+    _unrecorded_attributes = frozenset({"map_calibration", "robot_bumper_color"})
 
     _attr_has_entity_name = True
     _attr_name            = "Floor Map"
@@ -140,6 +142,7 @@ class DysonMapCamera(Camera):
         self._last_source: tuple | None = None
         self._last_image_options: dict | None = None
         self._map_calibration: dict = {}
+        self._last_bumper_color: str | None = None
         self._path_history = PathHistory()
         self._path_codes: dict = {}
         self._observed_action: str | None = None
@@ -271,10 +274,27 @@ class DysonMapCamera(Camera):
     @property
     def extra_state_attributes(self) -> dict:
         """Calibration belongs to the exact PNG, and only to the active map."""
+        attrs: dict = {}
+        if self._coordinator.mqtt is not None:
+            # The map's bumper colour, for cards that draw their own robot (#60).
+            attrs["robot_bumper_color"] = self._bumper_color()
         current = self._coordinator.mqtt.state.get("persistentMapId") if self._coordinator.mqtt else None
-        if current is None or self._map_calibration.get("map_id") != str(current):
-            return {}
-        return {"map_calibration": dict(self._map_calibration)}
+        if current is not None and self._map_calibration.get("map_id") == str(current):
+            attrs["map_calibration"] = dict(self._map_calibration)
+        return attrs
+
+    def _bumper_color(self) -> str:
+        """The robot's bumper colour on the map, as "#rrggbb"."""
+        r, g, b, *_ = robot_bumper_color(self._robot_state(), self._render_options)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _update_bumper_color(self) -> None:
+        """Write the state when the colour changes, so the attribute stays live."""
+        color = self._bumper_color() if self._coordinator.mqtt is not None else None
+        if color != self._last_bumper_color:
+            self._last_bumper_color = color
+            if getattr(self, "hass", None) is not None and getattr(self, "entity_id", None):
+                self.async_write_ha_state()
 
     def _set_calibration(self, calibration: dict) -> None:
         if calibration != self._map_calibration:
@@ -469,6 +489,9 @@ class DysonMapCamera(Camera):
         retained = self._retained_image()
         if generation != self._cleaning_generation or retained is not None:
             return retained or self._last_image
+        if live_data:
+            # The robot's bumper shows what it's doing (#60).
+            live_data = {**live_data, "_robotState": self._robot_state()}
         try:
             source = deepcopy((patched_map, self._metadata, live_data))
             image_bytes, options, calibration = await self._render_source(source)
@@ -488,6 +511,17 @@ class DysonMapCamera(Camera):
             return self._last_image
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _robot_state(self) -> str:
+        """"fault", the current cleaning action, or "idle", for the robot marker."""
+        mqtt = self._coordinator.mqtt
+        state = dict(mqtt.state) if mqtt is not None else {}
+        if has_fault(state):
+            return "fault"
+        if state.get("state") == "FULL_CLEAN_PAUSED":
+            return "idle"   # a paused robot can still report its last action
+        action = state.get("fullCleanAction")
+        return action if isinstance(action, str) and action != "NONE" else "idle"
 
     async def _async_refresh_static_map(self) -> None:
         """Fetch (or re-fetch) the persistent map and metadata from Dyson's API.

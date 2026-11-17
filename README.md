@@ -151,7 +151,7 @@ The Floor Map camera entity draws a live PNG in the style of the MyDyson app:
 
 - **Rooms:** walls, doors and room dividers from your Dyson map, with the floor the robot can reach shaded dark and the rest of each room grey.
 - **Cleaned path:** smooth lines, purple for vacuuming and blue with a soft glow for mopping. Travel between areas isn't drawn.
-- **Robot:** seen from above, with a red front bumper and a green beam showing which way it's heading.
+- **Robot:** seen from above, with a green beam showing which way it's heading. Its front bumper shows what it's doing: the path colour while vacuuming or mopping, light grey when paused or between areas, and red when it reports a fault.
 - **Dock and room names:** names are centred in each room by default.
 
 The map refreshes about every 5 seconds while the robot is cleaning, and every 60 seconds otherwise. After a clean, the last map is kept for 5 minutes by default.
@@ -242,7 +242,7 @@ data:
 
 ### For dashboard card developers
 
-The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. More detail: [start readiness](docs/START_READINESS.md) and [consumable sensors](docs/CONSUMABLES.md).
+The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. The Floor Map camera exposes `robot_bumper_color` (for example `"#825fc8"`): the robot's bumper colour on the map, so a card drawing its own robot can match it. More detail: [start readiness](docs/START_READINESS.md) and [consumable sensors](docs/CONSUMABLES.md).
 
 ### Languages
 

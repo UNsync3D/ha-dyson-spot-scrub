@@ -206,4 +206,4 @@ class ZoneCameraTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await self.camera.async_camera_image(), image)
         self.assertEqual(self.camera.extra_state_attributes["map_calibration"], calibration)
         self.state("INACTIVE_CHARGING", map_id=456)
-        self.assertEqual(self.camera.extra_state_attributes, {})
+        self.assertNotIn("map_calibration", self.camera.extra_state_attributes)

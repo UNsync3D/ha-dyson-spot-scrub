@@ -67,7 +67,8 @@ DOCK           = (52,  211, 153, 255)   # #34d399 emerald green
 ROBOT_BODY     = (58,  58,  64,  255)   # charcoal top
 ROBOT_RIM      = (255, 255, 255, 230)
 ROBOT_SHADOW   = (0,   0,   0,   110)
-ROBOT_BUMPER   = (225, 29,  42,  255)   # #e11d2a red front bumper
+ROBOT_BUMPER   = (225, 29,  42,  255)   # #e11d2a red front bumper: a fault
+ROBOT_BUMPER_IDLE = (205, 205, 212, 255)  # light grey: paused or between areas
 ROBOT_TURRET   = (200, 200, 205, 255)
 ROBOT_SENSOR   = (57,  255, 20,  255)   # #39ff14 fluorescent green
 ROBOT_BEAM     = (57,  255, 20)         # heading beam, alpha fades outwards
@@ -394,7 +395,8 @@ def _render(
         robot = live_data.get("robotLocation")
         if robot:
             angle  = float(robot.get("angle", 0.0))
-            _draw_robot(img, tx(robot["x"]), ty(robot["y"]), angle)
+            _draw_robot(img, tx(robot["x"]), ty(robot["y"]), angle,
+                        robot_bumper_color(live_data.get("_robotState"), options))
 
     # ── 10. Zone labels ───────────────────────────────────────────────────────
     font_l, font_s = _load_fonts()
@@ -1049,9 +1051,26 @@ BEAM_HALF_ANGLE = 30.0  # degrees either side of the heading
 _SS = 4                 # supersampling for smooth edges
 
 
-def _draw_robot(img, cx: float, cy: float, angle: float) -> None:
-    """Robot seen from above: charcoal body, white rim, red front bumper,
-    sensor turret with a green dot, and a green beam that fades outwards."""
+def robot_bumper_color(state: str | None, options: dict) -> tuple:
+    """The bumper shows what the robot is doing (FutuRazor's idea, #60).
+
+    The path colour of the current cleaning action (vacuum, mop, or both),
+    red for a fault, and light grey otherwise: paused, or driving between
+    areas. The path colours follow the map options.
+    """
+    if state == "fault":
+        return ROBOT_BUMPER
+    key = MAP_PATH_ACTIONS.get(state) if state else None
+    color = options.get(key) if key else None
+    if isinstance(color, (list, tuple)) and len(color) >= 3:
+        return tuple(int(c) for c in color[:3]) + (255,)
+    return ROBOT_BUMPER_IDLE
+
+
+def _draw_robot(img, cx: float, cy: float, angle: float, bumper: tuple = ROBOT_BUMPER) -> None:
+    """Robot seen from above: charcoal body, white rim, a front bumper in the
+    given colour, sensor turret with a green dot, and a green beam that fades
+    outwards."""
     reach = int(math.ceil(BEAM_LENGTH)) + 3
     box = _overlay_box(img, [int(cx) - reach, int(cx) + reach], [int(cy) - reach, int(cy) + reach])
     if box is None:
@@ -1085,7 +1104,7 @@ def _draw_robot(img, cx: float, cy: float, angle: float) -> None:
     disc(draw, ROBOT_RADIUS, fill=ROBOT_BODY, outline=ROBOT_RIM, width=int(1.5 * _SS))
     r = ROBOT_RADIUS * _SS
     draw.arc([ox - r, oy - r, ox + r, oy + r], heading - 60, heading + 60,
-             fill=ROBOT_BUMPER, width=int(3.2 * _SS))
+             fill=bumper, width=int(3.2 * _SS))
     fx = ox + 4.5 * _SS * math.cos(angle)
     fy = oy - 4.5 * _SS * math.sin(angle)
     for rad, col in ((3.2, ROBOT_TURRET), (1.4, ROBOT_SENSOR)):
