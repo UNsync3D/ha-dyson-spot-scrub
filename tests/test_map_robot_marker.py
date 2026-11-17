@@ -1,4 +1,4 @@
-"""Robot marker: body from above, red bumper, fading green heading beam."""
+"""Robot marker: body from above, state-coloured bumper, fading green heading beam."""
 import importlib.util
 import math
 from pathlib import Path
@@ -57,6 +57,26 @@ class RobotMarkerTests(unittest.TestCase):
         self.assertFalse(reddish(img.getpixel((49, 60))))
         r, g, b, _ = img.getpixel((56, 60))
         self.assertTrue(40 < r < 80 and abs(r - g) < 10)
+
+    def test_bumper_shows_the_robots_state(self):
+        """FutuRazor's idea (#60): path colour, grey, or red on a fault."""
+        options = {"map_vacuum_color": [130, 95, 200], "map_mop_color": [72, 128, 214],
+                   "map_combined_color": [10, 200, 90]}
+        colour = renderer.robot_bumper_color
+        self.assertEqual(colour("VACUUMING", options), (130, 95, 200, 255))
+        self.assertEqual(colour("MOPPING", options), (72, 128, 214, 255))
+        self.assertEqual(colour("VACUUMING_AND_MOPPING", options), (10, 200, 90, 255))
+        self.assertEqual(colour("fault", options), renderer.ROBOT_BUMPER)
+        for state in ("idle", None, "SOMETHING_NEW"):
+            self.assertEqual(colour(state, options), renderer.ROBOT_BUMPER_IDLE)
+        img = canvas()
+        renderer._draw_robot(img, 60, 60, 0.0, colour("VACUUMING", options))
+        r, g, b, _ = img.getpixel((71, 60))
+        self.assertTrue(b > 150 and r > 90 and g < 140)           # purple, not red
+        img = canvas()
+        renderer._draw_robot(img, 60, 60, 0.0, colour("idle", options))
+        r, g, b, _ = img.getpixel((71, 60))
+        self.assertTrue(r > 150 and abs(r - b) < 25)              # light grey
 
     def test_green_sensor_dot_sits_towards_the_front(self):
         img = canvas()

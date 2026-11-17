@@ -34,7 +34,7 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN, CONF_SERIAL, CONF_AUTH_TOKEN
 from .coordinator import DysonCoordinator
 from .dyson_api import get_current_map, get_map_metadata, DysonApiError
-from .dyson_mqtt import RUNNING_STATES, is_any_cleaning
+from .dyson_mqtt import RUNNING_STATES, has_fault, is_any_cleaning
 from .entity_helpers import device_info
 from .map_renderer import format_path_codes, path_code_counts, render_map
 from .map_options import map_options
@@ -469,6 +469,9 @@ class DysonMapCamera(Camera):
         retained = self._retained_image()
         if generation != self._cleaning_generation or retained is not None:
             return retained or self._last_image
+        if live_data:
+            # The robot's bumper shows what it's doing (#60).
+            live_data = {**live_data, "_robotState": self._robot_state()}
         try:
             source = deepcopy((patched_map, self._metadata, live_data))
             image_bytes, options, calibration = await self._render_source(source)
@@ -488,6 +491,17 @@ class DysonMapCamera(Camera):
             return self._last_image
 
     # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _robot_state(self) -> str:
+        """"fault", the current cleaning action, or "idle", for the robot marker."""
+        mqtt = self._coordinator.mqtt
+        state = dict(mqtt.state) if mqtt is not None else {}
+        if has_fault(state):
+            return "fault"
+        if state.get("state") == "FULL_CLEAN_PAUSED":
+            return "idle"   # a paused robot can still report its last action
+        action = state.get("fullCleanAction")
+        return action if isinstance(action, str) and action != "NONE" else "idle"
 
     async def _async_refresh_static_map(self) -> None:
         """Fetch (or re-fetch) the persistent map and metadata from Dyson's API.

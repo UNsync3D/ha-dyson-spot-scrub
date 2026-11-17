@@ -90,10 +90,13 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.fetch = self.enterContext(patch.object(
             coordinator_module, 'get_live_map', AsyncMock(side_effect=lambda *args, **kwargs: self.path)))
         self.rendered = []
+        self.robot_states = []
 
         def render(map_data, metadata, live, options=None, **kwargs):
             # Original retention assertions focus on API data, not path metadata.
-            original = {k: v for k, v in live.items() if k != '_pathModes'} if live else live
+            original = ({k: v for k, v in live.items() if k not in ('_pathModes', '_robotState')}
+                        if live else live)
+            self.robot_states.append(live.get('_robotState') if live else None)
             self.rendered.append(original)
             return repr(original).encode() if original else b'static'
 
@@ -137,6 +140,21 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.camera.frame_interval, 60)
         self.assertIsNone(self.camera._last_cleaning_image)
 
+    async def test_robot_state_for_the_bumper(self):
+        """#60: the action while cleaning, grey when paused or between areas, red on a fault."""
+        for status, action, extra, expected in (
+                ('FULL_CLEAN_RUNNING', 'VACUUMING', {}, 'VACUUMING'),
+                ('FULL_CLEAN_RUNNING', 'MOPPING', {}, 'MOPPING'),
+                ('FULL_CLEAN_RUNNING', 'NONE', {}, 'idle'),
+                ('FULL_CLEAN_PAUSED', 'VACUUMING', {}, 'idle'),
+                ('FULL_CLEAN_RUNNING', 'VACUUMING',
+                 {'activeFaults': [{'faultCode': '586', 'nextActionRequired': 'USER_RECOVERABLE'}]}, 'fault'),
+                ('FULL_CLEAN_RUNNING', 'VACUUMING',
+                 {'activeFaults': [{'faultCode': '5001', 'nextActionRequired': 'LOG_ONLY'}]}, 'VACUUMING')):
+            with self.subTest(status=status, action=action, extra=extra):
+                self.state(status, action, **extra)
+                self.assertEqual(self.camera._robot_state(), expected)
+
     async def test_pause_resume_and_abort(self):
         image = await self.start()
         self.state('FULL_CLEAN_PAUSED', 'VACUUMING')
@@ -148,6 +166,8 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
         self.path = {'cleanPath': [[1, 1], [2, 2], [3, 3]]}
         image = await self.camera.async_camera_image()
         self.assertEqual(self.rendered[-1], self.path)
+        self.assertEqual(self.robot_states[-1], 'VACUUMING')       # bumper colour (#60)
+        self.assertNotIn('_robotState', self.coordinator._live_map_cache or {})
         self.state('FULL_CLEAN_PAUSED')
         self.state('ABORTED')
         self.state('CHARGING')

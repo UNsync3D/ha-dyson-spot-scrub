@@ -151,7 +151,7 @@ The Floor Map camera entity draws a live PNG in the style of the MyDyson app:
 
 - **Rooms:** walls, doors and room dividers from your Dyson map, with the floor the robot can reach shaded dark and the rest of each room grey.
 - **Cleaned path:** smooth lines, purple for vacuuming and blue with a soft glow for mopping. Travel between areas isn't drawn.
-- **Robot:** seen from above, with a red front bumper and a green beam showing which way it's heading.
+- **Robot:** seen from above, with a green beam showing which way it's heading. Its front bumper shows what it's doing: the path colour while vacuuming or mopping, light grey when paused or between areas, and red when it reports a fault.
 - **Dock and room names:** names are centred in each room by default.
 
 The map refreshes about every 5 seconds while the robot is cleaning, and every 60 seconds otherwise. After a clean, the last map is kept for 5 minutes by default.
