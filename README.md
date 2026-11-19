@@ -246,7 +246,7 @@ The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason`
 
 ### Languages
 
-The integration follows your Home Assistant language in **English**, **Dutch** and **German**: setup and options screens, error messages, action descriptions and entity names (for example *Huidige kamer* or *Aktueller Raum* for Current room).
+The integration follows your Home Assistant language in **English**, **Dutch**, **German** and **French**: setup and options screens, error messages, action descriptions and entity names (for example *Huidige kamer*, *Aktueller Raum* or *Pièce actuelle* for Current room).
 
 - **Option labels stay in English**, such as *Vacuum* or *Two Passes*. Automations, the dashboard card and the actions use them as values.
 - **Room names** come from the MyDyson app, in whatever language you named your rooms.

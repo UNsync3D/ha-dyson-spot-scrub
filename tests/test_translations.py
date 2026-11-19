@@ -1,4 +1,4 @@
-"""Translations (#57): English, Dutch and German cover the same text and placeholders."""
+"""Translations (#57): English, Dutch, German and French cover the same text and placeholders."""
 import ast
 import json
 from pathlib import Path
@@ -25,7 +25,7 @@ def placeholders(text):
 
 class TranslationTests(unittest.TestCase):
     def test_languages(self):
-        self.assertEqual(set(LANGS), {"en", "nl", "de"})
+        self.assertEqual(set(LANGS), {"en", "nl", "de", "fr"})
 
     def test_strings_json_matches_english(self):
         self.assertEqual(json.loads((ROOT / "strings.json").read_text()), LANGS["en"])
