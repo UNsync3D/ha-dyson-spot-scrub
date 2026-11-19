@@ -64,16 +64,31 @@ def collect(root):
             for e in ents:
                 di = {k: sorted(map(list, v)) if isinstance(v, set) else v for k, v in e._attr_device_info.items()}
                 out.append([platform, type(e).__name__, e._attr_unique_id, di])
-                NAMES[e._attr_unique_id] = getattr(e, '_attr_name', None)
+                NAMES[e._attr_unique_id] = display_name(platform, e)
         return sorted(out, key=lambda r: r[2])
 
 
 NAMES = {}
+EN = json.loads((Path(ROOT) / "translations/en.json").read_text())
+
+
+def display_name(platform, entity):
+    """The English name Home Assistant shows: a fixed name, or the translated one (#57)."""
+    if getattr(entity, '_attr_name', None) is not None or not getattr(entity, '_attr_translation_key', None):
+        return getattr(entity, '_attr_name', None)
+    name = EN["entity"][platform][entity._attr_translation_key]["name"]
+    return name.format(**getattr(entity, '_attr_translation_placeholders', {}) or {})
 
 
 class EntityCompatibilityTests(unittest.TestCase):
     def test_unique_ids_and_devices_match_snapshot(self):
         self.assertEqual(collect(str(ROOT)), json.loads(SNAPSHOT.read_text()))
+
+    def test_english_names_are_unchanged(self):
+        """#57: names are translated now, but English users see exactly the old names."""
+        collect(str(ROOT))
+        before = json.loads((SNAPSHOT.parent / "entity_names_en.json").read_text())
+        self.assertEqual({uid: NAMES[uid] for uid in before}, before)
 
     def test_repetitions_select_is_renamed_but_keeps_its_id(self):
         """#35: shown as Clean Repetitions; the card finds it by unique ID."""

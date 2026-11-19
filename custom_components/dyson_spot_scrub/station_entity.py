@@ -27,7 +27,8 @@ class StationEntity:
         self._coordinator = coordinator
         self._setting_key = key
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_{self._id_group}_{key}"
-        self._attr_name = name
+        # Translated name (#57); `name` is the English one, kept in strings.json.
+        self._attr_translation_key = key
         self._attr_device_info = device_info(entry)
         self._pending = None        # (value, monotonic deadline) after a change
         self._pending_timer = None

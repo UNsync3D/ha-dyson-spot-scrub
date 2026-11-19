@@ -177,7 +177,7 @@ class DysonCleaningModeSelectEntity(SelectEntity):
     """Drop-down for selecting the cleaning mode applied when starting all rooms."""
 
     _attr_has_entity_name = True
-    _attr_name = "Vacuum Mode"
+    _attr_translation_key = "vacuum_mode"
     _attr_icon = "mdi:robot-vacuum"
     _attr_should_poll = False
     _attr_options = CLEANING_MODES
@@ -264,7 +264,9 @@ class DysonRoomSelectEntity(SelectEntity):
         self._attr_unique_id = (
             f"{entry.data[CONF_SERIAL]}_room_{room_slug(room_name)}_{select_type}"
         )
-        self._attr_name      = f"Room {room_name} {label}"
+        # Translated name, e.g. "Room Kitchen Cleaning Mode" (#57).
+        self._attr_translation_key = f"room_{select_type}"
+        self._attr_translation_placeholders = {"room": room_name}
         self._attr_icon      = icon
         self._attr_options   = list(options_map.values())
         self._attr_device_info = device_info(entry)

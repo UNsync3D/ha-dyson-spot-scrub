@@ -129,7 +129,7 @@ class R2ConsumableTests(ConsumableTests):
         pad = next(e for e in self.entities
                    if getattr(e, "_attr_extra_state_attributes", {}).get("consumable_type") == "mopPad")
         self.assertEqual(pad._attr_unique_id, "TEST_consumable_mop_pad_usage")
-        self.assertEqual(pad._attr_name, "Mop pad usage")
+        self.assertEqual(pad._attr_translation_key, "mop_pad_usage")   # "Mop pad usage" (#57)
         self.coord.state = {"consumables": [{"type": "mopPad", "usage": 1}]}
         self.assertEqual(pad.native_value, 1)
 

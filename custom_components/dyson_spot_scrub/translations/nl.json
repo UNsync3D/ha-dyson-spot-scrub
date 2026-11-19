@@ -186,13 +186,135 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "docked": {
+        "name": "Gedockt"
+      },
+      "charging": {
+        "name": "Opladen"
+      },
+      "fault": {
+        "name": "Storing"
+      }
+    },
+    "button": {
+      "vacuum_start": {
+        "name": "Stofzuigen starten"
+      },
+      "clean_whole_home": {
+        "name": "Hele huis schoonmaken"
+      },
+      "empty_bin": {
+        "name": "Stofbak legen"
+      },
+      "wash_mop": {
+        "name": "Dweil wassen"
+      },
+      "dry_mop": {
+        "name": "Dweil drogen"
+      }
+    },
+    "camera": {
+      "floor_map": {
+        "name": "Plattegrond"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Volume"
+      }
+    },
+    "select": {
+      "vacuum_mode": {
+        "name": "Stofzuigmodus"
+      },
+      "room_cleaning_mode": {
+        "name": "Kamer {room} schoonmaakmodus"
+      },
+      "room_cleaning_strategy": {
+        "name": "Kamer {room} schoonmaakstrategie"
+      },
+      "room_water_level": {
+        "name": "Kamer {room} waterniveau"
+      },
+      "room_mop_repetitions": {
+        "name": "Kamer {room} schoonmaakrondes"
+      },
+      "self_cleaning_frequency": {
+        "name": "Frequentie zelfreiniging"
+      },
+      "roller_drying_duration": {
+        "name": "Droogduur dweilrol"
+      }
+    },
     "sensor": {
+      "battery": {
+        "name": "Batterij"
+      },
+      "brush_bar_usage": {
+        "name": "Gebruik borstelrol"
+      },
+      "mop_roller_usage": {
+        "name": "Gebruik dweilrol"
+      },
+      "mop_pad_usage": {
+        "name": "Gebruik dweilpad"
+      },
+      "side_brushes_usage": {
+        "name": "Gebruik zijborstels"
+      },
+      "robot_filter_usage": {
+        "name": "Gebruik robotfilter"
+      },
+      "dock_filter_usage": {
+        "name": "Gebruik dockfilter"
+      },
       "cleaning_solution": {
         "name": "Reinigingsmiddel",
         "state": {
           "ok": "OK",
           "refill_required": "Bijvullen nodig"
         }
+      },
+      "drying_remaining": {
+        "name": "Resterende droogtijd dweil"
+      },
+      "current_room": {
+        "name": "Huidige kamer"
+      }
+    },
+    "switch": {
+      "room": {
+        "name": "Kamer {room}"
+      },
+      "hot_water_mopping": {
+        "name": "Dweilen met heet water"
+      },
+      "cleaning_solution": {
+        "name": "Reinigingsmiddel"
+      },
+      "extended_roller_preparation": {
+        "name": "Uitgebreide dweilrolvoorbereiding"
+      },
+      "hot_water_self_cleaning": {
+        "name": "Zelfreiniging met heet water"
+      },
+      "voice_prompts": {
+        "name": "Gesproken meldingen"
+      },
+      "child_lock": {
+        "name": "Kinderslot"
+      },
+      "do_not_disturb": {
+        "name": "Niet storen"
+      }
+    },
+    "time": {
+      "do_not_disturb_start": {
+        "name": "Niet storen begin"
+      },
+      "do_not_disturb_end": {
+        "name": "Niet storen einde"
       }
     }
   },

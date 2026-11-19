@@ -97,7 +97,7 @@ class DysonMapCamera(Camera):
     _unrecorded_attributes = frozenset({"map_calibration", "robot_bumper_color"})
 
     _attr_has_entity_name = True
-    _attr_name            = "Floor Map"
+    _attr_translation_key = "floor_map"
     _attr_icon            = "mdi:map"
     _attr_is_streaming    = False
 

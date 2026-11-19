@@ -186,13 +186,135 @@
     }
   },
   "entity": {
+    "binary_sensor": {
+      "docked": {
+        "name": "Docked"
+      },
+      "charging": {
+        "name": "Charging"
+      },
+      "fault": {
+        "name": "Fault"
+      }
+    },
+    "button": {
+      "vacuum_start": {
+        "name": "Vacuum Start"
+      },
+      "clean_whole_home": {
+        "name": "Clean Whole Home"
+      },
+      "empty_bin": {
+        "name": "Empty Bin"
+      },
+      "wash_mop": {
+        "name": "Wash Mop"
+      },
+      "dry_mop": {
+        "name": "Dry Mop"
+      }
+    },
+    "camera": {
+      "floor_map": {
+        "name": "Floor Map"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Volume"
+      }
+    },
+    "select": {
+      "vacuum_mode": {
+        "name": "Vacuum Mode"
+      },
+      "room_cleaning_mode": {
+        "name": "Room {room} Cleaning Mode"
+      },
+      "room_cleaning_strategy": {
+        "name": "Room {room} Cleaning Strategy"
+      },
+      "room_water_level": {
+        "name": "Room {room} Water Level"
+      },
+      "room_mop_repetitions": {
+        "name": "Room {room} Clean Repetitions"
+      },
+      "self_cleaning_frequency": {
+        "name": "Self-cleaning frequency"
+      },
+      "roller_drying_duration": {
+        "name": "Roller drying duration"
+      }
+    },
     "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "brush_bar_usage": {
+        "name": "Brush bar usage"
+      },
+      "mop_roller_usage": {
+        "name": "Mop roller usage"
+      },
+      "mop_pad_usage": {
+        "name": "Mop pad usage"
+      },
+      "side_brushes_usage": {
+        "name": "Side brushes usage"
+      },
+      "robot_filter_usage": {
+        "name": "Robot filter usage"
+      },
+      "dock_filter_usage": {
+        "name": "Dock filter usage"
+      },
       "cleaning_solution": {
         "name": "Cleaning solution",
         "state": {
           "ok": "OK",
           "refill_required": "Refill required"
         }
+      },
+      "drying_remaining": {
+        "name": "Mop drying time remaining"
+      },
+      "current_room": {
+        "name": "Current room"
+      }
+    },
+    "switch": {
+      "room": {
+        "name": "Room {room}"
+      },
+      "hot_water_mopping": {
+        "name": "Hot water mopping"
+      },
+      "cleaning_solution": {
+        "name": "Cleaning solution"
+      },
+      "extended_roller_preparation": {
+        "name": "Extended roller preparation"
+      },
+      "hot_water_self_cleaning": {
+        "name": "Hot water self-cleaning"
+      },
+      "voice_prompts": {
+        "name": "Voice prompts"
+      },
+      "child_lock": {
+        "name": "Child lock"
+      },
+      "do_not_disturb": {
+        "name": "Do not disturb"
+      }
+    },
+    "time": {
+      "do_not_disturb_start": {
+        "name": "Do not disturb start"
+      },
+      "do_not_disturb_end": {
+        "name": "Do not disturb end"
       }
     }
   },
