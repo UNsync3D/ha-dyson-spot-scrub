@@ -454,6 +454,40 @@
         "solid": "Plein",
         "dashed": "Pointillé"
       }
+    },
+    "room_type": {
+      "options": {
+        "balcony": "Balcon",
+        "bathroom": "Salle de bain",
+        "bedroom": "Chambre",
+        "boxroom": "Débarras",
+        "cloakroom": "Vestiaire",
+        "closet": "Dressing",
+        "conservatory": "Véranda",
+        "dining": "Salle à manger",
+        "ensuite": "Salle de bain attenante",
+        "entrance": "Entrée",
+        "family_room": "Salle familiale",
+        "guest_bathroom": "Salle de bain des invités",
+        "guest_bedroom": "Chambre d'amis",
+        "guest_room": "Chambre d'invités",
+        "hallway": "Couloir",
+        "kids_bedroom": "Chambre d'enfant",
+        "kitchen": "Cuisine",
+        "laundry_room": "Buanderie",
+        "living_room": "Salon",
+        "nursery": "Chambre de bébé",
+        "office": "Bureau",
+        "pantry": "Garde-manger",
+        "play_room": "Salle de jeux",
+        "primary_bathroom": "Salle de bain principale",
+        "primary_bedroom": "Chambre principale",
+        "recreation_room": "Salle de loisirs",
+        "storage_room": "Rangement",
+        "study": "Bureau d'étude",
+        "toilet": "Toilettes",
+        "utility_room": "Arrière-cuisine"
+      }
     }
   },
   "issues": {

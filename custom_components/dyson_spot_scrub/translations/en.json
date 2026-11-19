@@ -454,6 +454,40 @@
         "solid": "Solid",
         "dashed": "Dashed"
       }
+    },
+    "room_type": {
+      "options": {
+        "balcony": "Balcony",
+        "bathroom": "Bathroom",
+        "bedroom": "Bedroom",
+        "boxroom": "Boxroom",
+        "cloakroom": "Cloakroom",
+        "closet": "Closet",
+        "conservatory": "Conservatory",
+        "dining": "Dining",
+        "ensuite": "Ensuite",
+        "entrance": "Entrance",
+        "family_room": "Family Room",
+        "guest_bathroom": "Guest Bathroom",
+        "guest_bedroom": "Guest Bedroom",
+        "guest_room": "Guest Room",
+        "hallway": "Hallway",
+        "kids_bedroom": "Kids Bedroom",
+        "kitchen": "Kitchen",
+        "laundry_room": "Laundry Room",
+        "living_room": "Living Room",
+        "nursery": "Nursery",
+        "office": "Office",
+        "pantry": "Pantry",
+        "play_room": "Play Room",
+        "primary_bathroom": "Primary Bathroom",
+        "primary_bedroom": "Primary Bedroom",
+        "recreation_room": "Recreation Room",
+        "storage_room": "Storage Room",
+        "study": "Study",
+        "toilet": "Toilet",
+        "utility_room": "Utility Room"
+      }
     }
   },
   "issues": {

@@ -55,6 +55,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _report_experimental(hass, entry, mqtt_prefix)
 
+    await _async_load_room_types(hass, coordinator)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 
@@ -108,6 +109,22 @@ def _purge_mop_entities(reg, entry: ConfigEntry, serial: str) -> None:
         if is_mop_only_entity(ent.unique_id, serial):
             _LOGGER.info("Removing %s: this robot has no mop", ent.entity_id)
             reg.async_remove(ent.entity_id)
+
+
+async def _async_load_room_types(hass: HomeAssistant, coordinator) -> None:
+    """Standard room types in the user's language, for room entity names (#57)."""
+    from homeassistant.helpers.translation import async_get_translations
+
+    prefix = f"component.{DOMAIN}.selector.room_type.options."
+    try:
+        translations = await async_get_translations(
+            hass, hass.config.language, "selector", {DOMAIN})
+    except Exception as exc:  # noqa: BLE001 - names fall back to English
+        _LOGGER.debug("Room type translations unavailable: %s", exc)
+        return
+    coordinator.room_type_names = {
+        key[len(prefix):]: value for key, value in translations.items()
+        if key.startswith(prefix)}
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

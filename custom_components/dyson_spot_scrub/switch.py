@@ -64,6 +64,12 @@ async def async_setup_entry(
     _check_for_new_rooms()
 
 
+def _room_label(coordinator, room_name: str) -> str:
+    """Standard room types in the user's language; the English name everywhere else."""
+    label = getattr(coordinator, "room_label", None)
+    return label(room_name) if callable(label) else room_name
+
+
 class DysonRoomSwitchEntity(SwitchEntity):
     """Toggle switch for a single mapped room.
 
@@ -87,7 +93,7 @@ class DysonRoomSwitchEntity(SwitchEntity):
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_room_{room_slug(room_name)}"
         # Translated name, e.g. "Room Kitchen" (#57).
         self._attr_translation_key = "room"
-        self._attr_translation_placeholders = {"room": room_name}
+        self._attr_translation_placeholders = {"room": _room_label(coordinator, room_name)}
         self._attr_device_info = device_info(entry)
 
     async def async_added_to_hass(self) -> None:

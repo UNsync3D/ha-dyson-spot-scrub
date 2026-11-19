@@ -8,6 +8,7 @@ an entity's identity must update it deliberately.
 import asyncio
 import enum
 import importlib
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -17,10 +18,14 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1] / "custom_components/dyson_spot_scrub"
+_spec = importlib.util.spec_from_file_location("room_types_for_tests", ROOT / "room_types.py")
+_room_types = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_room_types)
+sys.modules["room_types_for_tests"] = _room_types
 SNAPSHOT = Path(__file__).resolve().parent / "fixtures/entity_registry_snapshot.json"
 
 
-def collect(root):
+def collect(root, room_labels=None):
     stubs = {}
     def mod(name, **kw):
         m = types.ModuleType(name); m.__dict__.update(kw); stubs[name] = m; return m
@@ -51,6 +56,9 @@ def collect(root):
         mqtt = NS(connected=True, room_names=rooms, room_preferences=[], state={})
         coord = NS(mqtt=mqtt, cached_room_names=rooms, room_names=rooms, state={}, serial='7VD-AU-ABC1234A',
                    current_mode='Vacuum', async_add_listener=lambda l: None)
+        if room_labels is not None:
+            from room_types_for_tests import translate_room
+            coord.room_label = lambda name: translate_room(name, room_labels)
         entry = NS(entry_id='e', data={'serial': '7VD-AU-ABC1234A', 'device_name': 'Robot', 'product_type': '804',
                                        'auth_token': 't'}, options={})
         hass = NS(data={'dyson_spot_scrub': {'e': coord}},
@@ -65,10 +73,12 @@ def collect(root):
                 di = {k: sorted(map(list, v)) if isinstance(v, set) else v for k, v in e._attr_device_info.items()}
                 out.append([platform, type(e).__name__, e._attr_unique_id, di])
                 NAMES[e._attr_unique_id] = display_name(platform, e)
+                PLACEHOLDERS[e._attr_unique_id] = getattr(e, '_attr_translation_placeholders', None)
         return sorted(out, key=lambda r: r[2])
 
 
 NAMES = {}
+PLACEHOLDERS = {}
 EN = json.loads((Path(ROOT) / "translations/en.json").read_text())
 
 
@@ -96,6 +106,16 @@ class EntityCompatibilityTests(unittest.TestCase):
         uid = '7VD-AU-ABC1234A_room_living_room_mop_repetitions'
         self.assertEqual(NAMES[uid], 'Room Living Room Clean Repetitions')
         self.assertFalse(any('Mop Repetitions' in str(n) for n in NAMES.values()))
+
+    def test_standard_room_types_are_translated_in_names_only(self):
+        """#57: Dutch names for standard room types; IDs and the card's room names stay English."""
+        nl = json.loads((ROOT / "translations/nl.json").read_text())["selector"]["room_type"]["options"]
+        english = collect(str(ROOT))
+        self.assertEqual(collect(str(ROOT), nl), english)          # same unique IDs and devices
+        rooms = {uid: p["room"] for uid, p in PLACEHOLDERS.items() if p and "room" in p}
+        self.assertEqual(rooms['7VD-AU-ABC1234A_room_living_room'], 'Woonkamer')
+        self.assertEqual(rooms['7VD-AU-ABC1234A_room_kitchen_1'], 'Keuken 1')
+        self.assertEqual(rooms['7VD-AU-ABC1234A_room_living_room_mop_repetitions'], 'Woonkamer')
 
 
 if __name__ == "__main__":

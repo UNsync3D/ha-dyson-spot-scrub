@@ -266,7 +266,9 @@ class DysonRoomSelectEntity(SelectEntity):
         )
         # Translated name, e.g. "Room Kitchen Cleaning Mode" (#57).
         self._attr_translation_key = f"room_{select_type}"
-        self._attr_translation_placeholders = {"room": room_name}
+        label = getattr(coordinator, "room_label", None)
+        self._attr_translation_placeholders = {
+            "room": label(room_name) if callable(label) else room_name}
         self._attr_icon      = icon
         self._attr_options   = list(options_map.values())
         self._attr_device_info = device_info(entry)

@@ -454,6 +454,40 @@
         "solid": "Doorgetrokken",
         "dashed": "Gestippeld"
       }
+    },
+    "room_type": {
+      "options": {
+        "balcony": "Balkon",
+        "bathroom": "Badkamer",
+        "bedroom": "Slaapkamer",
+        "boxroom": "Rommelkamer",
+        "cloakroom": "Garderobe",
+        "closet": "Inloopkast",
+        "conservatory": "Serre",
+        "dining": "Eetkamer",
+        "ensuite": "En-suite badkamer",
+        "entrance": "Entree",
+        "family_room": "Familiekamer",
+        "guest_bathroom": "Gastenbadkamer",
+        "guest_bedroom": "Logeerkamer",
+        "guest_room": "Gastenkamer",
+        "hallway": "Gang",
+        "kids_bedroom": "Kinderkamer",
+        "kitchen": "Keuken",
+        "laundry_room": "Washok",
+        "living_room": "Woonkamer",
+        "nursery": "Babykamer",
+        "office": "Kantoor",
+        "pantry": "Voorraadkast",
+        "play_room": "Speelkamer",
+        "primary_bathroom": "Hoofdbadkamer",
+        "primary_bedroom": "Hoofdslaapkamer",
+        "recreation_room": "Recreatieruimte",
+        "storage_room": "Berging",
+        "study": "Studeerkamer",
+        "toilet": "Toilet",
+        "utility_room": "Bijkeuken"
+      }
     }
   },
   "issues": {
