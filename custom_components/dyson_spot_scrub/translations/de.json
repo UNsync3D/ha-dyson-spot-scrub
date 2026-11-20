@@ -407,16 +407,16 @@
         "name": "Reinigungsmodus"
       },
       "room_cleaning_mode": {
-        "name": "Raum {room} Reinigungsmodus"
+        "name": "{room} Reinigungsmodus"
       },
       "room_cleaning_strategy": {
-        "name": "Raum {room} Reinigungsstrategie"
+        "name": "{room} Reinigungsstrategie"
       },
       "room_water_level": {
-        "name": "Raum {room} Wassermenge"
+        "name": "{room} Wassermenge"
       },
       "room_mop_repetitions": {
-        "name": "Raum {room} Reinigungsdurchgänge"
+        "name": "{room} Reinigungsdurchgänge"
       },
       "self_cleaning_frequency": {
         "name": "Häufigkeit der Selbstreinigung"
@@ -463,7 +463,7 @@
     },
     "switch": {
       "room": {
-        "name": "Raum {room}"
+        "name": "{room}"
       },
       "hot_water_mopping": {
         "name": "Wischen mit heißem Wasser"

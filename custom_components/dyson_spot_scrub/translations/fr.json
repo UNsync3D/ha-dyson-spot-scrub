@@ -229,16 +229,16 @@
         "name": "Mode de nettoyage"
       },
       "room_cleaning_mode": {
-        "name": "Pièce {room} – mode de nettoyage"
+        "name": "{room} – mode de nettoyage"
       },
       "room_cleaning_strategy": {
-        "name": "Pièce {room} – stratégie de nettoyage"
+        "name": "{room} – stratégie de nettoyage"
       },
       "room_water_level": {
-        "name": "Pièce {room} – niveau d'eau"
+        "name": "{room} – niveau d'eau"
       },
       "room_mop_repetitions": {
-        "name": "Pièce {room} – nombre de passages"
+        "name": "{room} – nombre de passages"
       },
       "self_cleaning_frequency": {
         "name": "Fréquence d'autonettoyage"
@@ -285,7 +285,7 @@
     },
     "switch": {
       "room": {
-        "name": "Pièce {room}"
+        "name": "{room}"
       },
       "hot_water_mopping": {
         "name": "Lavage à l'eau chaude"

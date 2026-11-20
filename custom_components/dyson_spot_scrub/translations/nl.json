@@ -229,16 +229,16 @@
         "name": "Stofzuigmodus"
       },
       "room_cleaning_mode": {
-        "name": "Kamer {room} schoonmaakmodus"
+        "name": "{room} schoonmaakmodus"
       },
       "room_cleaning_strategy": {
-        "name": "Kamer {room} schoonmaakstrategie"
+        "name": "{room} schoonmaakstrategie"
       },
       "room_water_level": {
-        "name": "Kamer {room} waterniveau"
+        "name": "{room} waterniveau"
       },
       "room_mop_repetitions": {
-        "name": "Kamer {room} schoonmaakrondes"
+        "name": "{room} schoonmaakrondes"
       },
       "self_cleaning_frequency": {
         "name": "Frequentie zelfreiniging"
@@ -285,7 +285,7 @@
     },
     "switch": {
       "room": {
-        "name": "Kamer {room}"
+        "name": "{room}"
       },
       "hot_water_mopping": {
         "name": "Dweilen met heet water"
