@@ -80,7 +80,7 @@ class _DysonBinarySensorBase(BinarySensorEntity):
 class DysonDockSensor(_DysonBinarySensorBase):
     """True when the robot is sitting in the dock (charging or fully charged)."""
 
-    _attr_name         = "Docked"
+    _attr_translation_key = "docked"
     _attr_device_class = BinarySensorDeviceClass.OCCUPANCY
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
@@ -95,7 +95,7 @@ class DysonDockSensor(_DysonBinarySensorBase):
 class DysonChargingSensor(_DysonBinarySensorBase):
     """True while the battery is actively charging."""
 
-    _attr_name         = "Charging"
+    _attr_translation_key = "charging"
     _attr_device_class = BinarySensorDeviceClass.BATTERY_CHARGING
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
@@ -109,7 +109,7 @@ class DysonChargingSensor(_DysonBinarySensorBase):
 class DysonFaultSensor(_DysonBinarySensorBase):
     """True when the robot has reported a fault or error."""
 
-    _attr_name         = "Fault"
+    _attr_translation_key = "fault"
     _attr_device_class = BinarySensorDeviceClass.PROBLEM
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:

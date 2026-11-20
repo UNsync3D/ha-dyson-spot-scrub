@@ -145,7 +145,7 @@ class PlatformTests(unittest.TestCase):
                 "sensor", SensorEntity=Entity,
                 SensorDeviceClass=SimpleNamespace(BATTERY="battery", DURATION="duration", ENUM="enum"),
                 SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
-            "homeassistant.const": module("const", PERCENTAGE="%",
+            "homeassistant.const": module("const", PERCENTAGE="%", EntityCategory=SimpleNamespace(CONFIG="config"),
                                           UnitOfTime=SimpleNamespace(MINUTES="min", SECONDS="s")),
         })
 

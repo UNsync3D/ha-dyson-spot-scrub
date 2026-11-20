@@ -1,6 +1,7 @@
 """Shared lifecycle and explicit-write handling for station controls."""
 import time
 
+from homeassistant.const import EntityCategory
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import CONF_SERIAL
@@ -18,6 +19,9 @@ class StationEntity:
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+    # Settings go in the device page's Configuration section, so Controls
+    # keeps the rooms together now their names no longer start with "Room".
+    _attr_entity_category = EntityCategory.CONFIG
     # Unique ID group: "station" for mop station settings, "setting" for the
     # robot's own settings (#50), so removing a no-mop robot's station
     # entities (#49) never touches them.
@@ -27,7 +31,8 @@ class StationEntity:
         self._coordinator = coordinator
         self._setting_key = key
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_{self._id_group}_{key}"
-        self._attr_name = name
+        # Translated name (#57); `name` is the English one, kept in strings.json.
+        self._attr_translation_key = key
         self._attr_device_info = device_info(entry)
         self._pending = None        # (value, monotonic deadline) after a change
         self._pending_timer = None

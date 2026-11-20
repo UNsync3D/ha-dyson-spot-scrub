@@ -38,7 +38,7 @@ class DysonStartButton(ButtonEntity):
     """Press to start cleaning the selected room (or a full clean if no room chosen)."""
 
     _attr_has_entity_name = True
-    _attr_name = "Vacuum Start"
+    _attr_translation_key = "vacuum_start"
     _attr_icon = "mdi:play-circle"
     _attr_should_poll = False
 
@@ -100,7 +100,7 @@ class DysonWholeHomeButton(ButtonEntity):
     """Start a whole-home clean, like the robot's own button."""
 
     _attr_has_entity_name = True
-    _attr_name = "Clean Whole Home"
+    _attr_translation_key = "clean_whole_home"
     _attr_icon = "mdi:home-floor-a"
     _attr_should_poll = False
 
@@ -161,7 +161,7 @@ class DysonDockActionButton(ButtonEntity):
 class DysonEmptyBinButton(DysonDockActionButton):
     """Trigger the dock to collect dust from the robot's bin."""
 
-    _attr_name = "Empty Bin"
+    _attr_translation_key = "empty_bin"
     _attr_icon = "mdi:trash-can-outline"
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
@@ -182,7 +182,7 @@ class DysonEmptyBinButton(DysonDockActionButton):
 class DysonWashMopButton(DysonDockActionButton):
     """Trigger the dock to wash then air-dry the mop roller."""
 
-    _attr_name = "Wash Mop"
+    _attr_translation_key = "wash_mop"
     _attr_icon = "mdi:washing-machine"
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
@@ -203,7 +203,7 @@ class DysonWashMopButton(DysonDockActionButton):
 class DysonDryMopButton(DysonDockActionButton):
     """Dry the mop roller without washing it first ("dry only" in the app)."""
 
-    _attr_name = "Dry Mop"
+    _attr_translation_key = "dry_mop"
     _attr_icon = "mdi:weather-windy"
 
     def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:

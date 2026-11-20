@@ -24,7 +24,7 @@ class ConsumableTests(unittest.TestCase):
             "homeassistant.components": mod("components"),
             "homeassistant.components.sensor": mod("sensor", SensorEntity=object, SensorDeviceClass=SimpleNamespace(BATTERY="battery", ENUM="enum", DURATION="duration"), SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
             "homeassistant.config_entries": mod("config_entries", ConfigEntry=object),
-            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s")),
+            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s"), EntityCategory=SimpleNamespace(CONFIG="config")),
             "homeassistant.core": mod("core", HomeAssistant=object, callback=lambda f: f),
             "homeassistant.helpers": mod("helpers"),
             "homeassistant.helpers.entity": mod("entity", DeviceInfo=dict),
@@ -129,7 +129,7 @@ class R2ConsumableTests(ConsumableTests):
         pad = next(e for e in self.entities
                    if getattr(e, "_attr_extra_state_attributes", {}).get("consumable_type") == "mopPad")
         self.assertEqual(pad._attr_unique_id, "TEST_consumable_mop_pad_usage")
-        self.assertEqual(pad._attr_name, "Mop pad usage")
+        self.assertEqual(pad._attr_translation_key, "mop_pad_usage")   # "Mop pad usage" (#57)
         self.coord.state = {"consumables": [{"type": "mopPad", "usage": 1}]}
         self.assertEqual(pad.native_value, 1)
 
