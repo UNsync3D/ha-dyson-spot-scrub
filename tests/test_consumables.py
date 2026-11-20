@@ -24,7 +24,7 @@ class ConsumableTests(unittest.TestCase):
             "homeassistant.components": mod("components"),
             "homeassistant.components.sensor": mod("sensor", SensorEntity=object, SensorDeviceClass=SimpleNamespace(BATTERY="battery", ENUM="enum", DURATION="duration"), SensorStateClass=SimpleNamespace(MEASUREMENT="measurement")),
             "homeassistant.config_entries": mod("config_entries", ConfigEntry=object),
-            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s")),
+            "homeassistant.const": mod("const", PERCENTAGE="%", UnitOfTime=SimpleNamespace(SECONDS="s"), EntityCategory=SimpleNamespace(CONFIG="config")),
             "homeassistant.core": mod("core", HomeAssistant=object, callback=lambda f: f),
             "homeassistant.helpers": mod("helpers"),
             "homeassistant.helpers.entity": mod("entity", DeviceInfo=dict),

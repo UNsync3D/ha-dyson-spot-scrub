@@ -51,8 +51,8 @@ class RoomTypeTests(unittest.TestCase):
         self.assertIsNone(rt.translate_room(None, NL))
 
     def test_translated_room_entities_start_with_the_room(self):
-        """Wesley (#57): "Woonkamer", not "Kamer Woonkamer". English keeps "Room ..."."""
-        for lang in ("nl", "de", "fr"):
+        """Wesley (#57): "Woonkamer", not "Kamer Woonkamer"; English too."""
+        for lang in ("en", "nl", "de", "fr"):
             entity = json.loads((ROOT / f"translations/{lang}.json").read_text())["entity"]
             for platform, key in [("switch", "room"), ("select", "room_cleaning_mode"),
                                   ("select", "room_cleaning_strategy"), ("select", "room_water_level"),

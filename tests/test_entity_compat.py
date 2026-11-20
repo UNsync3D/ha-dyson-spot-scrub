@@ -39,7 +39,7 @@ def collect(root, room_labels=None):
     mod('homeassistant.components.number', NumberEntity=object, NumberMode=NS(SLIDER='slider'))
     mod('homeassistant.components.time', TimeEntity=object)
     mod('homeassistant.config_entries', ConfigEntry=object)
-    mod('homeassistant.const', PERCENTAGE='%', UnitOfTime=NS(SECONDS='s'))
+    mod('homeassistant.const', PERCENTAGE='%', UnitOfTime=NS(SECONDS='s'), EntityCategory=NS(CONFIG='config'))
     mod('homeassistant.core', HomeAssistant=object, ServiceCall=object, callback=lambda f: f)
     mod('homeassistant.exceptions', HomeAssistantError=RuntimeError)
     h = mod('homeassistant.helpers')
@@ -74,11 +74,13 @@ def collect(root, room_labels=None):
                 out.append([platform, type(e).__name__, e._attr_unique_id, di])
                 NAMES[e._attr_unique_id] = display_name(platform, e)
                 PLACEHOLDERS[e._attr_unique_id] = getattr(e, '_attr_translation_placeholders', None)
+                CATEGORIES[e._attr_unique_id] = getattr(e, '_attr_entity_category', None)
         return sorted(out, key=lambda r: r[2])
 
 
 NAMES = {}
 PLACEHOLDERS = {}
+CATEGORIES = {}
 EN = json.loads((Path(ROOT) / "translations/en.json").read_text())
 
 
@@ -94,17 +96,29 @@ class EntityCompatibilityTests(unittest.TestCase):
     def test_unique_ids_and_devices_match_snapshot(self):
         self.assertEqual(collect(str(ROOT)), json.loads(SNAPSHOT.read_text()))
 
-    def test_english_names_are_unchanged(self):
-        """#57: names are translated now, but English users see exactly the old names."""
+    def test_english_names_are_unchanged_apart_from_rooms(self):
+        """#57: names are translated now, but English names are the old ones, except that
+        room entities no longer start with "Room" (settings moved to Configuration instead)."""
         collect(str(ROOT))
         before = json.loads((SNAPSHOT.parent / "entity_names_en.json").read_text())
-        self.assertEqual({uid: NAMES[uid] for uid in before}, before)
+        expected = {uid: name[len("Room "):] if "_room_" in uid and name.startswith("Room ") else name
+                    for uid, name in before.items()}
+        self.assertEqual({uid: NAMES[uid] for uid in before}, expected)
+        self.assertEqual(NAMES['7VD-AU-ABC1234A_room_kitchen_1'], 'Kitchen 1')
+
+    def test_settings_are_in_configuration_and_rooms_in_controls(self):
+        collect(str(ROOT))
+        for uid, category in CATEGORIES.items():
+            with self.subTest(uid):
+                setting = "_station_" in uid or "_setting_" in uid
+                self.assertEqual(category, 'config' if setting else None)
+        self.assertTrue(any(c == 'config' for c in CATEGORIES.values()))
 
     def test_repetitions_select_is_renamed_but_keeps_its_id(self):
         """#35: shown as Clean Repetitions; the card finds it by unique ID."""
         collect(str(ROOT))
         uid = '7VD-AU-ABC1234A_room_living_room_mop_repetitions'
-        self.assertEqual(NAMES[uid], 'Room Living Room Clean Repetitions')
+        self.assertEqual(NAMES[uid], 'Living Room Clean Repetitions')
         self.assertFalse(any('Mop Repetitions' in str(n) for n in NAMES.values()))
 
     def test_standard_room_types_are_translated_in_names_only(self):

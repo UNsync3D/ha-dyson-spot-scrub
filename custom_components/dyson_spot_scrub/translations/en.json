@@ -229,16 +229,16 @@
         "name": "Vacuum Mode"
       },
       "room_cleaning_mode": {
-        "name": "Room {room} Cleaning Mode"
+        "name": "{room} Cleaning Mode"
       },
       "room_cleaning_strategy": {
-        "name": "Room {room} Cleaning Strategy"
+        "name": "{room} Cleaning Strategy"
       },
       "room_water_level": {
-        "name": "Room {room} Water Level"
+        "name": "{room} Water Level"
       },
       "room_mop_repetitions": {
-        "name": "Room {room} Clean Repetitions"
+        "name": "{room} Clean Repetitions"
       },
       "self_cleaning_frequency": {
         "name": "Self-cleaning frequency"
@@ -285,7 +285,7 @@
     },
     "switch": {
       "room": {
-        "name": "Room {room}"
+        "name": "{room}"
       },
       "hot_water_mopping": {
         "name": "Hot water mopping"

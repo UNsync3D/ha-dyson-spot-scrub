@@ -178,7 +178,7 @@ class QuickChangeTests(unittest.TestCase):
         with patch.dict("sys.modules", {
             "homeassistant.components.number": module("number", NumberEntity=Entity,
                                                       NumberMode=SimpleNamespace(SLIDER="slider")),
-            "homeassistant.const": module("const", PERCENTAGE="%")}):
+            "homeassistant.const": module("const", PERCENTAGE="%", EntityCategory=SimpleNamespace(CONFIG="config"))}):
             number = importlib.import_module("drying_test_integration.number")
             station_entity = importlib.import_module("drying_test_integration.station_entity")
             volume = number.DysonVolumeNumber(self.coord, self.entry, "volume", "Volume")
