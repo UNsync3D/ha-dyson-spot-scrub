@@ -280,7 +280,10 @@
         "name": "Resterende droogtijd dweil"
       },
       "current_room": {
-        "name": "Huidige kamer"
+        "name": "Huidige kamer",
+        "state": {
+          "docked": "Gedockt"
+        }
       }
     },
     "switch": {

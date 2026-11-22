@@ -280,7 +280,10 @@
         "name": "Mop drying time remaining"
       },
       "current_room": {
-        "name": "Current room"
+        "name": "Current room",
+        "state": {
+          "docked": "Docked"
+        }
       }
     },
     "switch": {

@@ -505,9 +505,13 @@ class DysonCoordinator:
 
     @property
     def current_room_state(self) -> str | None:
-        """For the Current room sensor: the room, "Docked", or None if unknown."""
+        """For the Current room sensor: the room, "docked", or None if unknown.
+
+        "docked" is a state key, shown translated ("Docked", "Angedockt"); room
+        names have no translation and are shown as they are.
+        """
         if _docked(self.state):
-            return "Docked"
+            return "docked"
         return self.current_room
 
     def set_room_outlines(self, map_id, map_data) -> None:

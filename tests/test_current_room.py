@@ -134,7 +134,7 @@ class CoordinatorTests(unittest.TestCase):
             c._state_snapshot = {**self.moving(1.5, 1.0), "state": "INACTIVE_CHARGING"}
             c._async_update_current_room()
             self.assertIsNone(c.current_room)
-            self.assertEqual(c.current_room_state, "Docked")
+            self.assertEqual(c.current_room_state, "docked")
             self.get_map.assert_not_awaited()           # the camera's map was used
         asyncio.run(run())
 
@@ -148,7 +148,7 @@ class CoordinatorTests(unittest.TestCase):
             c.set_room_outlines("1792911875", MAP)
             c._state_snapshot = self.docked(1.5, 1.0)      # last position of the previous clean
             c._async_update_current_room()
-            self.assertEqual(c.current_room_state, "Docked")
+            self.assertEqual(c.current_room_state, "docked")
             c._state_snapshot = self.moving(1.5, 1.0)      # same old position: not a new one
             c._async_update_current_room()
             self.assertEqual(c.current_room, "Dining")     # the dock's room

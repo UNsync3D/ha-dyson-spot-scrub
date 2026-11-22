@@ -280,7 +280,10 @@
         "name": "Temps de séchage restant"
       },
       "current_room": {
-        "name": "Pièce actuelle"
+        "name": "Pièce actuelle",
+        "state": {
+          "docked": "Sur la base"
+        }
       }
     },
     "switch": {

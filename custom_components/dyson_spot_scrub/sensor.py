@@ -226,7 +226,7 @@ class DysonCurrentRoomSensor(DysonBatterySensor):
     """The room the robot is in, worked out from its position on the map (#53).
 
     Shows the room's name (as on the room entities) while the robot is off the
-    dock, "Docked" on the dock, and unknown until a position and the map's room
+    dock, "docked" (shown translated) on the dock, and unknown until a position and the map's room
     outlines are known. Updates about once a second while the robot moves.
     """
 

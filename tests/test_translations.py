@@ -65,6 +65,17 @@ class TranslationTests(unittest.TestCase):
                      if re.search(r"_attr_name\s*=", line) and "None" not in line]
             self.assertEqual(fixed, [], path.name)
 
+    def test_docked_is_translated_in_every_language(self):
+        """FutuRazor (#64): the Current room sensor showed "Docked" in German."""
+        import json
+        from pathlib import Path
+        root = Path(__file__).resolve().parents[1] / "custom_components/dyson_spot_scrub"
+        expected = {"en": "Docked", "nl": "Gedockt", "de": "Angedockt", "fr": "Sur la base"}
+        for lang, text in expected.items():
+            with self.subTest(lang):
+                data = json.loads((root / f"translations/{lang}.json").read_text())
+                self.assertEqual(data["entity"]["sensor"]["current_room"]["state"], {"docked": text})
+
 
 if __name__ == "__main__":
     unittest.main()

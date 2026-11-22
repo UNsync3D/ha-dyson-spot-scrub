@@ -56,7 +56,7 @@
     "error": {
       "cannot_connect": "Die Server von Dyson sind nicht erreichbar. Prüfe deine Internetverbindung.",
       "invalid_auth": "Ungültige E-Mail-Adresse oder ungültiges Passwort. Bitte prüfe deine Angaben.",
-      "invalid_otp": "Dyson hat den Code oder das Passwort abgelehnt. Prüfe beides (du kannst das Passwort unten korrigieren, ohne einen neuen Code anzufordern) und versuche es noch einmal. Wird es erneut abgelehnt, hör auf: Dyson antwortet bei einem gesperrten Konto genauso, und wiederholte Versuche können eine Sperre verlängern.",
+      "invalid_otp": "Dyson hat den Code oder das Passwort abgelehnt. Prüfe beides (du kannst das Passwort unten korrigieren, ohne einen neuen Code anzufordern) und versuche es erneut. Falls die Anmeldung erneut fehlschlägt, warte bitte, bevor du es noch einmal versuchst: Dyson antwortet bei einem gesperrten Konto genauso, und wiederholte Versuche können eine Sperre verlängern.",
       "serial_not_found": "Diese Seriennummer wurde in deinem Dyson-Konto nicht gefunden.",
       "invalid_serial": "Die Seriennummer enthält ungültige Zeichen. Verwende nur Buchstaben, Ziffern und Bindestriche.",
       "invalid_country": "Gib einen zweistelligen Ländercode ein, z. B. DE oder AT.",
@@ -458,7 +458,10 @@
         "name": "Verbleibende Trocknungszeit"
       },
       "current_room": {
-        "name": "Aktueller Raum"
+        "name": "Aktueller Raum",
+        "state": {
+          "docked": "Angedockt"
+        }
       }
     },
     "switch": {
