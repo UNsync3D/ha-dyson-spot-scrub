@@ -804,28 +804,27 @@ class DysonMqttClient:
             with self._reply_lock:
                 self._reply_waiters.pop(msg_id, None)
 
-    def pause(self) -> None:
-        """Pause an active clean: legacy PAUSE only.
+    def _publish_clean_control(self, command: str, mode: str | None = None) -> None:
+        payload = {"msg": command, "mode-reason": "RAPP", "time": _now_iso()}
+        if mode is not None:
+            payload["cleaningMode"] = mode
+        self._publish(payload)
 
-        Dyson's cloud adds service.set_room_clean (ctrl_value 2) itself; the
-        HA test on 3 Nov 2026 showed that request twice when we sent it too.
-        Any in-flight start is cancelled first so the preference lock is
-        released and PAUSE is sent immediately.
-        """
+    def pause(self) -> None:
+        """Pause once. Dyson routes the mode-qualified command to set_areas_start."""
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → PAUSE", self.serial)
-            self._publish({"msg": "PAUSE", "mode-reason": "RAPP", "time": _now_iso()})
+            mode = self.state.get("currentCleaningMode")
+            self._publish_clean_control("PAUSE", mode if mode == "spotZoneConfigured" else None)
 
     def resume(self) -> None:
-        """Resume a paused clean.
-
-        The Dyson app does NOT send a general START on resume — it sends
-        only service.set_room_clean with ctrl_value: 1 and empty room_ids.
-        Sending START would start a new job from scratch; this resumes the
-        existing one.
-        """
+        """Continue the current zone or room job."""
         _LOGGER.info("[%s] → RESUME", self.serial)
+        mode = self.state.get("currentCleaningMode")
+        if mode == "spotZoneConfigured":
+            self._publish_clean_control("RESUME", mode)
+            return
         self._publish_jdm("service.set_room_clean", {
             "ctrl_value": 1, "clean_type": 0, "room_ids": [],
         })
