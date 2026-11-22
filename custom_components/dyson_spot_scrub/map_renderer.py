@@ -1200,6 +1200,24 @@ def path_code_counts(path: list) -> dict:
     return counts
 
 
+# The first points of a clean, in order, for the dock-exit line (#69).
+PATH_START_POINTS = 40
+
+
+def format_path_start(path: list, limit: int = PATH_START_POINTS) -> str:
+    """The first points as "code@x,y" (metres, centimetre precision), in order."""
+    parts = []
+    for point in path[:limit]:
+        code = _point_update(point)
+        try:
+            x, y = _pt(point)
+        except (KeyError, IndexError, TypeError, ValueError):
+            parts.append(f"{'-' if code is None else code}@?")
+            continue
+        parts.append(f"{'-' if code is None else code}@{x:.2f},{y:.2f}")
+    return " ".join(parts)
+
+
 def format_path_codes(counts: dict) -> str:
     total = sum(counts.values())
     parts = ", ".join(f"code {k}: {v}" for k, v in sorted(counts.items(), key=lambda i: str(i[0])))

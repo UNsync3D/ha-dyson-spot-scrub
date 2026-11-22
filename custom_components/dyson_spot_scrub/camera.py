@@ -36,7 +36,10 @@ from .coordinator import DysonCoordinator
 from .dyson_api import get_current_map, get_map_metadata, DysonApiError
 from .dyson_mqtt import RUNNING_STATES, has_fault, is_any_cleaning
 from .entity_helpers import device_info
-from .map_renderer import format_path_codes, path_code_counts, render_map, robot_bumper_color
+from .map_renderer import (
+    PATH_START_POINTS, format_path_codes, format_path_start, path_code_counts, render_map,
+    robot_bumper_color,
+)
 from .map_options import map_options
 from .map_path import PathHistory
 
@@ -145,6 +148,7 @@ class DysonMapCamera(Camera):
         self._last_bumper_color: str | None = None
         self._path_history = PathHistory()
         self._path_codes: dict = {}
+        self._path_start_logged = False
         self._observed_action: str | None = None
         self._action_changed_at = 0.0
 
@@ -164,6 +168,7 @@ class DysonMapCamera(Camera):
         self._set_calibration({})
         self._path_history = PathHistory()
         self._path_codes = {}
+        self._path_start_logged = False
         self._cleaning_finished_at = None
         _LOGGER.debug("[%s] Cleaning image reset: %s", self._serial, reason)
 
@@ -431,11 +436,19 @@ class DysonMapCamera(Camera):
             # Diagnostic (no coordinates): how many path points carry each
             # "update" code (0 travel, 1 vacuum, 2 mop, 3 vacuum+mop).
             # Logged when a code first appears, and at the end of the clean.
-            codes = path_code_counts(live_data.get("cleanPath") or [])
-            if set(codes) - set(self._path_codes):
-                new = sorted(set(codes) - set(self._path_codes), key=str)
+            path = live_data.get("cleanPath") or []
+            codes = path_code_counts(path)
+            new = sorted(set(codes) - set(self._path_codes), key=str)
+            if new:
                 _LOGGER.debug("[%s] Clean path: new code %s; %s", self._serial,
                               ", ".join(map(str, new)), format_path_codes(codes))
+            # #69: the first points in order (code@x,y), to see how the dock
+            # exit and the first cleaning pass join. Logged with each new code
+            # and once the first PATH_START_POINTS points have all arrived.
+            full = len(path) >= PATH_START_POINTS
+            if new or (full and not self._path_start_logged):
+                _LOGGER.debug("[%s] Clean path start: %s", self._serial, format_path_start(path))
+                self._path_start_logged = self._path_start_logged or full
             self._path_codes = codes
 
         # ── Update presentation cache from fresh zone data ────────────────────

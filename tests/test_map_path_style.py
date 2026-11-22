@@ -64,5 +64,21 @@ class PathCodeCountTests(unittest.TestCase):
         self.assertEqual(text, "6 points (code 0: 2, code 1: 1, code 2: 1, code none: 2)")
         self.assertNotIn("x", text.replace("none", ""))
 
+
+class PathStartLogTests(unittest.TestCase):
+    """#69: the first points in order, to see how the dock exit is drawn."""
+
+    def test_points_in_order_with_codes(self):
+        cp = [{"x": 0.004, "y": -0.5, "update": 0}, {"x": 1.234, "y": 2, "update": 1},
+              {"x": 1, "y": 2}, {"y": 3, "update": 2}]
+        self.assertEqual(renderer.format_path_start(cp), "0@0.00,-0.50 1@1.23,2.00 -@1.00,2.00 2@?")
+
+    def test_only_the_first_points(self):
+        cp = [{"x": i, "y": 0, "update": 0} for i in range(100)]
+        text = renderer.format_path_start(cp)
+        self.assertEqual(len(text.split()), renderer.PATH_START_POINTS)
+        self.assertTrue(text.endswith("0@39.00,0.00"))
+
+
 if __name__ == "__main__":
     unittest.main()
