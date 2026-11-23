@@ -26,6 +26,7 @@ from .dyson_api import (
 )
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
 from .room_locator import dock_room, latest_position, locate, room_outlines
+from .room_types import translate_room
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,6 +126,8 @@ class DysonCoordinator:
         self._outline_fetch_at = -_OUTLINE_RETRY_SECONDS
         self._outline_task = None
         self.current_room_id: str | None = None
+        # Standard room types in the user's language, key -> name (#57).
+        self.room_type_names: dict[str, str] = {}
         self._dock_room_id: str | None = None
         # Leaving the dock (FutuRazor's idea, #53): until the robot reports a
         # new position, it is in the dock's room. The last position from the
@@ -483,6 +486,10 @@ class DysonCoordinator:
                          self.serial, "a mop" if reported else "no mop")
             self.hass.config_entries.async_schedule_reload(self._config_entry.entry_id)
 
+    def room_label(self, room_name: str) -> str:
+        """A room's name for display: standard types in the user's language (#57)."""
+        return translate_room(room_name, self.room_type_names)
+
     # ── Current room (#53) ────────────────────────────────────────────────────
 
     @property
@@ -498,9 +505,13 @@ class DysonCoordinator:
 
     @property
     def current_room_state(self) -> str | None:
-        """For the Current room sensor: the room, "Docked", or None if unknown."""
+        """For the Current room sensor: the room, "docked", or None if unknown.
+
+        "docked" is a state key, shown translated ("Docked", "Angedockt"); room
+        names have no translation and are shown as they are.
+        """
         if _docked(self.state):
-            return "Docked"
+            return "docked"
         return self.current_room
 
     def set_room_outlines(self, map_id, map_data) -> None:

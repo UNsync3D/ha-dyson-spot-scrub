@@ -401,7 +401,11 @@ class DysonVacuumEntity(StateVacuumEntity):
     # ── Commands ──────────────────────────────────────────────────────────────
 
     async def async_start(self) -> None:
-        """Resume the paused job or start a new clean."""
+        """Resume the paused job or start a new clean.
+
+        When paused, only resume() is sent: a general START would start a new
+        job from scratch instead of continuing the paused one.
+        """
         if is_paused(self._mqtt_state):
             await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.resume

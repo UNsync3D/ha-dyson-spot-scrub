@@ -210,6 +210,7 @@ class RoomSelectFixture(unittest.TestCase):
             "homeassistant.config_entries": module("config_entries", ConfigEntry=object),
             "homeassistant.core": module("core", HomeAssistant=object, callback=lambda f: f),
             "homeassistant.exceptions": module("exceptions", HomeAssistantError=HAError),
+            "homeassistant.const": module("const", PERCENTAGE="%", EntityCategory=SimpleNamespace(CONFIG="config")),
             "homeassistant.helpers": module("homeassistant.helpers"),
             "homeassistant.helpers.entity": module("entity", DeviceInfo=dict),
             "homeassistant.helpers.entity_platform": module("platform", AddEntitiesCallback=object),

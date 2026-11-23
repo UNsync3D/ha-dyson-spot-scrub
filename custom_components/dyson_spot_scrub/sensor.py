@@ -58,7 +58,7 @@ class DysonBatterySensor(SensorEntity):
     """
 
     _attr_has_entity_name  = True
-    _attr_name             = "Battery"
+    _attr_translation_key  = "battery"
     _attr_device_class     = SensorDeviceClass.BATTERY
     _attr_state_class      = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = PERCENTAGE
@@ -127,7 +127,7 @@ class DysonConsumableSensor(DysonBatterySensor):
     def __init__(self, coordinator, entry, kind: str, key: str, name: str) -> None:
         super().__init__(coordinator, entry)
         self._kind = kind
-        self._attr_name = name
+        self._attr_translation_key = f"{key}_usage"   # English: the name below (#57)
         self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_consumable_{key}_usage"
         self._attr_extra_state_attributes = {
             "consumable_type": kind,
@@ -148,7 +148,6 @@ class DysonConsumableSensor(DysonBatterySensor):
 class DysonCleaningSolutionSensor(DysonBatterySensor):
     """Refill status; the robot does not report a liquid percentage."""
 
-    _attr_name = "Cleaning solution"
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_state_class = None
     _attr_native_unit_of_measurement = None
@@ -185,7 +184,7 @@ class DysonDryingCountdownSensor(DysonBatterySensor):
     This sensor is only available while dockState == 'DRYING_MOP'.
     """
 
-    _attr_name             = "Mop drying time remaining"
+    _attr_translation_key  = "drying_remaining"
     _attr_device_class     = SensorDeviceClass.DURATION
     _attr_state_class      = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfTime.SECONDS
@@ -227,11 +226,11 @@ class DysonCurrentRoomSensor(DysonBatterySensor):
     """The room the robot is in, worked out from its position on the map (#53).
 
     Shows the room's name (as on the room entities) while the robot is off the
-    dock, "Docked" on the dock, and unknown until a position and the map's room
+    dock, "docked" (shown translated) on the dock, and unknown until a position and the map's room
     outlines are known. Updates about once a second while the robot moves.
     """
 
-    _attr_name = "Current room"
+    _attr_translation_key = "current_room"
     _attr_icon = "mdi:map-marker"
     _attr_device_class = None
     _attr_state_class = None

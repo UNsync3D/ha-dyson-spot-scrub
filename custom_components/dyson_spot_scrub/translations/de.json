@@ -1,0 +1,502 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "**Datenschutz:** Diese Integration verbindet sich mit der Cloud-API von Dyson, um deinen Roboter zu steuern und Kartendaten abzurufen. Deine Kontodaten oder dein Bearer-Token werden in Home Assistant gespeichert. Halte sie aus Versionsverwaltung und geteilten Konfigurationsdateien heraus und behandle sie wie ein Passwort.",
+        "menu_options": {
+          "login": "Mit Dyson-Konto anmelden (E-Mail + Einmalcode)",
+          "token": "Bearer-Token direkt eingeben"
+        }
+      },
+      "login": {
+        "title": "Bei Dyson anmelden",
+        "description": "Gib die Daten deines Dyson-Kontos ein. Falls dein Konto es erfordert, bekommst du einen Einmalcode per E-Mail.",
+        "data": {
+          "email": "E-Mail-Adresse",
+          "password": "Passwort",
+          "country": "Ländercode (z. B. DE, AT, CH)"
+        }
+      },
+      "otp": {
+        "title": "Einmalcode",
+        "description": "Ein 6-stelliger Code wurde an **{email}** gesendet. Gib ihn unten ein.",
+        "data": {
+          "otp_code": "Einmalcode",
+          "password": "Passwort (nur zum Korrigieren)"
+        }
+      },
+      "token": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "Gib ein Dyson-Bearer-Token ein (mit einem Proxy-Tool wie Proxyman mitgeschnitten oder aus einer anderen Integration übernommen), die Seriennummer deines Roboters und den Ländercode deines Dyson-Kontos.",
+        "data": {
+          "token": "Bearer-Token",
+          "serial": "Seriennummer des Roboters",
+          "country": "Ländercode (z. B. DE, AT, CH)"
+        }
+      },
+      "select_robot": {
+        "title": "Roboter auswählen",
+        "description": "Es wurden mehrere Roboter gefunden. Wähle einen zum Hinzufügen aus.",
+        "data": {
+          "serial": "Roboter"
+        }
+      },
+      "experimental": {
+        "title": "Experimenteller Roboter",
+        "description": "**{name}** ({summary}) ist ein Dyson-Roboter, den diese Integration noch nicht unterstützt. Du kannst ihn trotzdem als experimentellen Roboter hinzufügen: Er nutzt denselben Code wie der Spot+Scrub AI und der R2 Nurovi, daher funktionieren viele Funktionen wahrscheinlich, manche aber vielleicht nicht.\n\nHilf uns, ihn vollständig zu unterstützen: Aktiviere die Debug-Protokollierung für diese Integration, lass eine Reinigung laufen und teile das Protokoll auf der Issues-Seite: {issues_url} (entferne vorher deine Seriennummer).\n\nWähle **Absenden**, um ihn hinzuzufügen."
+      }
+    },
+    "abort": {
+      "no_robots_found": "In deinem Dyson-Konto wurden keine unterstützten Saugroboter gefunden. Gefundene Geräte: {devices}. Falls eines davon ein Dyson-Saugroboter ist, eröffne bitte ein Issue mit dieser Liste unter {issues_url}, damit wir ihn hinzufügen können.",
+      "cannot_connect": "Verbindung zur Cloud-API von Dyson nicht möglich.",
+      "already_configured": "Dieses Gerät ist bereits eingerichtet.",
+      "invalid_serial": "Das Gerät hat eine ungültige Seriennummer gemeldet."
+    },
+    "error": {
+      "cannot_connect": "Die Server von Dyson sind nicht erreichbar. Prüfe deine Internetverbindung.",
+      "invalid_auth": "Ungültige E-Mail-Adresse oder ungültiges Passwort. Bitte prüfe deine Angaben.",
+      "invalid_otp": "Dyson hat den Code oder das Passwort abgelehnt. Prüfe beides (du kannst das Passwort unten korrigieren, ohne einen neuen Code anzufordern) und versuche es erneut. Falls die Anmeldung erneut fehlschlägt, warte bitte, bevor du es noch einmal versuchst: Dyson antwortet bei einem gesperrten Konto genauso, und wiederholte Versuche können eine Sperre verlängern.",
+      "serial_not_found": "Diese Seriennummer wurde in deinem Dyson-Konto nicht gefunden.",
+      "invalid_serial": "Die Seriennummer enthält ungültige Zeichen. Verwende nur Buchstaben, Ziffern und Bindestriche.",
+      "invalid_country": "Gib einen zweistelligen Ländercode ein, z. B. DE oder AT.",
+      "rate_limited": "Dyson begrenzt die Anmeldeversuche für dieses Konto. Warte eine Weile, bevor du es erneut versuchst, statt es sofort zu wiederholen.",
+      "account_not_active": "Laut Dyson ist dieses Konto nicht aktiv, daher wurde kein Anmeldecode angefordert. Prüfe das Konto in der MyDyson-App.",
+      "unsupported_auth_method": "Dieses Dyson-Konto nutzt eine Anmeldemethode, die die Integration noch nicht unterstützt. Es wurde kein Anmeldecode angefordert; verwende stattdessen ein Bearer-Token.",
+      "app_version_unsupported": "Dyson verlangt inzwischen eine neuere Version der MyDyson-App, als diese Integration meldet. Es wurde kein Anmeldecode angefordert; die Integration muss aktualisiert werden.",
+      "too_many_attempts": "Die Anmeldung ist nach zwei abgelehnten Versuchen für 15 Minuten pausiert, um dein Dyson-Konto zu schützen. Werden Versuche mit dem richtigen Code und Passwort weiterhin abgelehnt, hat Dyson das Konto möglicherweise gesperrt: Hör auf und warte einige Stunden oder wende dich an den Dyson-Support, statt es erneut zu versuchen."
+    }
+  },
+  "services": {
+    "clean_room": {
+      "name": "Raum reinigen",
+      "description": "Startet die Reinigung eines einzelnen Raums. Der Roboter reinigt nur den genannten Raum und kehrt danach zur Station zurück.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter",
+          "description": "Der Saugroboter, der reinigen soll. Optional, wenn nur ein Dyson-Roboter eingerichtet ist; erforderlich, wenn es mehrere gibt."
+        },
+        "room": {
+          "name": "Raum",
+          "description": "Der Name des Raums, genau wie im Attribut \"rooms\" des Saugroboters (z. B. \"Living Room\", \"Kitchen\"). Groß- und Kleinschreibung spielt keine Rolle."
+        }
+      }
+    },
+    "clean_rooms": {
+      "name": "Räume reinigen (nacheinander)",
+      "description": "Reinigt mehrere Räume nacheinander. Der Roboter beendet jeden Raum und kehrt zur Station zurück, bevor er mit dem nächsten beginnt. Die Räume werden in der angegebenen Reihenfolge gereinigt.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter",
+          "description": "Der Saugroboter, der reinigen soll. Optional, wenn nur ein Dyson-Roboter eingerichtet ist; erforderlich, wenn es mehrere gibt."
+        },
+        "rooms": {
+          "name": "Räume",
+          "description": "Liste der Raumnamen, in Reihenfolge. Jeder Name muss genau dem Attribut \"rooms\" des Saugroboters entsprechen (Groß- und Kleinschreibung spielt keine Rolle), z. B. [\"Living Room\", \"Kitchen\"]."
+        }
+      }
+    },
+    "save_room_settings": {
+      "name": "Raumeinstellungen speichern",
+      "description": "Speichert die Einstellungen mehrerer Räume in einem Schritt, ohne eine Reinigung zu starten.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter",
+          "description": "Der Saugroboter, dessen Raumeinstellungen aktualisiert werden sollen."
+        },
+        "room_settings": {
+          "name": "Raumeinstellungen",
+          "description": "Objekt mit der festen Raum-ID als Schlüssel. Jeder Raum kann cleaning_mode, cleaning_strategy, water_level und mop_repetitions enthalten, mit denselben Optionsbezeichnungen wie die Auswahl-Entitäten (auf Englisch). Zum Beispiel Raum 12 mit cleaning_mode \"Vacuum then Mop\" und mop_repetitions \"Two Passes\"."
+        }
+      }
+    },
+    "start_rooms_with_settings": {
+      "name": "Räume mit Einstellungen starten",
+      "description": "Wendet einen Entwurf von Raumeinstellungen an und sendet die gewählten Raum-IDs in der angegebenen Reihenfolge an den Roboter. Der Roboter kann eine eigene Reihenfolge wählen.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter",
+          "description": "Der Saugroboter, der starten soll."
+        },
+        "room_ids": {
+          "name": "Raum-IDs in Reihenfolge",
+          "description": "Feste Raum-IDs in der gewünschten Reinigungsreihenfolge."
+        },
+        "room_settings": {
+          "name": "Raumeinstellungen",
+          "description": "Optionales Objekt mit der festen Raum-ID als Schlüssel, mit Optionsbezeichnungen, die vor dem Start angewendet werden."
+        }
+      }
+    },
+    "cancel_drying": {
+      "name": "Trocknung abbrechen",
+      "description": "Bricht das Trocknen der Wischwalze für einen verbundenen Dyson-Saugroboter ab. Der Stationsstatus wird aktualisiert, sobald der Roboter die Änderung bestätigt.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter",
+          "description": "Der Saugroboter, der gerade seine Wischwalze trocknet."
+        }
+      }
+    },
+    "clean_zone": {
+      "name": "Zone reinigen",
+      "description": "Reinigt ein Rechteck auf der aktiven Karte mit eigenen Einstellungen, wie der Zielmodus der MyDyson-App. Raumeinstellungen werden nicht geändert. Vorerst nur für den Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter"
+        },
+        "map_id": {
+          "name": "Karten-ID",
+          "description": "ID der aktiven Karte, vom Saugroboter oder vom kalibrierten Kamerabild. Bei einer anderen aktiven Karte wird der Start abgelehnt."
+        },
+        "rectangle": {
+          "name": "Rechteck",
+          "description": "Vier Roboterkoordinaten in Metern, [x_min, y_min, x_max, y_max]. Keine Bildpixel. Prüfe den Bereich vor dem Start."
+        },
+        "cleaning_strategy": {
+          "name": "Saugleistung",
+          "description": "Standard: auto."
+        },
+        "clean_type": {
+          "name": "Reinigungsmodus",
+          "description": "Standard: vacuum (nur saugen)."
+        },
+        "water_level": {
+          "name": "Wassermenge",
+          "description": "Standard: low. Nur für Modi mit Wischen relevant."
+        },
+        "mop_passes": {
+          "name": "Wischdurchgänge",
+          "description": "Standard: 1. Mit 2 wird die Reinigung in jedem Modus wiederholt, auch beim reinen Saugen. Mit vacuumThenMop ergibt das einen Saugdurchgang und zwei Wischdurchgänge."
+        },
+        "dry_passes": {
+          "name": "Saugdurchgänge",
+          "description": "Standard: 1. Wird so gesendet wie von der App, aber 2 hatte in Tests am Roboter keine Wirkung; nutze Wischdurchgänge für einen zweiten Durchgang."
+        }
+      }
+    },
+    "clean_whole_home": {
+      "name": "Ganzes Zuhause reinigen",
+      "description": "Experimentell. Startet dieselbe Reinigung wie die Taste am Roboter. Es ist noch nicht bestätigt, ob dabei jeder Raum mit seinen gespeicherten Einstellungen gereinigt oder die letzte Reinigung des Roboters wiederholt wird. Raumeinstellungen werden nicht geändert. Vorerst nur für den Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Saugroboter"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Karteneinstellungen",
+        "description": "Änderungen gelten ab der nächsten Aktualisierung der Kamera, auch während die letzte Reinigungskarte aufbewahrt wird.",
+        "data": {
+          "map_retention_minutes": "Aufbewahrungszeit",
+          "map_keep_last": "Letzte Reinigungskarte behalten",
+          "map_transparent_background": "Transparenter Hintergrund"
+        },
+        "data_description": {
+          "map_retention_minutes": "Zeit nach dem Ende oder Abbruch der Reinigung. 0 schaltet die zeitliche Aufbewahrung ab. Pausen und Wechsel zwischen Saugen und Wischen behalten die Karte, ohne diesen Timer zu starten.",
+          "map_keep_last": "Behält die letzte Reinigungskarte, bis eine neue Reinigung startet, die Karte sich ändert oder die Integration neu startet. Hat Vorrang vor der Aufbewahrungszeit. Wenn ausgeschaltet, zählt die Zeit ab dem ursprünglichen Ende der Reinigung.",
+          "map_transparent_background": "Entfernt den Kartenhintergrund, um die Karte über einen Grundriss zu legen."
+        },
+        "sections": {
+          "line_settings_section": {
+            "name": "Darstellung",
+            "data": {
+              "map_vacuum_color": "Farbe Saugpfad",
+              "map_mop_color": "Farbe Wischpfad",
+              "map_combined_color": "Farbe Saugen und Wischen",
+              "map_path_width": "Pfadbreite",
+              "map_glow_width": "Leuchtbreite",
+              "map_room_colors": "Raumfarben"
+            },
+            "data_description": {
+              "map_combined_color": "Für gleichzeitiges Saugen und Wischen. Bei nacheinander ausgeführter Reinigung bleiben die getrennten Farben für Saugen und Wischen.",
+              "map_path_width": "Linienbreite in Pixeln des Quellbilds. Die Skalierung im Dashboard beeinflusst die angezeigte Größe.",
+              "map_glow_width": "Gesamtbreite des durchscheinenden Bands hinter Wischpfaden und Pfaden mit Saugen und Wischen, wie in der MyDyson-App. Reine Saugpfade haben kein Leuchten. Wähle einen Wert größer als die Pfadbreite für ein sichtbares Leuchten. 0 schaltet es ab.",
+              "map_room_colors": "Gibt jedem Raum eine eigene Farbe für Boden, Umriss, Namen, Fläche und Legende, fest je Karte und Raum. Wände werden weiß; die Farben der Reinigungspfade bleiben gleich."
+            }
+          },
+          "outside_walls_section": {
+            "name": "Außenwände",
+            "description": "Ein Rand eines Raums, den er mit keinem anderen Raum teilt.",
+            "data": {
+              "map_wall_style": "Stil",
+              "map_wall_thickness_cm": "Stärke",
+              "map_wall_color": "Farbe"
+            },
+            "data_description": {
+              "map_wall_thickness_cm": "In Zentimetern auf dem echten Boden, damit Wände mit der Karte skalieren.",
+              "map_wall_color": "Das Standardgrau wird weiß, wenn Raumfarben an oder die Bodenfüllung aus ist. Jede andere Farbe wird wie gewählt verwendet."
+            }
+          },
+          "inner_walls_section": {
+            "name": "Wände zwischen Räumen",
+            "description": "Eine feste Wand, die sich zwei Räume teilen.",
+            "data": {
+              "map_inner_wall_style": "Stil",
+              "map_inner_wall_thickness_cm": "Stärke",
+              "map_inner_wall_color": "Farbe"
+            },
+            "data_description": {
+              "map_inner_wall_thickness_cm": "In Zentimetern auf dem echten Boden.",
+              "map_inner_wall_color": "Das Standardgrau wird weiß, wenn Raumfarben an oder die Bodenfüllung aus ist. Jede andere Farbe wird wie gewählt verwendet."
+            }
+          },
+          "doors_section": {
+            "name": "Türen und Durchgänge",
+            "description": "Wo der Roboter von einem Raum in den nächsten fahren kann, auch bei offenen Grundrissen.",
+            "data": {
+              "map_door_style": "Stil",
+              "map_door_thickness_cm": "Stärke",
+              "map_door_color": "Farbe"
+            },
+            "data_description": {
+              "map_door_thickness_cm": "In Zentimetern auf dem echten Boden.",
+              "map_door_color": "Das Standardgrau wird hellgrau, wenn Raumfarben an oder die Bodenfüllung aus ist. Jede andere Farbe wird wie gewählt verwendet."
+            }
+          },
+          "floor_section": {
+            "name": "Boden",
+            "data": {
+              "map_floor_color": "Farbe erreichbarer Boden",
+              "map_room_fill_color": "Farbe übriger Raum"
+            },
+            "data_description": {
+              "map_floor_color": "Nur verwendet, wenn Raumfarben aus ist. Mit Raumfarben bekommt der Boden jedes Raums seine Raumfarbe.",
+              "map_room_fill_color": "Möbel und andere Teile eines Raums, die der Roboter nicht erreicht."
+            }
+          },
+          "keepout_section": {
+            "name": "Sperrzonen",
+            "description": "Ein- oder ausblenden unter Sichtbare Elemente.",
+            "data": {
+              "map_keepout_style": "Stil",
+              "map_keepout_thickness_cm": "Stärke",
+              "map_keepout_color": "Farbe"
+            },
+            "data_description": {
+              "map_keepout_thickness_cm": "Stärke des Umrisses in Zentimetern auf dem echten Boden.",
+              "map_keepout_color": "Farbe des Umrisses; die Zone wird mit einem leichten Farbton davon gefüllt."
+            }
+          },
+          "visibility_settings_section": {
+            "name": "Sichtbare Elemente",
+            "description": "Aktivierte Elemente sind sichtbar. Ausgeblendete Elemente zählen weiter für die Bildgröße, damit ein Overlay ausgerichtet bleibt.",
+            "data": {
+              "map_show_furniture": "Möbel anzeigen",
+              "map_show_room_names": "Raumnamen anzeigen",
+              "map_center_room_names": "Raumnamen zentrieren",
+              "map_show_room_areas": "Raumflächen anzeigen (m²)",
+              "map_show_legend": "Legende anzeigen",
+              "map_show_status_areas": "Reinigungsstatus je Bereich anzeigen",
+              "map_show_perimeter": "Wände und Raumteiler anzeigen",
+              "map_show_visited_paths": "Umriss des erreichbaren Bodens anzeigen",
+              "map_show_grid": "Raster anzeigen",
+              "map_show_dock": "Ladestation anzeigen",
+              "map_show_restrictions": "Sperrzonen anzeigen",
+              "map_floor_fill": "Bodenschattierung anzeigen"
+            },
+            "data_description": {
+              "map_center_room_names": "Setzt jeden Raumnamen in die Mitte der Wände des Raums. Aus verwendet die Positionen der MyDyson-App.",
+              "map_floor_fill": "Dunkel für den Boden, den der Roboter erreicht, grau für Möbel und andere Stellen, die er nicht erreicht. Ausschalten, um die Karte über deinen eigenen Grundriss zu legen.",
+              "map_show_status_areas": "Farbige Raumflächen, die den Reinigungsfortschritt zeigen.",
+              "map_show_perimeter": "Wände als durchgezogene Linien und Türen oder Durchgänge zwischen Räumen als gestrichelte Linien, wie in der MyDyson-App.",
+              "map_show_visited_paths": "Umriss des Bodens, den der Roboter in jedem Raum erreicht. Führt um Möbel herum.",
+              "map_show_grid": "Mit Entfernungsbeschriftungen und der Markierung des Kartenursprungs.",
+              "map_show_legend": "Die Legende hat eigene Raumbezeichnungen, unabhängig von Raumnamen anzeigen."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "invalid_map_option": "Gib einen gültigen Wert im erlaubten Bereich ein."
+    }
+  },
+  "selector": {
+    "line_style": {
+      "options": {
+        "solid": "Durchgezogen",
+        "dashed": "Gestrichelt"
+      }
+    },
+    "room_type": {
+      "options": {
+        "balcony": "Balkon",
+        "bathroom": "Badezimmer",
+        "bedroom": "Schlafzimmer",
+        "boxroom": "Abstellkammer",
+        "cloakroom": "Garderobe",
+        "closet": "Ankleidezimmer",
+        "conservatory": "Wintergarten",
+        "dining": "Esszimmer",
+        "ensuite": "Eigenes Bad",
+        "entrance": "Eingang",
+        "family_room": "Familienzimmer",
+        "guest_bathroom": "Gästebad",
+        "guest_bedroom": "Gästeschlafzimmer",
+        "guest_room": "Gästezimmer",
+        "hallway": "Flur",
+        "kids_bedroom": "Kinderzimmer",
+        "kitchen": "Küche",
+        "laundry_room": "Waschküche",
+        "living_room": "Wohnzimmer",
+        "nursery": "Babyzimmer",
+        "office": "Büro",
+        "pantry": "Speisekammer",
+        "play_room": "Spielzimmer",
+        "primary_bathroom": "Hauptbadezimmer",
+        "primary_bedroom": "Hauptschlafzimmer",
+        "recreation_room": "Hobbyraum",
+        "storage_room": "Abstellraum",
+        "study": "Arbeitszimmer",
+        "toilet": "WC",
+        "utility_room": "Hauswirtschaftsraum"
+      }
+    }
+  },
+  "issues": {
+    "experimental_robot": {
+      "title": "Hilf mit, deinen Dyson-Roboter zu unterstützen",
+      "description": "**{name}** (Produkttyp {product_type}, Präfix {prefix}) ist als **experimenteller** Roboter eingerichtet: Dieses Modell wird noch nicht vollständig unterstützt, daher funktionieren manche Funktionen vielleicht nicht.\n\nDu kannst helfen: Aktiviere die Debug-Protokollierung für diese Integration (Einstellungen → Geräte & Dienste → Dyson Spot+Scrub AI → ⋮ → Debug-Protokollierung aktivieren), lass eine Reinigung laufen, deaktiviere die Debug-Protokollierung, um das Protokoll herunterzuladen, und teile es auf der Issues-Seite: {issues_url}. Entferne vorher die Seriennummer deines Roboters aus dem Protokoll. Wähle **Mehr erfahren**, um ein neues Issue zu eröffnen."
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "docked": {
+        "name": "Angedockt"
+      },
+      "charging": {
+        "name": "Lädt"
+      },
+      "fault": {
+        "name": "Störung"
+      }
+    },
+    "button": {
+      "vacuum_start": {
+        "name": "Reinigung starten"
+      },
+      "clean_whole_home": {
+        "name": "Ganzes Zuhause reinigen"
+      },
+      "empty_bin": {
+        "name": "Behälter leeren"
+      },
+      "wash_mop": {
+        "name": "Wischmopp waschen"
+      },
+      "dry_mop": {
+        "name": "Wischmopp trocknen"
+      }
+    },
+    "camera": {
+      "floor_map": {
+        "name": "Karte"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Lautstärke"
+      }
+    },
+    "select": {
+      "vacuum_mode": {
+        "name": "Reinigungsmodus"
+      },
+      "room_cleaning_mode": {
+        "name": "{room} Reinigungsmodus"
+      },
+      "room_cleaning_strategy": {
+        "name": "{room} Reinigungsstrategie"
+      },
+      "room_water_level": {
+        "name": "{room} Wassermenge"
+      },
+      "room_mop_repetitions": {
+        "name": "{room} Reinigungsdurchgänge"
+      },
+      "self_cleaning_frequency": {
+        "name": "Häufigkeit der Selbstreinigung"
+      },
+      "roller_drying_duration": {
+        "name": "Trocknungsdauer der Wischwalze"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Akku"
+      },
+      "brush_bar_usage": {
+        "name": "Nutzung Bürstenwalze"
+      },
+      "mop_roller_usage": {
+        "name": "Nutzung Wischwalze"
+      },
+      "mop_pad_usage": {
+        "name": "Nutzung Wischpad"
+      },
+      "side_brushes_usage": {
+        "name": "Nutzung Seitenbürsten"
+      },
+      "robot_filter_usage": {
+        "name": "Nutzung Roboterfilter"
+      },
+      "dock_filter_usage": {
+        "name": "Nutzung Stationsfilter"
+      },
+      "cleaning_solution": {
+        "name": "Reinigungsmittel",
+        "state": {
+          "ok": "OK",
+          "refill_required": "Nachfüllen erforderlich"
+        }
+      },
+      "drying_remaining": {
+        "name": "Verbleibende Trocknungszeit"
+      },
+      "current_room": {
+        "name": "Aktueller Raum",
+        "state": {
+          "docked": "Angedockt"
+        }
+      }
+    },
+    "switch": {
+      "room": {
+        "name": "{room}"
+      },
+      "hot_water_mopping": {
+        "name": "Wischen mit heißem Wasser"
+      },
+      "cleaning_solution": {
+        "name": "Reinigungsmittel"
+      },
+      "extended_roller_preparation": {
+        "name": "Erweiterte Walzenvorbereitung"
+      },
+      "hot_water_self_cleaning": {
+        "name": "Selbstreinigung mit heißem Wasser"
+      },
+      "voice_prompts": {
+        "name": "Sprachansagen"
+      },
+      "child_lock": {
+        "name": "Kindersicherung"
+      },
+      "do_not_disturb": {
+        "name": "Nicht stören"
+      }
+    },
+    "time": {
+      "do_not_disturb_start": {
+        "name": "Nicht stören Beginn"
+      },
+      "do_not_disturb_end": {
+        "name": "Nicht stören Ende"
+      }
+    }
+  }
+}

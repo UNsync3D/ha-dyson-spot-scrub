@@ -34,6 +34,7 @@ class DryingTests(unittest.TestCase):
             'homeassistant.config_entries': module('config_entries', ConfigEntry=object),
             'homeassistant.core': module('core', HomeAssistant=object, ServiceCall=object, callback=lambda f: f),
             'homeassistant.exceptions': module('exceptions', HomeAssistantError=RuntimeError),
+            'homeassistant.const': module('const', PERCENTAGE='%', EntityCategory=SimpleNamespace(CONFIG="config")),
             'homeassistant.helpers': module('helpers'),
             'homeassistant.helpers.config_validation': module('cv', string=str, entity_id=str, ensure_list=lambda v: v if isinstance(v, list) else [v]),
             'homeassistant.helpers.entity': module('entity', DeviceInfo=dict),

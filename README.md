@@ -80,7 +80,7 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Clean Whole Home | `button` | **Experimental.** The same clean as the button on the robot (Spot+Scrub AI). See [Actions](#actions) |
 | Floor Map | `camera` | Live map of rooms, the cleaned path and the robot |
 | Battery | `sensor` | Battery percentage |
-| Current room | `sensor` | The room the robot is in, "Docked" on the dock. See [Current room](#current-room) |
+| Current room | `sensor` | The room the robot is in, Docked on the dock (state `docked`). See [Current room](#current-room) |
 | Docked, Charging, Fault | `binary_sensor` | Robot on the dock, battery charging, error reported |
 
 **Rooms** (one set per room on the current map)
@@ -126,7 +126,7 @@ While the dock dries the mop, **Mop drying time remaining** counts down, using t
 
 ### Current room
 
-The robot doesn't report which room it's in, so the integration works it out from its position on the map and the room outlines. The **Current room** sensor shows the room's name, as on the room entities, while the robot is off the dock, and **Docked** on the dock. It updates about once a second while the robot moves, and the vacuum has the same value as its `current_room` attribute.
+The robot doesn't report which room it's in, so the integration works it out from its position on the map and the room outlines. The **Current room** sensor shows the room's name, as on the room entities, while the robot is off the dock, and **Docked** on the dock, in your language (the state itself is `docked`; it was `Docked` in v2.1.0, so update any automation that checks for it). It updates about once a second while the robot moves, and the vacuum has the same value as its `current_room` attribute.
 
 Right after leaving the dock, while the robot is still finding its position, it shows the room the dock is in. Near a doorway it keeps the room the robot was in until the robot is properly inside the next one, so it doesn't flicker. It needs the map's room outlines: it fetches the map once if the Floor Map hasn't already.
 
@@ -246,7 +246,12 @@ The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason`
 
 ### Languages
 
-The setup and options screens, error messages and action descriptions are available in **English** and **Dutch**, following your Home Assistant language. Entity names are in English for now. The select entities' option labels, such as *Vacuum* or *Two Passes*, stay in English, because automations, the card and the actions use them as values.
+The integration follows your Home Assistant language in **English**, **Dutch**, **German** and **French**: setup and options screens, error messages, action descriptions and entity names (for example *Huidige kamer*, *Aktueller Raum* or *Pièce actuelle* for Current room).
+
+- **Option labels stay in English**, such as *Vacuum* or *Two Passes*. Automations, the dashboard card and the actions use them as values.
+- **Room names** come from the MyDyson app. A room given one of the app's standard types (Kitchen, Living Room, Bedroom…) is stored by Dyson in English, so entity names show it in your language, as the app does: *Keuken*, *Keuken waterniveau*. Rooms you named yourself keep your name. Actions, automations and the dashboard card still use the room's English name (`Kitchen`), which is what the vacuum's `rooms` attribute lists.
+- **Room entities are named after the room** (*Kitchen*, *Kitchen Water Level*), and the robot and station settings (child lock, voice prompts, Do Not Disturb, hot water, drying, self-cleaning) are under **Configuration** on the device page, so the rooms stay together under **Controls**. Before v2.1.1 room names started with *Room*. Configuration entities aren't added to auto-generated dashboards; add any you use by hand.
+- **Entity IDs don't change** on an existing install. On a **new** install, Home Assistant creates entity IDs from the names in your language, so a Dutch install gets IDs like `sensor.dyson_huidige_kamer`. The examples in this README use English IDs: use yours instead.
 
 ---
 

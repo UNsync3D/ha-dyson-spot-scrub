@@ -1,0 +1,502 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "**Confidentialité :** cette intégration se connecte à l'API cloud de Dyson pour piloter votre robot et récupérer les données de la carte. Vos identifiants ou votre jeton bearer sont stockés dans Home Assistant. Gardez-les hors du contrôle de version et des fichiers de configuration partagés, et traitez-les comme un mot de passe.",
+        "menu_options": {
+          "login": "Se connecter avec un compte Dyson (e-mail + code à usage unique)",
+          "token": "Saisir directement un jeton bearer"
+        }
+      },
+      "login": {
+        "title": "Connexion à Dyson",
+        "description": "Saisissez les identifiants de votre compte Dyson. Si votre compte l'exige, vous recevrez un code à usage unique par e-mail.",
+        "data": {
+          "email": "Adresse e-mail",
+          "password": "Mot de passe",
+          "country": "Code pays (par ex. FR, BE, CH)"
+        }
+      },
+      "otp": {
+        "title": "Code à usage unique",
+        "description": "Un code à 6 chiffres a été envoyé à **{email}**. Saisissez-le ci-dessous.",
+        "data": {
+          "otp_code": "Code à usage unique",
+          "password": "Mot de passe (uniquement pour le corriger)"
+        }
+      },
+      "token": {
+        "title": "Dyson Spot+Scrub AI",
+        "description": "Saisissez un jeton bearer Dyson (capturé avec un outil proxy comme Proxyman, ou repris d'une autre intégration), le numéro de série de votre robot et le code pays de votre compte Dyson.",
+        "data": {
+          "token": "Jeton bearer",
+          "serial": "Numéro de série du robot",
+          "country": "Code pays (par ex. FR, BE, CH)"
+        }
+      },
+      "select_robot": {
+        "title": "Choisir un robot",
+        "description": "Plusieurs robots ont été trouvés. Choisissez celui à ajouter.",
+        "data": {
+          "serial": "Robot"
+        }
+      },
+      "experimental": {
+        "title": "Robot expérimental",
+        "description": "**{name}** ({summary}) est un robot Dyson que cette intégration ne prend pas encore en charge. Vous pouvez tout de même l'ajouter comme robot expérimental : il utilise le même code que le Spot+Scrub AI et le R2 Nurovi, donc beaucoup de fonctions devraient marcher, mais certaines peut-être pas.\n\nAidez-nous à le prendre entièrement en charge : activez la journalisation de débogage de cette intégration, lancez un nettoyage et partagez le journal sur la page des issues : {issues_url} (retirez d'abord votre numéro de série).\n\nChoisissez **Valider** pour l'ajouter."
+      }
+    },
+    "abort": {
+      "no_robots_found": "Aucun robot aspirateur pris en charge n'a été trouvé dans votre compte Dyson. Appareils trouvés : {devices}. Si l'un d'eux est un robot aspirateur Dyson, ouvrez une issue avec cette liste sur {issues_url} pour que nous puissions l'ajouter.",
+      "cannot_connect": "Impossible de se connecter à l'API cloud de Dyson.",
+      "already_configured": "Cet appareil est déjà configuré.",
+      "invalid_serial": "L'appareil a renvoyé un numéro de série non valide."
+    },
+    "error": {
+      "cannot_connect": "Impossible de joindre les serveurs de Dyson. Vérifiez votre connexion Internet.",
+      "invalid_auth": "Adresse e-mail ou mot de passe non valide. Vérifiez vos identifiants.",
+      "invalid_otp": "Dyson a refusé le code ou le mot de passe. Vérifiez les deux (vous pouvez corriger le mot de passe ci-dessous sans demander de nouveau code) et réessayez une seule fois. S'il est refusé à nouveau, arrêtez : Dyson répond de la même façon pour un compte bloqué, et des tentatives répétées peuvent prolonger un blocage.",
+      "serial_not_found": "Ce numéro de série est introuvable dans votre compte Dyson.",
+      "invalid_serial": "Le numéro de série contient des caractères non valides. Utilisez uniquement des lettres, des chiffres et des tirets.",
+      "invalid_country": "Saisissez un code pays à deux lettres, par ex. FR ou BE.",
+      "rate_limited": "Dyson limite les tentatives de connexion pour ce compte. Attendez un moment avant de réessayer, plutôt que de recommencer tout de suite.",
+      "account_not_active": "Selon Dyson, ce compte n'est pas actif, donc aucun code de connexion n'a été demandé. Vérifiez le compte dans l'application MyDyson.",
+      "unsupported_auth_method": "Ce compte Dyson utilise une méthode de connexion que l'intégration ne prend pas encore en charge. Aucun code de connexion n'a été demandé ; utilisez plutôt un jeton bearer.",
+      "app_version_unsupported": "Dyson exige désormais une version de l'application MyDyson plus récente que celle annoncée par cette intégration. Aucun code de connexion n'a été demandé ; l'intégration doit être mise à jour.",
+      "too_many_attempts": "La connexion est suspendue pendant 15 minutes après deux tentatives refusées, pour protéger votre compte Dyson. Si les tentatives avec le bon code et le bon mot de passe sont toujours refusées, Dyson a peut-être bloqué le compte : arrêtez et attendez quelques heures, ou contactez le support Dyson, plutôt que de réessayer."
+    }
+  },
+  "services": {
+    "clean_room": {
+      "name": "Nettoyer une pièce",
+      "description": "Lance le nettoyage d'une seule pièce. Le robot nettoie uniquement la pièce indiquée, puis retourne à sa base.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur qui doit nettoyer. Facultatif s'il n'y a qu'un robot Dyson configuré ; obligatoire s'il y en a plusieurs."
+        },
+        "room": {
+          "name": "Pièce",
+          "description": "Le nom de la pièce, exactement comme dans l'attribut \"rooms\" de l'aspirateur (par ex. \"Living Room\", \"Kitchen\"). Les majuscules ne comptent pas."
+        }
+      }
+    },
+    "clean_rooms": {
+      "name": "Nettoyer des pièces (l'une après l'autre)",
+      "description": "Nettoie plusieurs pièces l'une après l'autre. Le robot termine chaque pièce et retourne à sa base avant de passer à la suivante. Les pièces sont nettoyées dans l'ordre indiqué.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur qui doit nettoyer. Facultatif s'il n'y a qu'un robot Dyson configuré ; obligatoire s'il y en a plusieurs."
+        },
+        "rooms": {
+          "name": "Pièces",
+          "description": "Liste des noms de pièces, dans l'ordre. Chaque nom doit correspondre exactement à l'attribut \"rooms\" de l'aspirateur (les majuscules ne comptent pas), par ex. [\"Living Room\", \"Kitchen\"]."
+        }
+      }
+    },
+    "save_room_settings": {
+      "name": "Enregistrer les réglages des pièces",
+      "description": "Enregistre les réglages de plusieurs pièces en une seule fois, sans lancer de nettoyage.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur dont les réglages des pièces doivent être mis à jour."
+        },
+        "room_settings": {
+          "name": "Réglages des pièces",
+          "description": "Objet dont les clés sont les identifiants fixes des pièces. Chaque pièce peut contenir cleaning_mode, cleaning_strategy, water_level et mop_repetitions, avec les mêmes libellés d'options que les entités de sélection (en anglais). Par exemple, la pièce 12 avec cleaning_mode \"Vacuum then Mop\" et mop_repetitions \"Two Passes\"."
+        }
+      }
+    },
+    "start_rooms_with_settings": {
+      "name": "Lancer des pièces avec réglages",
+      "description": "Applique un brouillon de réglages des pièces et envoie au robot les identifiants des pièces choisies, dans l'ordre indiqué. Le robot peut choisir son propre ordre.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur à lancer."
+        },
+        "room_ids": {
+          "name": "Identifiants des pièces, dans l'ordre",
+          "description": "Identifiants fixes des pièces, dans l'ordre de nettoyage souhaité."
+        },
+        "room_settings": {
+          "name": "Réglages des pièces",
+          "description": "Objet facultatif dont les clés sont les identifiants fixes des pièces, avec les libellés d'options à appliquer avant le lancement."
+        }
+      }
+    },
+    "cancel_drying": {
+      "name": "Annuler le séchage",
+      "description": "Arrête le séchage du rouleau de lavage pour un aspirateur Dyson connecté. L'état de la base est mis à jour dès que le robot confirme le changement.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur qui est en train de sécher son rouleau de lavage."
+        }
+      }
+    },
+    "clean_zone": {
+      "name": "Nettoyer une zone",
+      "description": "Nettoie un rectangle de la carte active avec ses propres réglages, comme le mode Cible de l'application MyDyson. Les réglages des pièces ne sont pas modifiés. Pour l'instant uniquement pour le Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson"
+        },
+        "map_id": {
+          "name": "Identifiant de la carte",
+          "description": "Identifiant de la carte active, pris sur l'aspirateur ou sur l'image calibrée de la caméra. Si une autre carte est active, le lancement est refusé."
+        },
+        "rectangle": {
+          "name": "Rectangle",
+          "description": "Quatre coordonnées du robot en mètres, [x_min, y_min, x_max, y_max]. Pas des pixels d'image. Vérifiez la zone avant de lancer."
+        },
+        "cleaning_strategy": {
+          "name": "Puissance d'aspiration",
+          "description": "Par défaut : auto."
+        },
+        "clean_type": {
+          "name": "Mode de nettoyage",
+          "description": "Par défaut : vacuum (aspiration seule)."
+        },
+        "water_level": {
+          "name": "Niveau d'eau",
+          "description": "Par défaut : low. Utile seulement pour les modes avec lavage."
+        },
+        "mop_passes": {
+          "name": "Passages de lavage",
+          "description": "Par défaut : 1. Avec 2, le nettoyage est répété dans tous les modes, même en aspiration seule. Avec vacuumThenMop, cela donne un passage d'aspiration et deux passages de lavage."
+        },
+        "dry_passes": {
+          "name": "Passages d'aspiration",
+          "description": "Par défaut : 1. Envoyé comme le fait l'application, mais 2 n'a eu aucun effet lors des essais sur le robot ; utilisez les passages de lavage pour un second passage."
+        }
+      }
+    },
+    "clean_whole_home": {
+      "name": "Nettoyer toute la maison",
+      "description": "Expérimental. Lance le même nettoyage que le bouton du robot. Il n'est pas encore confirmé si chaque pièce est nettoyée avec ses réglages enregistrés, ou si le dernier nettoyage du robot est répété. Les réglages des pièces ne sont pas modifiés. Pour l'instant uniquement pour le Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson"
+        }
+      }
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "docked": {
+        "name": "Sur la base"
+      },
+      "charging": {
+        "name": "En charge"
+      },
+      "fault": {
+        "name": "Erreur"
+      }
+    },
+    "button": {
+      "vacuum_start": {
+        "name": "Lancer le nettoyage"
+      },
+      "clean_whole_home": {
+        "name": "Nettoyer toute la maison"
+      },
+      "empty_bin": {
+        "name": "Vider le bac"
+      },
+      "wash_mop": {
+        "name": "Laver la serpillière"
+      },
+      "dry_mop": {
+        "name": "Sécher la serpillière"
+      }
+    },
+    "camera": {
+      "floor_map": {
+        "name": "Plan"
+      }
+    },
+    "number": {
+      "volume": {
+        "name": "Volume"
+      }
+    },
+    "select": {
+      "vacuum_mode": {
+        "name": "Mode de nettoyage"
+      },
+      "room_cleaning_mode": {
+        "name": "{room} – mode de nettoyage"
+      },
+      "room_cleaning_strategy": {
+        "name": "{room} – stratégie de nettoyage"
+      },
+      "room_water_level": {
+        "name": "{room} – niveau d'eau"
+      },
+      "room_mop_repetitions": {
+        "name": "{room} – nombre de passages"
+      },
+      "self_cleaning_frequency": {
+        "name": "Fréquence d'autonettoyage"
+      },
+      "roller_drying_duration": {
+        "name": "Durée de séchage du rouleau"
+      }
+    },
+    "sensor": {
+      "battery": {
+        "name": "Batterie"
+      },
+      "brush_bar_usage": {
+        "name": "Usure de la brosse"
+      },
+      "mop_roller_usage": {
+        "name": "Usure du rouleau de lavage"
+      },
+      "mop_pad_usage": {
+        "name": "Usure du patin de lavage"
+      },
+      "side_brushes_usage": {
+        "name": "Usure des brosses latérales"
+      },
+      "robot_filter_usage": {
+        "name": "Usure du filtre du robot"
+      },
+      "dock_filter_usage": {
+        "name": "Usure du filtre de la base"
+      },
+      "cleaning_solution": {
+        "name": "Solution de nettoyage",
+        "state": {
+          "ok": "OK",
+          "refill_required": "À remplir"
+        }
+      },
+      "drying_remaining": {
+        "name": "Temps de séchage restant"
+      },
+      "current_room": {
+        "name": "Pièce actuelle",
+        "state": {
+          "docked": "Sur la base"
+        }
+      }
+    },
+    "switch": {
+      "room": {
+        "name": "{room}"
+      },
+      "hot_water_mopping": {
+        "name": "Lavage à l'eau chaude"
+      },
+      "cleaning_solution": {
+        "name": "Solution de nettoyage"
+      },
+      "extended_roller_preparation": {
+        "name": "Préparation prolongée du rouleau"
+      },
+      "hot_water_self_cleaning": {
+        "name": "Autonettoyage à l'eau chaude"
+      },
+      "voice_prompts": {
+        "name": "Annonces vocales"
+      },
+      "child_lock": {
+        "name": "Sécurité enfant"
+      },
+      "do_not_disturb": {
+        "name": "Ne pas déranger"
+      }
+    },
+    "time": {
+      "do_not_disturb_start": {
+        "name": "Ne pas déranger – début"
+      },
+      "do_not_disturb_end": {
+        "name": "Ne pas déranger – fin"
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Réglages de la carte",
+        "description": "Les modifications s'appliquent à la prochaine actualisation de la caméra, y compris pendant que la dernière carte de nettoyage est conservée.",
+        "data": {
+          "map_retention_minutes": "Durée de conservation",
+          "map_keep_last": "Garder la dernière carte de nettoyage",
+          "map_transparent_background": "Fond transparent"
+        },
+        "data_description": {
+          "map_retention_minutes": "Durée après la fin ou l'annulation du nettoyage. 0 désactive la conservation limitée dans le temps. Les pauses et les passages entre aspiration et lavage conservent la carte sans lancer ce minuteur.",
+          "map_keep_last": "Garde la dernière carte de nettoyage jusqu'au prochain nettoyage, à un changement de carte ou au redémarrage de l'intégration. Prioritaire sur la durée de conservation. Si désactivé, la durée est comptée depuis la fin réelle du nettoyage.",
+          "map_transparent_background": "Retire le fond de la carte, pour la superposer à un plan."
+        },
+        "sections": {
+          "line_settings_section": {
+            "name": "Apparence",
+            "data": {
+              "map_vacuum_color": "Couleur du tracé d'aspiration",
+              "map_mop_color": "Couleur du tracé de lavage",
+              "map_combined_color": "Couleur aspiration et lavage",
+              "map_path_width": "Épaisseur du tracé",
+              "map_glow_width": "Largeur du halo",
+              "map_room_colors": "Couleurs des pièces"
+            },
+            "data_description": {
+              "map_combined_color": "Pour l'aspiration et le lavage simultanés. En nettoyage successif, les couleurs distinctes d'aspiration et de lavage sont conservées.",
+              "map_path_width": "Épaisseur du trait en pixels de l'image source. La mise à l'échelle du tableau de bord change la taille affichée.",
+              "map_glow_width": "Largeur totale de la bande translucide derrière les tracés de lavage et d'aspiration avec lavage, comme dans l'application MyDyson. Les tracés d'aspiration seule n'ont pas de halo. Choisissez une valeur supérieure à l'épaisseur du tracé pour un halo visible. 0 le désactive.",
+              "map_room_colors": "Donne à chaque pièce sa propre couleur pour le sol, le contour, le nom, la surface et la légende, fixe par carte et par pièce. Les murs deviennent blancs ; les couleurs des tracés de nettoyage ne changent pas."
+            }
+          },
+          "outside_walls_section": {
+            "name": "Murs extérieurs",
+            "description": "Un bord de pièce qui n'est partagé avec aucune autre pièce.",
+            "data": {
+              "map_wall_style": "Style",
+              "map_wall_thickness_cm": "Épaisseur",
+              "map_wall_color": "Couleur"
+            },
+            "data_description": {
+              "map_wall_thickness_cm": "En centimètres sur le sol réel, pour que les murs suivent l'échelle de la carte.",
+              "map_wall_color": "Le gris par défaut devient blanc quand les couleurs des pièces sont activées ou le remplissage du sol désactivé. Toute autre couleur est utilisée telle quelle."
+            }
+          },
+          "inner_walls_section": {
+            "name": "Murs entre les pièces",
+            "description": "Un mur plein partagé par deux pièces.",
+            "data": {
+              "map_inner_wall_style": "Style",
+              "map_inner_wall_thickness_cm": "Épaisseur",
+              "map_inner_wall_color": "Couleur"
+            },
+            "data_description": {
+              "map_inner_wall_thickness_cm": "En centimètres sur le sol réel.",
+              "map_inner_wall_color": "Le gris par défaut devient blanc quand les couleurs des pièces sont activées ou le remplissage du sol désactivé. Toute autre couleur est utilisée telle quelle."
+            }
+          },
+          "doors_section": {
+            "name": "Portes et passages",
+            "description": "Là où le robot peut passer d'une pièce à l'autre, y compris dans les espaces ouverts.",
+            "data": {
+              "map_door_style": "Style",
+              "map_door_thickness_cm": "Épaisseur",
+              "map_door_color": "Couleur"
+            },
+            "data_description": {
+              "map_door_thickness_cm": "En centimètres sur le sol réel.",
+              "map_door_color": "Le gris par défaut devient gris clair quand les couleurs des pièces sont activées ou le remplissage du sol désactivé. Toute autre couleur est utilisée telle quelle."
+            }
+          },
+          "floor_section": {
+            "name": "Sol",
+            "data": {
+              "map_floor_color": "Couleur du sol accessible",
+              "map_room_fill_color": "Couleur du reste de la pièce"
+            },
+            "data_description": {
+              "map_floor_color": "Utilisée seulement quand les couleurs des pièces sont désactivées. Sinon, le sol de chaque pièce prend la couleur de sa pièce.",
+              "map_room_fill_color": "Les meubles et les autres parties d'une pièce que le robot ne peut pas atteindre."
+            }
+          },
+          "keepout_section": {
+            "name": "Zones interdites",
+            "description": "Afficher ou masquer dans Éléments visibles.",
+            "data": {
+              "map_keepout_style": "Style",
+              "map_keepout_thickness_cm": "Épaisseur",
+              "map_keepout_color": "Couleur"
+            },
+            "data_description": {
+              "map_keepout_thickness_cm": "Épaisseur du contour en centimètres sur le sol réel.",
+              "map_keepout_color": "Couleur du contour ; la zone est remplie d'une teinte légère de cette couleur."
+            }
+          },
+          "visibility_settings_section": {
+            "name": "Éléments visibles",
+            "description": "Les éléments activés sont visibles. Les éléments masqués comptent toujours dans les dimensions de l'image, pour qu'une superposition reste alignée.",
+            "data": {
+              "map_show_furniture": "Afficher les meubles",
+              "map_show_room_names": "Afficher les noms des pièces",
+              "map_center_room_names": "Centrer les noms des pièces",
+              "map_show_room_areas": "Afficher la surface des pièces (m²)",
+              "map_show_legend": "Afficher la légende",
+              "map_show_status_areas": "Afficher l'état du nettoyage par zone",
+              "map_show_perimeter": "Afficher les murs et les séparations",
+              "map_show_visited_paths": "Afficher le contour du sol accessible",
+              "map_show_grid": "Afficher la grille",
+              "map_show_dock": "Afficher la base de charge",
+              "map_show_restrictions": "Afficher les zones interdites",
+              "map_floor_fill": "Afficher l'ombrage du sol"
+            },
+            "data_description": {
+              "map_center_room_names": "Place chaque nom de pièce au centre des murs de la pièce. Désactivé, utilise les positions de l'application MyDyson.",
+              "map_floor_fill": "Foncé pour le sol que le robot peut atteindre, gris pour les meubles et les autres endroits inaccessibles. Désactivez pour superposer la carte à votre propre plan.",
+              "map_show_status_areas": "Pièces colorées qui montrent l'avancement du nettoyage.",
+              "map_show_perimeter": "Les murs en traits pleins, et les portes ou passages entre les pièces en pointillés, comme dans l'application MyDyson.",
+              "map_show_visited_paths": "Contour du sol que le robot peut atteindre dans chaque pièce. Il contourne les meubles.",
+              "map_show_grid": "Avec les repères de distance et la marque de l'origine de la carte.",
+              "map_show_legend": "La légende a ses propres libellés de pièces, indépendamment de Afficher les noms des pièces."
+            }
+          }
+        }
+      }
+    },
+    "error": {
+      "invalid_map_option": "Saisissez une valeur valide dans la plage autorisée."
+    }
+  },
+  "selector": {
+    "line_style": {
+      "options": {
+        "solid": "Plein",
+        "dashed": "Pointillé"
+      }
+    },
+    "room_type": {
+      "options": {
+        "balcony": "Balcon",
+        "bathroom": "Salle de bain",
+        "bedroom": "Chambre",
+        "boxroom": "Débarras",
+        "cloakroom": "Vestiaire",
+        "closet": "Dressing",
+        "conservatory": "Véranda",
+        "dining": "Salle à manger",
+        "ensuite": "Salle de bain attenante",
+        "entrance": "Entrée",
+        "family_room": "Salle familiale",
+        "guest_bathroom": "Salle de bain des invités",
+        "guest_bedroom": "Chambre d'amis",
+        "guest_room": "Chambre d'invités",
+        "hallway": "Couloir",
+        "kids_bedroom": "Chambre d'enfant",
+        "kitchen": "Cuisine",
+        "laundry_room": "Buanderie",
+        "living_room": "Salon",
+        "nursery": "Chambre de bébé",
+        "office": "Bureau",
+        "pantry": "Garde-manger",
+        "play_room": "Salle de jeux",
+        "primary_bathroom": "Salle de bain principale",
+        "primary_bedroom": "Chambre principale",
+        "recreation_room": "Salle de loisirs",
+        "storage_room": "Rangement",
+        "study": "Bureau d'étude",
+        "toilet": "Toilettes",
+        "utility_room": "Arrière-cuisine"
+      }
+    }
+  },
+  "issues": {
+    "experimental_robot": {
+      "title": "Aidez à prendre en charge votre robot Dyson",
+      "description": "**{name}** (type de produit {product_type}, préfixe {prefix}) est configuré comme robot **expérimental** : ce modèle n'est pas encore entièrement pris en charge, donc certaines fonctions peuvent ne pas marcher.\n\nVous pouvez aider : activez la journalisation de débogage de cette intégration (Paramètres → Appareils et services → Dyson Spot+Scrub AI → ⋮ → Activer la journalisation de débogage), lancez un nettoyage, désactivez la journalisation de débogage pour télécharger le journal, puis partagez-le sur la page des issues : {issues_url}. Retirez d'abord le numéro de série de votre robot du journal. Choisissez **En savoir plus** pour ouvrir une nouvelle issue."
+    }
+  }
+}
