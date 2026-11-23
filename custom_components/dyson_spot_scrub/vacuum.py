@@ -401,13 +401,7 @@ class DysonVacuumEntity(StateVacuumEntity):
     # ── Commands ──────────────────────────────────────────────────────────────
 
     async def async_start(self) -> None:
-        """Start or resume cleaning.
-
-        If the robot is currently paused, sends only the JDM resume command
-        (service.set_room_clean ctrl_value:1) — the Dyson app does not send
-        a general START on resume, which would start a new job from scratch.
-        If the robot is not paused, uses the existing full start flow.
-        """
+        """Resume the paused job or start a new clean."""
         if is_paused(self._mqtt_state):
             await self.hass.async_add_executor_job(
                 self._coordinator.mqtt.resume
