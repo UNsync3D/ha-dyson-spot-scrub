@@ -992,13 +992,17 @@ def _path_runs(cp: list, pts: list, modes: list) -> list:
 
     A segment takes its mode from the point it ends on when Dyson sent
     per-point codes; otherwise from the observed robot activity (modes).
+    A segment touching a travel point is travel (#69): leaving the dock the
+    robot reported one stray vacuuming point between travel points, 43 cm
+    from the previous one, with the suction off, which drew a false
+    cleaning line at the dock.
     """
     runs: list = []
     current_mode = object()
     current: list = []
     for j in range(len(pts) - 1):
         update = _point_update(cp[j + 1])
-        if update == PATH_TRAVEL:
+        if update == PATH_TRAVEL or _point_update(cp[j]) == PATH_TRAVEL:
             mode = PATH_TRAVEL
         elif update in PATH_UPDATE_MODES:
             mode = PATH_UPDATE_MODES[update]

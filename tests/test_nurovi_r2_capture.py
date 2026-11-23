@@ -131,13 +131,11 @@ class R2PathTests(unittest.TestCase):
         pts = [(p["x"] * 20, p["y"] * 20) for p in cp]
         runs = self.renderer._path_runs(cp, pts, [None] * (len(pts) - 1))
         self.assertEqual({mode for mode, _ in runs}, {"VACUUMING_AND_MOPPING"})
-        # Each drawn stretch starts from the point before it, then every
-        # vacuum+mop point; no travel point is drawn otherwise.
-        drawn = sum(len(run) for _, run in runs)
-        self.assertEqual(drawn - len(runs), sum(1 for p in cp if p["update"] == 3))
-        stretches = sum(1 for a, b in zip([None] + cp, cp) if b["update"] == 3
-                        and (a is None or a["update"] != 3))
-        self.assertEqual(len(runs), stretches)
+        # Only vacuum+mop points are drawn (#69): each stretch of two or more
+        # in a row is one run, and no travel point is part of any run.
+        import itertools
+        stretches = [len(list(g)) for code, g in itertools.groupby(p["update"] for p in cp) if code == 3]
+        self.assertEqual([len(run) for _, run in runs], [n for n in stretches if n >= 2])
 
 
 if __name__ == "__main__":
