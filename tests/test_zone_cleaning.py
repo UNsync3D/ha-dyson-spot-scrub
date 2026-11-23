@@ -34,6 +34,27 @@ class ZoneCommandTests(unittest.TestCase):
         })
         self.assertEqual(self.client._cached_preference, before)
 
+    def test_pause_resume_follow_reported_job_mode(self):
+        for mode in ("spotZoneConfigured", "zoneConfigured", "global", None):
+            with self.subTest(mode=mode):
+                self.sent.clear()
+                self.client.state.update(state="FULL_CLEAN_RUNNING", currentCleaningMode=mode)
+                self.client.pause()
+                self.client.state["state"] = "FULL_CLEAN_PAUSED"
+                self.client.resume()
+                pause, resume = [payload for _, payload in self.sent]
+                self.assertEqual(pause["msg"], "PAUSE")
+                if mode == "spotZoneConfigured":
+                    self.assertEqual(pause["cleaningMode"], mode)
+                    self.assertEqual(resume["msg"], "RESUME")
+                    self.assertEqual(resume["cleaningMode"], mode)
+                else:
+                    self.assertNotIn("cleaningMode", pause)
+                    self.assertEqual(resume["method"], "service.set_room_clean")
+                    self.assertEqual(resume["params"], {
+                        "ctrl_value": 1, "clean_type": 0, "room_ids": [],
+                    })
+
     def test_verified_power_and_invalid_values(self):
         for strategy in ("auto", "boost", "quiet", "quick"):
             self.assertTrue(self.client.start_zone("123", [0, 0, 1, 1], strategy))
