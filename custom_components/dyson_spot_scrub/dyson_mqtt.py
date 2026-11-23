@@ -811,7 +811,17 @@ class DysonMqttClient:
         self._publish(payload)
 
     def pause(self) -> None:
-        """Pause once. Dyson routes the mode-qualified command to set_areas_start."""
+        """Pause an active clean with one legacy PAUSE.
+
+        Room and whole-home cleans: PAUSE only. Dyson's cloud adds
+        service.set_room_clean (ctrl_value 2) itself; the HA test on 3 Nov 2026
+        showed that request twice when we sent it too. Rectangular zone cleans
+        (#68): PAUSE carries cleaningMode "spotZoneConfigured", as the app
+        sends it, and the cloud turns it into service.set_areas_start
+        (ctrl_value 2); without it the robot kept cleaning. Any in-flight start
+        is cancelled first so the preference lock is released and PAUSE is
+        sent immediately.
+        """
         with self._preference_lock:
             self._cancel_pending_start()
             _LOGGER.info("[%s] → PAUSE", self.serial)
@@ -819,7 +829,14 @@ class DysonMqttClient:
             self._publish_clean_control("PAUSE", mode if mode == "spotZoneConfigured" else None)
 
     def resume(self) -> None:
-        """Continue the current zone or room job."""
+        """Resume a paused clean, continuing the same job.
+
+        Never a general START: that starts a new job from scratch. Room and
+        whole-home cleans: only service.set_room_clean (ctrl_value 1, empty
+        room_ids), as the Dyson app sends. Rectangular zone cleans (#68): a
+        legacy RESUME with cleaningMode "spotZoneConfigured", which the cloud
+        turns into service.set_areas_start (ctrl_value 1).
+        """
         _LOGGER.info("[%s] → RESUME", self.serial)
         mode = self.state.get("currentCleaningMode")
         if mode == "spotZoneConfigured":
