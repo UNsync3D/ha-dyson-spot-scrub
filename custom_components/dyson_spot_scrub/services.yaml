@@ -235,7 +235,7 @@ set_schedule:
       selector:
         time:
     enabled:
-      name: On
+      name: "On"
       description: Whether the schedule is on. New schedules are on unless this is off.
       selector:
         boolean:
