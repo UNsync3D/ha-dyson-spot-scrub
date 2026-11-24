@@ -23,7 +23,14 @@ class PathRunsTests(unittest.TestCase):
     def test_travel_points_are_left_out(self):
         cp = [{"x": i, "y": 0, "update": u} for i, u in enumerate([0, 0, 1, 1, 1, 0, 0])]
         runs = renderer._path_runs(cp, pts(7), [None] * 6)
-        self.assertEqual([(m, len(r)) for m, r in runs], [("VACUUMING", 4)])
+        self.assertEqual([(m, len(r)) for m, r in runs], [("VACUUMING", 3)])
+
+    def test_stray_cleaning_point_between_travel_draws_nothing(self):
+        """#69: FutuRazor's zone clean, a lone update 1 just out of the dock."""
+        codes = [0, 0, 0, 1, 0, 0, 0, 1, 1, 1]
+        cp = [{"x": i, "y": 0, "update": u} for i, u in enumerate(codes)]
+        runs = renderer._path_runs(cp, pts(10), [None] * 9)
+        self.assertEqual([(m, [p[0] for p in r]) for m, r in runs], [("VACUUMING", [7.0, 8.0, 9.0])])
 
     def test_per_point_codes_decide_the_colour(self):
         cp = [{"x": i, "y": 0, "update": u} for i, u in enumerate([1, 1, 1, 2, 2, 3, 3])]

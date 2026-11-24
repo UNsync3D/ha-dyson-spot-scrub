@@ -183,6 +183,54 @@
           "name": "Dyson-stofzuiger"
         }
       }
+    },
+    "set_schedule": {
+      "name": "Schema instellen",
+      "description": "Maak een schoonmaakschema op de robot, of wijzig er een. Zonder schema-ID wordt er een nieuw gemaakt en zijn dagen, een tijd en kamers nodig; met een ID blijft alles wat je weglaat ongewijzigd. Elk schema heeft eigen kamerinstellingen. Voorlopig alleen Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger van dit schema."
+        },
+        "schedule_id": {
+          "name": "Schema-ID",
+          "description": "Het schema, uit het attribuut schedules van de sensor Schema's. Laat leeg om een nieuw schema te maken."
+        },
+        "days": {
+          "name": "Dagen",
+          "description": "Dagen van de week waarop wordt schoongemaakt."
+        },
+        "time": {
+          "name": "Tijd",
+          "description": "Starttijd, in de tijdzone van Home Assistant."
+        },
+        "enabled": {
+          "name": "Aan",
+          "description": "Of het schema aan staat. Nieuwe schema's staan aan, tenzij je dit uitzet."
+        },
+        "room_ids": {
+          "name": "Kamer-ID's",
+          "description": "Kamers om schoon te maken, op vaste kamer-ID, in volgorde (elke kamerselectie heeft een attribuut room_id)."
+        },
+        "room_settings": {
+          "name": "Kamerinstellingen",
+          "description": "Optionele instellingen alleen voor dit schema, per kamer-ID, met dezelfde labels als Kamers starten met instellingen. Andere kamers houden hun instellingen."
+        }
+      }
+    },
+    "delete_schedule": {
+      "name": "Schema verwijderen",
+      "description": "Verwijder een schoonmaakschema van de robot. Voorlopig alleen Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-stofzuiger",
+          "description": "De stofzuiger van dit schema."
+        },
+        "schedule_id": {
+          "name": "Schema-ID",
+          "description": "Het schema om te verwijderen, uit het attribuut schedules van de sensor Schema's."
+        }
+      }
     }
   },
   "entity": {
@@ -284,6 +332,9 @@
         "state": {
           "docked": "Gedockt"
         }
+      },
+      "schedules": {
+        "name": "Schema's"
       }
     },
     "switch": {
@@ -310,6 +361,9 @@
       },
       "do_not_disturb": {
         "name": "Niet storen"
+      },
+      "schedule": {
+        "name": "Schema {time} {days}"
       }
     },
     "time": {
@@ -318,6 +372,11 @@
       },
       "do_not_disturb_end": {
         "name": "Niet storen einde"
+      }
+    },
+    "calendar": {
+      "schedules": {
+        "name": "Schoonmaakschema"
       }
     }
   },
@@ -490,6 +549,17 @@
         "study": "Studeerkamer",
         "toilet": "Toilet",
         "utility_room": "Bijkeuken"
+      }
+    },
+    "weekday": {
+      "options": {
+        "mon": "ma",
+        "tue": "di",
+        "wed": "wo",
+        "thu": "do",
+        "fri": "vr",
+        "sat": "za",
+        "sun": "zo"
       }
     }
   },

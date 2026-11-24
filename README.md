@@ -87,8 +87,8 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 
 | Entity | Type | Notes |
 |---|---|---|
-| Room *name* | `switch` | Chooses whether the next **Start** cleans this room. Nothing is sent to the robot until you start |
-| Room *name* Cleaning Mode, Cleaning Strategy, Water Level, Clean Repetitions | `select` | The room's saved settings, as in the MyDyson app |
+| *Room name* | `switch` | Chooses whether the next **Start** cleans this room. Nothing is sent to the robot until you start |
+| *Room name* Cleaning Mode, Cleaning Strategy, Water Level, Clean Repetitions | `select` | The room's saved settings, as in the MyDyson app |
 
 **Dock and station** (robots with a mop: not the R1)
 
@@ -107,6 +107,14 @@ The card is developed and maintained by **[@FutuRazor](https://github.com/FutuRa
 | Voice prompts, Child lock, Do not disturb | `switch` | As in the MyDyson app's robot settings |
 | Volume | `number` | Voice and sound volume, 0–100 % in steps of 10 |
 | Do not disturb start, Do not disturb end | `time` | Quiet hours. Changing one keeps the other and the on/off setting |
+
+**Schedules** (the cleaning schedules saved on the robot, see [Schedules](#schedules))
+
+| Entity | Type | Notes |
+|---|---|---|
+| Schedule *time days* | `switch` | One per schedule, e.g. *Schedule 10:00 Tue, Thu*: turns it on or off, as in the MyDyson app (Spot+Scrub AI) |
+| Schedules | `sensor` | How many schedules the robot has, with the details of each in its `schedules` attribute |
+| Cleaning schedule | `calendar` | Each schedule that is on, as a weekly event |
 
 ### When a clean can start
 
@@ -144,6 +152,18 @@ automation:
         target:
           entity_id: light.kitchen
 ```
+
+### Schedules
+
+Schedules made in the MyDyson app are saved on the robot, and it starts them itself, even when Home Assistant is off. Home Assistant shows them and, on the Spot+Scrub AI, can turn them on and off, create, change and delete them.
+
+**How Home Assistant knows them:** the robot only says how many schedules it has, not what they are. Home Assistant learns each schedule when it sees the MyDyson app (or Home Assistant itself) save it, and keeps a copy. So a schedule made **before you installed v2.2.0**, or while Home Assistant was off, isn't known yet: the **Schedules** sensor then shows `in_sync: false` and how many are `unknown`. To fix it, open each schedule in the MyDyson app and save it once (or turn it off and on again).
+
+The **Schedules** sensor's `schedules` attribute lists each known schedule: `schedule_id`, `enabled`, `days` (`mon` to `sun`), `time`, `room_ids` and `rooms` in the order they're cleaned, and `room_settings`: each of those rooms' settings in this schedule, keyed by room ID, with the same labels `set_schedule` takes. Each schedule keeps its own room settings, separate from the rooms' settings in Home Assistant and the app.
+
+The calendar shows each clean as an hour long, since the robot doesn't say how long a clean will take. Like the app, Home Assistant won't save two schedules that are on and start at the same time on the same day.
+
+Creating, changing and deleting are captured from the app on the Spot+Scrub AI only. On the R1 and R2 Nurovi, schedules are shown but can't be changed from Home Assistant yet: a debug log of the app saving a schedule would let us add them ([#67](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/67)).
 
 ### Floor Map
 
@@ -191,6 +211,8 @@ The choice resets to Room settings when Home Assistant restarts. The [Dyson Clea
 | `dyson_spot_scrub.clean_zone` | Cleans one rectangle on the map with its own settings (Spot+Scrub AI) |
 | `dyson_spot_scrub.clean_whole_home` | **Experimental.** Starts the same clean as the button on the robot (Spot+Scrub AI) |
 | `dyson_spot_scrub.cancel_drying` | Stops mop drying |
+| `dyson_spot_scrub.set_schedule` | Creates a cleaning schedule on the robot, or changes one (Spot+Scrub AI) |
+| `dyson_spot_scrub.delete_schedule` | Deletes a cleaning schedule from the robot (Spot+Scrub AI) |
 
 The room select entities save each change straight away. `save_room_settings` saves a batch in one go, using stable room IDs and the same option labels as the select entities:
 
@@ -240,9 +262,33 @@ data:
   entity_id: vacuum.dyson_spot_scrub
 ```
 
+`set_schedule` creates a schedule when there's no `schedule_id`: it needs `days`, a `time` and `room_ids` (in cleaning order), and starts from the rooms' current settings, with any `room_settings` you give for this schedule only. With a `schedule_id` it changes that schedule, and anything you leave out stays as it is. It returns the schedule, including its new `schedule_id`. `enabled: false` saves it switched off.
+
+```yaml
+action: dyson_spot_scrub.set_schedule
+data:
+  entity_id: vacuum.dyson_spot_scrub
+  days: [mon, wed, fri]
+  time: "10:00"
+  room_ids: ["12", "13"]
+  room_settings:
+    "13":
+      cleaning_mode: Vacuum then Mop
+response_variable: result
+```
+
+```yaml
+action: dyson_spot_scrub.delete_schedule
+data:
+  entity_id: vacuum.dyson_spot_scrub
+  schedule_id: 1585487491
+```
+
 ### For dashboard card developers
 
 The vacuum entity exposes `ready_to_start` (true/false) and `start_block_reason` (a reason code, or `null` when ready), so a card can disable Start and say why; Home Assistant enforces the same rule. While drying, it also exposes `drying_total_seconds`, `drying_remaining_seconds` and `drying_updated_at` (when the last timing report arrived), so a card can show progress as `(total - remaining) / total`. The dock state, not a zero countdown, decides whether drying is active. The Floor Map camera exposes `robot_bumper_color` (for example `"#825fc8"`): the robot's bumper colour on the map, so a card drawing its own robot can match it. More detail: [start readiness](docs/START_READINESS.md) and [consumable sensors](docs/CONSUMABLES.md).
+
+For schedules, the **Schedules** sensor's `schedules` attribute lists each known schedule (see [Schedules](#schedules)), `in_sync` and `unknown` say whether the robot has any Home Assistant hasn't seen, and `can_change` whether this model can save them. `set_schedule` returns the saved schedule, so a card can save the current room selection and settings as a new schedule and learn its `schedule_id`.
 
 ### Languages
 

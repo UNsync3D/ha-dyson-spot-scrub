@@ -195,3 +195,78 @@ clean_whole_home:
         entity:
           integration: dyson_spot_scrub
           domain: vacuum
+set_schedule:
+  name: Set schedule
+  description: Create a cleaning schedule on the robot, or change one. Without a schedule ID it creates one and needs days, a time and rooms; with one, anything left out stays as it is. Each schedule keeps its own room settings. Spot+Scrub AI only for now.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      required: true
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
+    schedule_id:
+      name: Schedule ID
+      description: The schedule to change, from the Schedules sensor's schedules attribute. Leave out to create a new schedule.
+      example: 1585487491
+      selector:
+        text:
+    days:
+      name: Days
+      description: Days of the week to clean.
+      example: '["mon", "wed", "fri"]'
+      selector:
+        select:
+          multiple: true
+          translation_key: weekday
+          options:
+            - mon
+            - tue
+            - wed
+            - thu
+            - fri
+            - sat
+            - sun
+    time:
+      name: Time
+      description: Start time, in Home Assistant's time zone.
+      example: "10:00"
+      selector:
+        time:
+    enabled:
+      name: "On"
+      description: Whether the schedule is on. New schedules are on unless this is off.
+      selector:
+        boolean:
+    room_ids:
+      name: Room IDs
+      description: Rooms to clean, by stable room ID, in order (each room select has a room_id attribute).
+      example: '["12", "13"]'
+      selector:
+        object:
+    room_settings:
+      name: Room settings
+      description: Optional settings for this schedule only, keyed by room ID, with the same labels as start_rooms_with_settings. Other rooms keep their settings.
+      example: '{"12": {"cleaning_mode": "Vacuum then Mop", "mop_repetitions": "Two Passes"}}'
+      selector:
+        object:
+
+delete_schedule:
+  name: Delete schedule
+  description: Delete a cleaning schedule from the robot. Spot+Scrub AI only for now.
+  fields:
+    entity_id:
+      name: Dyson vacuum
+      required: true
+      selector:
+        entity:
+          integration: dyson_spot_scrub
+          domain: vacuum
+    schedule_id:
+      name: Schedule ID
+      description: The schedule to delete, from the Schedules sensor's schedules attribute.
+      required: true
+      example: 1585487491
+      selector:
+        text:

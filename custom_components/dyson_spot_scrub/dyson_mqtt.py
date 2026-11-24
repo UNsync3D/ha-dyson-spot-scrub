@@ -37,6 +37,7 @@ from .const import (DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATT
                     MOP_CONSUMABLES, MOP_STATE_FIELDS)
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
+from .schedules import ADD_ORDER, DEL_ORDER, GET_ORDER, ORDER_METHODS
 from .station_settings import (DND_FIELD, DND_KEYS, JDM_METHODS, STATE_FIELDS, current_setting,
                                setting_payloads, reported_properties)
 
@@ -159,6 +160,19 @@ def room_repetitions(room: list, split: bool):
         return room[_MOP_PASSES]
     values = [v for v in (room[_MOP_PASSES], room[_VACUUM_PASSES]) if isinstance(v, int)]
     return max(values) if values else room[_MOP_PASSES]
+
+
+def room_setting_labels(room: list, split: bool) -> dict[str, str]:
+    """A room row's settings as the labels room_settings takes (#67); unknown values left out."""
+    labels = {}
+    for key, (index, option_values) in _ROOM_SETTING_OPTIONS.items():
+        value = room_repetitions(room, split) if key == "mop_repetitions" else (
+            room[index] if isinstance(room, list) and len(room) > index else None)
+        label = next((name for name, v in option_values.items()
+                      if type(value) is int and v == value), None)
+        if label is not None:
+            labels[key] = label
+    return labels
 
 
 def set_room_repetitions(room: list, value: int, split: bool) -> None:
@@ -560,6 +574,9 @@ class DysonMqttClient:
         self._preference_lock = threading.RLock()
         # Called (paho thread) when the robot reports a different current map.
         self.on_map_changed: Callable[[str], None] | None = None
+        # Schedule traffic (#67): ("command" | "reply" | "total", payload),
+        # called on the paho thread for the coordinator's ScheduleBook.
+        self.on_schedule_message: Callable[[str, dict], None] | None = None
         self._preference_ready = threading.Event()
         # Replies awaited by msgId (e.g. the set_preference before a START).
         self._reply_lock = threading.Lock()
@@ -589,6 +606,11 @@ class DysonMqttClient:
     @property
     def supports_whole_home(self) -> bool:
         """Whole-home START confirmed on the Spot+Scrub AI (RB05) only (12 Nov 2026)."""
+        return str(self._prefix).upper() == "RB05"
+
+    @property
+    def supports_schedule_writes(self) -> bool:
+        """Schedule add/del captured from the app on the Spot+Scrub AI (RB05) only (#67)."""
         return str(self._prefix).upper() == "RB05"
 
     @property
@@ -1654,8 +1676,10 @@ class DysonMqttClient:
             _LOGGER.debug("[%s] ← %s  %s", self.serial, topic, json.dumps(_redact(data)))
 
         if topic.endswith("/command/jdm"):
-            # Our own and the Dyson app's requests. Only used to learn which
-            # map each get_preference reply belongs to.
+            # Our own and the Dyson app's requests: which map each
+            # get_preference reply belongs to, and schedule changes (#67).
+            if data.get("method") in (ADD_ORDER, DEL_ORDER):
+                self._schedule_message("command", data)
             if data.get("method") == "service.get_preference":
                 params = data.get("params") if isinstance(data.get("params"), dict) else {}
                 self._track_preference_request(data.get("msgId"), params.get("map_id"))
@@ -1674,6 +1698,12 @@ class DysonMqttClient:
             if waiter is not None:
                 waiter["code"] = data.get("code")
                 waiter["event"].set()
+
+        if method in ORDER_METHODS and "code" in data:
+            self._schedule_message("reply", data)
+        elif method == "prop.post" and isinstance(data.get("params"), dict) \
+                and isinstance(data["params"].get("order_total"), dict):
+            self._schedule_message("total", data["params"]["order_total"])
 
         if method == "prop.post" and data.get("params"):
             self._merge_jdm_props(data["params"])
@@ -1891,6 +1921,61 @@ class DysonMqttClient:
         self._publish_jdm("service.get_preference", {"map_id": map_id_int})
 
     # ── Internal publish ──────────────────────────────────────────────────────
+
+    def _schedule_message(self, kind: str, data: dict) -> None:
+        callback = self.on_schedule_message
+        if callback is None:
+            return
+        try:
+            callback(kind, deepcopy(data))
+        except Exception:  # noqa: BLE001 - never break message handling
+            _LOGGER.exception("[%s] Error handling a schedule message", self.serial)
+
+    # ── Schedules (#67) ───────────────────────────────────────────────────────
+
+    def request_order_summary(self) -> bool:
+        """Ask for the schedule summary (get_order); the reply arrives as a message."""
+        if not self.available:
+            return False
+        return self._publish_jdm(GET_ORDER, {})
+
+    def send_order_command(self, method: str, params: dict,
+                           timeout: float = _SETTINGS_CONFIRM_TIMEOUT * 2):
+        """Send add_order / del_order and wait for the robot: its code, or None.
+
+        Called from an executor. Never retried: a lost reply may still mean
+        the robot saved it, and a retry with a new ID would make a duplicate.
+        """
+        if method not in (ADD_ORDER, DEL_ORDER):
+            raise ValueError(f"Not a schedule command: {method}")
+        if not self.available:
+            _LOGGER.warning("[%s] Cannot change schedules: robot not reachable", self.serial)
+            return None
+        msg_id = _rand_msg_id()
+        waiter = self._expect_reply(msg_id)
+        sent = self._publish_raw(self._jdm_command_topic, {
+            "msgId": msg_id, "version": "1.0.1", "method": method,
+            "params": params, "time": _now_iso(),
+        })
+        if not sent:
+            self._await_reply(msg_id, waiter, 0)
+            return None
+        _LOGGER.info("[%s] → %s (schedule %s)", self.serial, method, params.get("id"))
+        return self._await_reply(msg_id, waiter, timeout)
+
+    def schedule_base(self) -> tuple[int | None, list[list], list]:
+        """(map ID, room rows as sent, uv_switch) for a new schedule: the current room settings."""
+        try:
+            map_id = int(self.state["persistentMapId"])
+        except (KeyError, TypeError, ValueError):
+            map_id = None
+        rows = self._rows_to_send(self.room_preferences_for_edit())
+        merged = (self._preference_view(self._map_key(map_id)) or {}) if map_id is not None else {}
+        return map_id, rows, deepcopy(merged.get("uv_switch") or [])
+
+    def apply_schedule_room_settings(self, room: list, settings: dict) -> bool:
+        """Room settings (labels) into one schedule row, as for start_rooms_with_settings."""
+        return self._apply_room_settings(room, settings)
 
     def _publish_jdm(self, method: str, params: dict) -> bool:
         """Publish a JDM RPC call; True if paho accepted it (not robot confirmation)."""

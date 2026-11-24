@@ -183,6 +183,54 @@
           "name": "Aspirateur Dyson"
         }
       }
+    },
+    "set_schedule": {
+      "name": "Définir une programmation",
+      "description": "Crée une programmation de nettoyage sur le robot, ou en modifie une. Sans identifiant, une nouvelle est créée et il faut des jours, une heure et des pièces ; avec un identifiant, tout ce qui est omis reste inchangé. Chaque programmation a ses propres réglages de pièces. Spot+Scrub AI uniquement pour l'instant.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur de cette programmation."
+        },
+        "schedule_id": {
+          "name": "Identifiant de programmation",
+          "description": "La programmation, d'après l'attribut schedules du capteur Programmations. Laisser vide pour en créer une nouvelle."
+        },
+        "days": {
+          "name": "Jours",
+          "description": "Jours de la semaine où nettoyer."
+        },
+        "time": {
+          "name": "Heure",
+          "description": "Heure de début, dans le fuseau horaire de Home Assistant."
+        },
+        "enabled": {
+          "name": "Activée",
+          "description": "Si la programmation est activée. Les nouvelles programmations sont activées, sauf si cette option est désactivée."
+        },
+        "room_ids": {
+          "name": "Identifiants des pièces",
+          "description": "Pièces à nettoyer, par identifiant fixe, dans l'ordre (chaque sélection de pièce a un attribut room_id)."
+        },
+        "room_settings": {
+          "name": "Réglages des pièces",
+          "description": "Réglages facultatifs pour cette programmation uniquement, par identifiant de pièce, avec les mêmes libellés que Démarrer des pièces avec réglages. Les autres pièces gardent leurs réglages."
+        }
+      }
+    },
+    "delete_schedule": {
+      "name": "Supprimer une programmation",
+      "description": "Supprime une programmation de nettoyage du robot. Spot+Scrub AI uniquement pour l'instant.",
+      "fields": {
+        "entity_id": {
+          "name": "Aspirateur Dyson",
+          "description": "L'aspirateur de cette programmation."
+        },
+        "schedule_id": {
+          "name": "Identifiant de programmation",
+          "description": "La programmation à supprimer, d'après l'attribut schedules du capteur Programmations."
+        }
+      }
     }
   },
   "entity": {
@@ -284,6 +332,9 @@
         "state": {
           "docked": "Sur la base"
         }
+      },
+      "schedules": {
+        "name": "Programmations"
       }
     },
     "switch": {
@@ -310,6 +361,9 @@
       },
       "do_not_disturb": {
         "name": "Ne pas déranger"
+      },
+      "schedule": {
+        "name": "Programmation {time} {days}"
       }
     },
     "time": {
@@ -318,6 +372,11 @@
       },
       "do_not_disturb_end": {
         "name": "Ne pas déranger – fin"
+      }
+    },
+    "calendar": {
+      "schedules": {
+        "name": "Programme de nettoyage"
       }
     }
   },
@@ -490,6 +549,17 @@
         "study": "Bureau d'étude",
         "toilet": "Toilettes",
         "utility_room": "Arrière-cuisine"
+      }
+    },
+    "weekday": {
+      "options": {
+        "mon": "lun.",
+        "tue": "mar.",
+        "wed": "mer.",
+        "thu": "jeu.",
+        "fri": "ven.",
+        "sat": "sam.",
+        "sun": "dim."
       }
     }
   },
