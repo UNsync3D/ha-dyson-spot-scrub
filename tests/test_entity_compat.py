@@ -22,10 +22,13 @@ _spec = importlib.util.spec_from_file_location("room_types_for_tests", ROOT / "r
 _room_types = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_room_types)
 sys.modules["room_types_for_tests"] = _room_types
+_spec = importlib.util.spec_from_file_location("schedules_for_tests", ROOT / "schedules.py")
+_schedules = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_schedules)
 SNAPSHOT = Path(__file__).resolve().parent / "fixtures/entity_registry_snapshot.json"
 
 
-def collect(root, room_labels=None):
+def collect(root, room_labels=None, schedules=None):
     stubs = {}
     def mod(name, **kw):
         m = types.ModuleType(name); m.__dict__.update(kw); stubs[name] = m; return m
@@ -56,6 +59,11 @@ def collect(root, room_labels=None):
         mqtt = NS(connected=True, room_names=rooms, room_preferences=[], state={})
         coord = NS(mqtt=mqtt, cached_room_names=rooms, room_names=rooms, state={}, serial='7VD-AU-ABC1234A',
                    current_mode='Vacuum', async_add_listener=lambda l: None)
+        if schedules is not None:
+            coord.schedules = schedules
+            coord.weekday_names = {}
+            coord.async_remove_listener = lambda l: None
+            coord.describe_schedule = lambda order: _schedules.describe_order(order)
         if room_labels is not None:
             from room_types_for_tests import translate_room
             coord.room_label = lambda name: translate_room(name, room_labels)
@@ -110,7 +118,7 @@ class EntityCompatibilityTests(unittest.TestCase):
         collect(str(ROOT))
         for uid, category in CATEGORIES.items():
             with self.subTest(uid):
-                setting = "_station_" in uid or "_setting_" in uid
+                setting = "_station_" in uid or "_setting_" in uid or "_schedule_" in uid
                 self.assertEqual(category, 'config' if setting else None)
         self.assertTrue(any(c == 'config' for c in CATEGORIES.values()))
 
@@ -130,6 +138,22 @@ class EntityCompatibilityTests(unittest.TestCase):
         self.assertEqual(rooms['7VD-AU-ABC1234A_room_living_room'], 'Woonkamer')
         self.assertEqual(rooms['7VD-AU-ABC1234A_room_kitchen_1'], 'Keuken 1')
         self.assertEqual(rooms['7VD-AU-ABC1234A_room_living_room_mop_repetitions'], 'Woonkamer')
+
+    def test_one_switch_per_known_schedule(self):
+        """#67: schedule switches have their own IDs and leave every other entity alone."""
+        capture = json.loads((SNAPSHOT.parent / "schedules_nov23.json").read_text())["messages"]
+        book = _schedules.ScheduleBook()
+        for m in capture:
+            if m["topic"] == "command/jdm":
+                book.command_seen(m["message"])
+            elif m["message"].get("method") != "prop.post":
+                book.reply_seen(m["message"])
+        rows = collect(str(ROOT), schedules=book)
+        self.assertEqual([r for r in rows if "_schedule_" not in r[2]], json.loads(SNAPSHOT.read_text()))
+        switches = sorted(r[2] for r in rows if "_schedule_" in r[2])
+        self.assertEqual(switches, ['7VD-AU-ABC1234A_schedule_1', '7VD-AU-ABC1234A_schedule_2'])
+        self.assertEqual(NAMES['7VD-AU-ABC1234A_schedule_1'], 'Schedule 10:00 Tue, Thu, Sat, Sun')
+        self.assertEqual(CATEGORIES['7VD-AU-ABC1234A_schedule_2'], 'config')
 
 
 if __name__ == "__main__":

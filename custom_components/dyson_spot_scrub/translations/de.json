@@ -183,6 +183,54 @@
           "name": "Dyson-Saugroboter"
         }
       }
+    },
+    "set_schedule": {
+      "name": "Zeitplan festlegen",
+      "description": "Erstellt einen Reinigungszeitplan auf dem Roboter oder ändert einen. Ohne Zeitplan-ID wird ein neuer erstellt; dafür sind Tage, eine Uhrzeit und Räume nötig. Mit einer ID bleibt alles Weggelassene unverändert. Jeder Zeitplan hat eigene Raumeinstellungen. Vorerst nur Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Staubsauger",
+          "description": "Der Staubsauger, zu dem der Zeitplan gehört."
+        },
+        "schedule_id": {
+          "name": "Zeitplan-ID",
+          "description": "Der Zeitplan, aus dem Attribut schedules des Sensors Zeitpläne. Leer lassen, um einen neuen Zeitplan zu erstellen."
+        },
+        "days": {
+          "name": "Tage",
+          "description": "Wochentage, an denen gereinigt wird."
+        },
+        "time": {
+          "name": "Uhrzeit",
+          "description": "Startzeit, in der Zeitzone von Home Assistant."
+        },
+        "enabled": {
+          "name": "Ein",
+          "description": "Ob der Zeitplan eingeschaltet ist. Neue Zeitpläne sind eingeschaltet, außer du schaltest das aus."
+        },
+        "room_ids": {
+          "name": "Raum-IDs",
+          "description": "Zu reinigende Räume, nach fester Raum-ID, in Reihenfolge (jede Raumauswahl hat ein Attribut room_id)."
+        },
+        "room_settings": {
+          "name": "Raumeinstellungen",
+          "description": "Optionale Einstellungen nur für diesen Zeitplan, nach Raum-ID, mit denselben Bezeichnungen wie bei Räume mit Einstellungen starten. Andere Räume behalten ihre Einstellungen."
+        }
+      }
+    },
+    "delete_schedule": {
+      "name": "Zeitplan löschen",
+      "description": "Löscht einen Reinigungszeitplan vom Roboter. Vorerst nur Spot+Scrub AI.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson-Staubsauger",
+          "description": "Der Staubsauger, zu dem der Zeitplan gehört."
+        },
+        "schedule_id": {
+          "name": "Zeitplan-ID",
+          "description": "Der zu löschende Zeitplan, aus dem Attribut schedules des Sensors Zeitpläne."
+        }
+      }
     }
   },
   "options": {
@@ -355,6 +403,17 @@
         "toilet": "WC",
         "utility_room": "Hauswirtschaftsraum"
       }
+    },
+    "weekday": {
+      "options": {
+        "mon": "Mo",
+        "tue": "Di",
+        "wed": "Mi",
+        "thu": "Do",
+        "fri": "Fr",
+        "sat": "Sa",
+        "sun": "So"
+      }
     }
   },
   "issues": {
@@ -462,6 +521,9 @@
         "state": {
           "docked": "Angedockt"
         }
+      },
+      "schedules": {
+        "name": "Zeitpläne"
       }
     },
     "switch": {
@@ -488,6 +550,9 @@
       },
       "do_not_disturb": {
         "name": "Nicht stören"
+      },
+      "schedule": {
+        "name": "Zeitplan {time} {days}"
       }
     },
     "time": {
@@ -496,6 +561,11 @@
       },
       "do_not_disturb_end": {
         "name": "Nicht stören Ende"
+      }
+    },
+    "calendar": {
+      "schedules": {
+        "name": "Reinigungsplan"
       }
     }
   }

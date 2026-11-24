@@ -459,6 +459,23 @@
   }
  ],
  [
+  "sensor",
+  "DysonSchedulesSensor",
+  "7VD-AU-ABC1234A_schedules",
+  {
+   "identifiers": [
+    [
+     "dyson_spot_scrub",
+     "7VD-AU-ABC1234A"
+    ]
+   ],
+   "name": "Robot",
+   "manufacturer": "Dyson",
+   "model": "804",
+   "serial_number": "7VD-AU-ABC1234A"
+  }
+ ],
+ [
   "switch",
   "DysonDeviceSettingSwitch",
   "7VD-AU-ABC1234A_setting_child_lock",

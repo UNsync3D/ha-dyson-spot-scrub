@@ -37,6 +37,7 @@ async def async_setup_entry(
             *(DysonConsumableSensor(coordinator, entry, kind, key, name)
               for kind, key, name in CONSUMABLES if kind not in MOP_CONSUMABLES),
             DysonCurrentRoomSensor(coordinator, entry),
+            DysonSchedulesSensor(coordinator, entry),
         ])
         return
     async_add_entities([
@@ -47,6 +48,7 @@ async def async_setup_entry(
         *([] if r2 else [DysonCleaningSolutionSensor(coordinator, entry)]),
         DysonDryingCountdownSensor(coordinator, entry),
         DysonCurrentRoomSensor(coordinator, entry),       # every model (#53)
+        DysonSchedulesSensor(coordinator, entry),         # every model (#67)
     ])
 
 
@@ -249,3 +251,50 @@ class DysonCurrentRoomSensor(DysonBatterySensor):
     @property
     def extra_state_attributes(self) -> dict:
         return {"room_id": getattr(self._coordinator, "current_room_id", None)}
+
+
+class DysonSchedulesSensor(DysonBatterySensor):
+    """The robot's cleaning schedules (#67): how many, and those Home Assistant knows.
+
+    State: the number of schedules on the robot (from its summary), or those
+    Home Assistant knows until the robot has reported. ``in_sync`` is False when
+    the robot has schedules Home Assistant hasn't seen, or they changed while it
+    wasn't watching; opening and saving each one once in the MyDyson app fixes it.
+    """
+
+    _attr_translation_key = "schedules"
+    _attr_icon = "mdi:calendar-clock"
+    _attr_device_class = None
+    _attr_state_class = None
+    _attr_native_unit_of_measurement = None
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        super().__init__(coordinator, entry)
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_schedules"
+
+    @property
+    def available(self) -> bool:
+        return getattr(self._coordinator, "schedules", None) is not None
+
+    @property
+    def native_value(self) -> int | None:
+        book = getattr(self._coordinator, "schedules", None)
+        if book is None:
+            return None
+        return book.robot_total if book.robot_total is not None else len(book.orders)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        book = getattr(self._coordinator, "schedules", None)
+        if book is None:
+            return {}
+        mqtt = self._coordinator.mqtt
+        return {
+            "schedules": [self._coordinator.describe_schedule(order)
+                          for order in book.sorted_orders()],
+            "known": len(book.orders),
+            "on": book.robot_enabled,
+            "in_sync": book.in_sync,
+            "unknown": book.unknown_count,
+            "can_change": bool(mqtt and getattr(mqtt, "supports_schedule_writes", False)),
+        }

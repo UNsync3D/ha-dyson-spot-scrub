@@ -40,6 +40,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         verbose=verbose,
     )
 
+    # Schedules first (#67), so traffic seen right after connecting lands in
+    # the saved copy.
+    await coordinator.async_setup_schedules()
+
     # async_setup is non-fatal — it logs and retries in the background if the
     # initial MQTT connection fails.  Entities are always created; they show
     # as unavailable until MQTT connects.
@@ -116,6 +120,7 @@ async def _async_load_room_types(hass: HomeAssistant, coordinator) -> None:
     from homeassistant.helpers.translation import async_get_translations
 
     prefix = f"component.{DOMAIN}.selector.room_type.options."
+    days = f"component.{DOMAIN}.selector.weekday.options."
     try:
         translations = await async_get_translations(
             hass, hass.config.language, "selector", {DOMAIN})
@@ -125,6 +130,10 @@ async def _async_load_room_types(hass: HomeAssistant, coordinator) -> None:
     coordinator.room_type_names = {
         key[len(prefix):]: value for key, value in translations.items()
         if key.startswith(prefix)}
+    # Weekday names for schedule entity names (#67).
+    coordinator.weekday_names = {
+        key[len(days):]: value for key, value in translations.items()
+        if key.startswith(days)}
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

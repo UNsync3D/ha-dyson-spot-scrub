@@ -290,6 +290,75 @@ async def async_setup_entry(
         )
 
 
+    # ── Schedules (#67) ───────────────────────────────────────────────────────
+    _register_schedule_services(hass, _get_target_coordinator)
+
+
+def _register_schedule_services(hass: HomeAssistant, get_target) -> None:
+    """set_schedule (create or change) and delete_schedule, for one robot."""
+    from homeassistant import core as ha_core
+    from .schedules import ScheduleError
+
+    schedule_id = vol.Any(int, cv.string)
+    set_schema = vol.Schema({
+        vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+        vol.Optional("schedule_id"): schedule_id,
+        vol.Optional("days"): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional("time"): cv.string,
+        vol.Optional("enabled"): bool,
+        vol.Optional(ATTR_ROOM_IDS): vol.All(cv.ensure_list, [cv.string]),
+        vol.Optional(ATTR_ROOM_SETTINGS): dict,
+    })
+    delete_schema = vol.Schema({
+        vol.Required(ATTR_ENTITY_ID): _CARD_ENTITY_SCHEMA,
+        vol.Required("schedule_id"): schedule_id,
+    })
+
+    def _id(call: ServiceCall) -> int | None:
+        value = call.data.get("schedule_id")
+        if value is None:
+            return None
+        try:
+            return int(str(value).strip())
+        except ValueError as exc:
+            raise HomeAssistantError(f"Not a schedule ID: {value!r}") from exc
+
+    response = getattr(getattr(ha_core, "SupportsResponse", None), "OPTIONAL", None)
+
+    if not hass.services.has_service(DOMAIN, "set_schedule"):
+
+        async def _handle_set_schedule(call: ServiceCall):
+            coordinator = get_target(call)
+            try:
+                schedule = await coordinator.async_set_schedule(
+                    schedule_id=_id(call),
+                    days=call.data.get("days"),
+                    start_time=call.data.get("time"),
+                    enabled=call.data.get("enabled"),
+                    room_ids=call.data.get(ATTR_ROOM_IDS),
+                    room_settings=call.data.get(ATTR_ROOM_SETTINGS),
+                )
+            except ScheduleError as exc:
+                raise HomeAssistantError(str(exc)) from exc
+            return {"schedule": schedule}
+
+        extra = {"supports_response": response} if response is not None else {}
+        hass.services.async_register(DOMAIN, "set_schedule", _handle_set_schedule,
+                                     schema=set_schema, **extra)
+
+    if not hass.services.has_service(DOMAIN, "delete_schedule"):
+
+        async def _handle_delete_schedule(call: ServiceCall) -> None:
+            coordinator = get_target(call)
+            try:
+                await coordinator.async_delete_schedule(_id(call))
+            except ScheduleError as exc:
+                raise HomeAssistantError(str(exc)) from exc
+
+        hass.services.async_register(DOMAIN, "delete_schedule", _handle_delete_schedule,
+                                     schema=delete_schema)
+
+
 class DysonVacuumEntity(StateVacuumEntity):
     """Represents the Dyson Spot+Scrub AI robot vacuum."""
 

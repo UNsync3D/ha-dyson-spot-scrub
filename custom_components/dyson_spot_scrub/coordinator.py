@@ -27,6 +27,10 @@ from .dyson_api import (
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
 from .room_locator import dock_room, latest_position, locate, room_outlines
 from .room_types import translate_room
+from .schedules import (
+    ADD_ORDER, DEL_ORDER, ScheduleBook, ScheduleError, days_to_mask, describe_order, new_order_id,
+    ordered_params, parse_time, room_plan, time_conflict, toggled, uv_plan, validate_order,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +49,9 @@ _CLEAN_COMPLETE_ROBOT_STATES: frozenset[str] = frozenset({"CHARGING", "INACTIVE_
 _LIVE_MAP_MIN_INTERVAL = 5.0
 # Room outlines for the current room (#53): at most one map fetch this often.
 _OUTLINE_RETRY_SECONDS = 600.0
+# Schedules (#67): ask for the robot's summary this often, and after a change.
+_SCHEDULE_POLL_SECONDS = 1800.0
+_SCHEDULE_STORAGE_VERSION = 1
 
 
 def _docked(state: dict) -> bool:
@@ -128,6 +135,13 @@ class DysonCoordinator:
         self.current_room_id: str | None = None
         # Standard room types in the user's language, key -> name (#57).
         self.room_type_names: dict[str, str] = {}
+        # Weekday names in the user's language, "mon" -> "Mon" (#67).
+        self.weekday_names: dict[str, str] = {}
+        # Cleaning schedules on the robot, as far as Home Assistant has seen (#67).
+        self.schedules = ScheduleBook()
+        self._schedule_store = None
+        self._schedule_poll_unsub = None
+        self._schedule_lock = asyncio.Lock()
         self._dock_room_id: str | None = None
         # Leaving the dock (FutuRazor's idea, #53): until the robot reports a
         # new position, it is in the dock's room. The last position from the
@@ -185,6 +199,7 @@ class DysonCoordinator:
         new_client.on_disconnected   = self._on_mqtt_disconnected
         new_client.on_prefix_changed = self._on_mqtt_prefix_changed
         new_client.on_map_changed    = self._on_mqtt_map_changed
+        new_client.on_schedule_message = self._on_schedule_message
         new_client.register_callback(self._on_state_change)
         # Carry a GONE-AWAY over a reconnect: a new broker connection doesn't
         # mean the robot came back.
@@ -217,6 +232,9 @@ class DysonCoordinator:
 
     async def async_shutdown(self) -> None:
         self._shutting_down = True
+        if self._schedule_poll_unsub:
+            self._schedule_poll_unsub()
+            self._schedule_poll_unsub = None
         await self._async_cancel_cleaning_task()
         if self._inventory_task and not self._inventory_task.done():
             self._inventory_task.cancel()
@@ -385,6 +403,7 @@ class DysonCoordinator:
 
     def _on_mqtt_connected(self) -> None:
         self.hass.loop.call_soon_threadsafe(self._async_update_rooms_and_notify)
+        self.hass.loop.call_soon_threadsafe(self._async_request_schedule_summary)
 
     def _on_mqtt_map_changed(self, map_id: str) -> None:
         """paho thread → refresh the room inventory for the (new) current map."""
@@ -596,6 +615,173 @@ class DysonCoordinator:
                 listener.async_write_ha_state()
             except Exception:
                 _LOGGER.exception("[%s] Error notifying listener", self.serial)
+
+    # ── Cleaning schedules (#67) ──────────────────────────────────────────────
+
+    async def async_setup_schedules(self) -> None:
+        """Load Home Assistant's copy of the robot's schedules and start the summary poll."""
+        from datetime import timedelta
+        from homeassistant.helpers.event import async_track_time_interval
+        from homeassistant.helpers.storage import Store
+        from .const import DOMAIN
+
+        self._schedule_store = Store(
+            self.hass, _SCHEDULE_STORAGE_VERSION, f"{DOMAIN}.schedules.{self.serial}")
+        try:
+            data = await self._schedule_store.async_load()
+        except Exception as exc:  # noqa: BLE001 - start empty rather than fail setup
+            _LOGGER.warning("[%s] Couldn't load saved schedules: %s", self.serial, exc)
+            data = None
+        self.schedules = ScheduleBook.from_dict(data)
+
+        async def _poll(_now) -> None:
+            self._async_request_schedule_summary()
+
+        self._schedule_poll_unsub = async_track_time_interval(
+            self.hass, _poll, timedelta(seconds=_SCHEDULE_POLL_SECONDS))
+
+    def _on_schedule_message(self, kind: str, data: dict) -> None:
+        """paho thread → apply schedule traffic on the HA event loop."""
+        self.hass.loop.call_soon_threadsafe(self._async_schedule_message, kind, data)
+
+    @callback
+    def _async_schedule_message(self, kind: str, data: dict) -> None:
+        book = self.schedules
+        if kind == "command":
+            book.command_seen(data)
+            return
+        was_in_sync = book.in_sync
+        changed = book.reply_seen(data) if kind == "reply" else book.total_seen(data)
+        if not changed:
+            return
+        if was_in_sync is not False and book.in_sync is False:
+            _LOGGER.warning(
+                "[%s] The robot has %s schedule(s); Home Assistant knows %d. Open and "
+                "save any missing schedule once in the MyDyson app so Home Assistant "
+                "can learn it", self.serial, book.robot_total, len(book.orders))
+        self._async_schedules_changed()
+
+    @callback
+    def _async_schedules_changed(self) -> None:
+        if self._schedule_store is not None:
+            self._schedule_store.async_delay_save(self.schedules.to_dict, 1)
+        self._async_notify_listeners()
+
+    @callback
+    def _async_request_schedule_summary(self) -> None:
+        mqtt = self.mqtt
+        if mqtt is None or self._shutting_down or not hasattr(mqtt, "request_order_summary"):
+            return
+        self.hass.async_add_executor_job(mqtt.request_order_summary)
+
+    def describe_schedule(self, order: dict) -> dict:
+        """A schedule for attributes and action responses, room names as on the room entities."""
+        from .dyson_mqtt import _room_display_name
+        return describe_order(order, _room_display_name)
+
+    def _schedule_writer(self):
+        mqtt = self.mqtt
+        if mqtt is None or not mqtt.available:
+            raise ScheduleError("The Dyson vacuum is disconnected")
+        if not getattr(mqtt, "supports_schedule_writes", False):
+            raise ScheduleError("Changing schedules isn't confirmed on this robot model yet")
+        return mqtt
+
+    async def _async_send_order(self, method: str, params: dict) -> None:
+        mqtt = self._schedule_writer()
+        code = await self.hass.async_add_executor_job(mqtt.send_order_command, method, params)
+        if code != 0:
+            raise ScheduleError(
+                "The robot didn't confirm the schedule change" if code is None
+                else f"The robot refused the schedule change (code {code})")
+        if method == ADD_ORDER:
+            self.schedules.apply_add(params)
+        else:
+            self.schedules.apply_delete(params["id"])
+        self._async_schedules_changed()
+        self._async_request_schedule_summary()
+
+    async def async_set_schedule_enabled(self, schedule_id: int, enabled: bool) -> dict:
+        """Switch a known schedule on or off, as the app does."""
+        async with self._schedule_lock:
+            order = self.schedules.orders.get(schedule_id)
+            if order is None:
+                raise ScheduleError(f"Unknown schedule: {schedule_id}")
+            if enabled and time_conflict(self.schedules.orders.values(), order["day"],
+                                         order["hour"], order["minute"], schedule_id):
+                raise ScheduleError("Another schedule that is on starts at the same time on one of its days")
+            params = toggled(order, enabled)
+            await self._async_send_order(ADD_ORDER, params)
+            return self.describe_schedule(params)
+
+    async def async_set_schedule(
+        self,
+        schedule_id: int | None = None,
+        days: list[str] | None = None,
+        start_time: str | None = None,
+        enabled: bool | None = None,
+        room_ids: list | None = None,
+        room_settings: dict | None = None,
+    ) -> dict:
+        """Create a schedule (no ID) or change one; omitted fields keep their value."""
+        from homeassistant.util import dt as dt_util
+
+        async with self._schedule_lock:
+            mqtt = self._schedule_writer()
+            existing = None
+            if schedule_id is not None:
+                existing = self.schedules.orders.get(schedule_id)
+                if existing is None:
+                    raise ScheduleError(f"Unknown schedule: {schedule_id}")
+            elif not days or start_time is None or not room_ids:
+                raise ScheduleError("A new schedule needs days, a time and rooms")
+            try:
+                day = days_to_mask(days) if days is not None else existing["day"]
+                hour, minute = (parse_time(start_time) if start_time is not None
+                                else (existing["hour"], existing["minute"]))
+                if existing is None:
+                    map_id, rows, uv_rows = mqtt.schedule_base()
+                    if map_id is None or not rows:
+                        raise ScheduleError("The robot's rooms aren't known yet")
+                    chosen = room_ids
+                else:
+                    map_id = existing.get("map_id")
+                    rows, uv_rows = existing["room_preference"], existing.get("uv_switch")
+                    chosen = room_ids if room_ids is not None else [
+                        row[0] for row in rows if row[8] == 1]
+                plan = room_plan(rows, chosen, mqtt.apply_schedule_room_settings, room_settings)
+            except ValueError as exc:
+                raise ScheduleError(str(exc)) from exc
+            enable = (1 if enabled else 0) if enabled is not None else (
+                existing["enable"] if existing else 1)
+            order_id = existing["id"] if existing else new_order_id(self.schedules.orders)
+            if enable and time_conflict(self.schedules.orders.values(), day, hour, minute, order_id):
+                raise ScheduleError("Another schedule that is on starts at the same time on one of these days")
+            offset = dt_util.now().utcoffset()
+            order = dict(existing or {})
+            order.update({
+                "id": order_id, "enable": enable, "day": day, "hour": hour, "minute": minute,
+                "repeat": order.get("repeat", 1), "map_id": map_id, "room_count": len(plan),
+                "time_zone": int(offset.total_seconds()) if offset else 0,
+                "prefer_type": order.get("prefer_type", 1), "is_global": order.get("is_global", 0),
+                "areas": order.get("areas", []), "room_preference": plan,
+                "uv_switch": uv_plan(plan, uv_rows),
+            })
+            if not enable:
+                order = toggled(order, False)
+            params = ordered_params(order)
+            try:
+                validate_order(params)
+            except ValueError as exc:
+                raise ScheduleError(str(exc)) from exc
+            await self._async_send_order(ADD_ORDER, params)
+            return self.describe_schedule(params)
+
+    async def async_delete_schedule(self, schedule_id: int) -> None:
+        async with self._schedule_lock:
+            if schedule_id not in self.schedules.orders:
+                raise ScheduleError(f"Unknown schedule: {schedule_id}")
+            await self._async_send_order(DEL_ORDER, {"id": schedule_id})
 
     # ── Sequential multi-room cleaning ────────────────────────────────────────
 

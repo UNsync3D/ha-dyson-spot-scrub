@@ -183,6 +183,54 @@
           "name": "Dyson vacuum"
         }
       }
+    },
+    "set_schedule": {
+      "name": "Set schedule",
+      "description": "Create a cleaning schedule on the robot, or change one. Without a schedule ID it creates one and needs days, a time and rooms; with one, anything left out stays as it is. Each schedule keeps its own room settings. Spot+Scrub AI only for now.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum whose schedule this is."
+        },
+        "schedule_id": {
+          "name": "Schedule ID",
+          "description": "The schedule, from the Schedules sensor's schedules attribute. Leave out to create a new schedule."
+        },
+        "days": {
+          "name": "Days",
+          "description": "Days of the week to clean."
+        },
+        "time": {
+          "name": "Time",
+          "description": "Start time, in Home Assistant's time zone."
+        },
+        "enabled": {
+          "name": "On",
+          "description": "Whether the schedule is on. New schedules are on unless this is off."
+        },
+        "room_ids": {
+          "name": "Room IDs",
+          "description": "Rooms to clean, by stable room ID, in order (each room select has a room_id attribute)."
+        },
+        "room_settings": {
+          "name": "Room settings",
+          "description": "Optional settings for this schedule only, keyed by room ID, with the same labels as Start Rooms With Settings. Other rooms keep their settings."
+        }
+      }
+    },
+    "delete_schedule": {
+      "name": "Delete schedule",
+      "description": "Delete a cleaning schedule from the robot. Spot+Scrub AI only for now.",
+      "fields": {
+        "entity_id": {
+          "name": "Dyson vacuum",
+          "description": "The vacuum whose schedule this is."
+        },
+        "schedule_id": {
+          "name": "Schedule ID",
+          "description": "The schedule to delete, from the Schedules sensor's schedules attribute."
+        }
+      }
     }
   },
   "entity": {
@@ -284,6 +332,9 @@
         "state": {
           "docked": "Docked"
         }
+      },
+      "schedules": {
+        "name": "Schedules"
       }
     },
     "switch": {
@@ -310,6 +361,9 @@
       },
       "do_not_disturb": {
         "name": "Do not disturb"
+      },
+      "schedule": {
+        "name": "Schedule {time} {days}"
       }
     },
     "time": {
@@ -318,6 +372,11 @@
       },
       "do_not_disturb_end": {
         "name": "Do not disturb end"
+      }
+    },
+    "calendar": {
+      "schedules": {
+        "name": "Cleaning schedule"
       }
     }
   },
@@ -490,6 +549,17 @@
         "study": "Study",
         "toilet": "Toilet",
         "utility_room": "Utility Room"
+      }
+    },
+    "weekday": {
+      "options": {
+        "mon": "Mon",
+        "tue": "Tue",
+        "wed": "Wed",
+        "thu": "Thu",
+        "fri": "Fri",
+        "sat": "Sat",
+        "sun": "Sun"
       }
     }
   },

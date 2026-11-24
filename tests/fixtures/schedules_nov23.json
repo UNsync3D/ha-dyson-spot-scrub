@@ -1,0 +1,939 @@
+{
+ "source": "FutuRazor's MyDyson capture on a Spot+Scrub AI, 23 Nov 2026 (#67), anonymised by him: schedule IDs 1 and 2, map ID 1, room names Room 1-5; checksums are placeholders. Times are UTC+01:00.",
+ "messages": [
+  {
+   "local_time": "2026-11-23 23:48:25.479+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "4184200426",
+    "version": "1.0.1",
+    "method": "service.get_order",
+    "params": {},
+    "time": "2026-11-23T22:48:25.455Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:48:25.757+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "4184200426",
+    "code": 0,
+    "method": "service.get_order",
+    "data": {
+     "order_data_lite": {
+      "total": 0,
+      "enable": 0,
+      "timestamp": 1795474106,
+      "md5": "REDACTED_HASH_1"
+     }
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:49:52.362+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "1174538750",
+    "version": "1.0.1",
+    "method": "service.add_order",
+    "params": {
+     "id": 1,
+     "enable": 1,
+     "day": 106,
+     "hour": 10,
+     "minute": 0,
+     "repeat": 1,
+     "map_id": 1,
+     "room_count": 5,
+     "time_zone": 3600,
+     "prefer_type": 1,
+     "is_global": 0,
+     "areas": [],
+     "room_preference": [
+      [
+       12,
+       "Room 1",
+       0,
+       0,
+       0,
+       1,
+       0,
+       0,
+       1,
+       0,
+       1,
+       0
+      ],
+      [
+       13,
+       "Room 2",
+       0,
+       1,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       2,
+       0
+      ],
+      [
+       10,
+       "Room 3",
+       0,
+       3,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       3,
+       0
+      ],
+      [
+       11,
+       "Room 4",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       4,
+       0
+      ],
+      [
+       14,
+       "Room 5",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       5,
+       0
+      ]
+     ],
+     "uv_switch": [
+      [
+       12,
+       1
+      ],
+      [
+       13,
+       1
+      ],
+      [
+       10,
+       1
+      ],
+      [
+       11,
+       1
+      ],
+      [
+       14,
+       1
+      ]
+     ]
+    },
+    "time": "2026-11-23T22:49:52.309Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:49:52.521+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "1174538750",
+    "code": 0,
+    "method": "service.add_order",
+    "data": {
+     "result": 0
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:49:52.574+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "530950",
+    "method": "prop.post",
+    "params": {
+     "order_total": {
+      "total": 1,
+      "enable": 1
+     }
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:49:52.874+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "811232527",
+    "version": "1.0.1",
+    "method": "service.get_order",
+    "params": {},
+    "time": "2026-11-23T22:49:52.849Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:49:53.038+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "811232527",
+    "code": 0,
+    "method": "service.get_order",
+    "data": {
+     "order_data_lite": {
+      "total": 1,
+      "enable": 1,
+      "timestamp": 1795474194,
+      "md5": "REDACTED_HASH_2"
+     }
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:50:25.968+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "1768629482",
+    "version": "1.0.1",
+    "method": "service.get_order",
+    "params": {},
+    "time": "2026-11-23T22:50:25.940Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:50:26.149+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "1768629482",
+    "code": 0,
+    "method": "service.get_order",
+    "data": {
+     "order_data_lite": {
+      "total": 1,
+      "enable": 1,
+      "timestamp": 1795474227,
+      "md5": "REDACTED_HASH_2"
+     }
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:09.304+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "3663086353",
+    "version": "1.0.1",
+    "method": "service.add_order",
+    "params": {
+     "id": 2,
+     "enable": 1,
+     "day": 21,
+     "hour": 0,
+     "minute": 0,
+     "repeat": 1,
+     "map_id": 1,
+     "room_count": 5,
+     "time_zone": 3600,
+     "prefer_type": 1,
+     "is_global": 0,
+     "areas": [],
+     "room_preference": [
+      [
+       13,
+       "Room 2",
+       0,
+       1,
+       0,
+       0,
+       0,
+       0,
+       1,
+       0,
+       1,
+       0
+      ],
+      [
+       11,
+       "Room 4",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       1,
+       0,
+       2,
+       0
+      ],
+      [
+       12,
+       "Room 1",
+       0,
+       0,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       3,
+       0
+      ],
+      [
+       10,
+       "Room 3",
+       0,
+       3,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       4,
+       0
+      ],
+      [
+       14,
+       "Room 5",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       5,
+       0
+      ]
+     ],
+     "uv_switch": [
+      [
+       13,
+       1
+      ],
+      [
+       11,
+       1
+      ],
+      [
+       12,
+       1
+      ],
+      [
+       10,
+       1
+      ],
+      [
+       14,
+       1
+      ]
+     ]
+    },
+    "time": "2026-11-23T22:51:09.283Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:09.457+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "3663086353",
+    "code": 0,
+    "method": "service.add_order",
+    "data": {
+     "result": 0
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:09.523+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "439409",
+    "method": "prop.post",
+    "params": {
+     "order_total": {
+      "total": 2,
+      "enable": 2
+     }
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:09.780+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "1624146762",
+    "version": "1.0.1",
+    "method": "service.get_order",
+    "params": {},
+    "time": "2026-11-23T22:51:09.754Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:09.967+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "1624146762",
+    "code": 0,
+    "method": "service.get_order",
+    "data": {
+     "order_data_lite": {
+      "total": 2,
+      "enable": 2,
+      "timestamp": 1795474270,
+      "md5": "REDACTED_HASH_3"
+     }
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:40.232+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "3926314827",
+    "version": "1.0.1",
+    "method": "service.add_order",
+    "params": {
+     "id": 1,
+     "enable": 0,
+     "day": 106,
+     "hour": 10,
+     "minute": 0,
+     "repeat": 1,
+     "map_id": 1,
+     "room_count": 5,
+     "time_zone": 3600,
+     "prefer_type": 1,
+     "is_global": 0,
+     "areas": [],
+     "room_preference": [
+      [
+       12,
+       "Room 1",
+       0,
+       0,
+       0,
+       1,
+       0,
+       0,
+       1,
+       0,
+       1,
+       0
+      ],
+      [
+       13,
+       "Room 2",
+       0,
+       1,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       2,
+       0
+      ],
+      [
+       10,
+       "Room 3",
+       0,
+       3,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       3,
+       0
+      ],
+      [
+       11,
+       "Room 4",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       4,
+       0
+      ],
+      [
+       14,
+       "Room 5",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       5,
+       0
+      ]
+     ],
+     "uv_switch": [
+      [
+       12,
+       0
+      ],
+      [
+       13,
+       0
+      ],
+      [
+       10,
+       0
+      ],
+      [
+       11,
+       0
+      ],
+      [
+       14,
+       0
+      ]
+     ]
+    },
+    "time": "2026-11-23T22:51:40.210Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:40.435+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "3926314827",
+    "code": 0,
+    "method": "service.add_order",
+    "data": {
+     "result": 0
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:44.909+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "658881923",
+    "version": "1.0.1",
+    "method": "service.add_order",
+    "params": {
+     "id": 1,
+     "enable": 1,
+     "day": 106,
+     "hour": 10,
+     "minute": 0,
+     "repeat": 1,
+     "map_id": 1,
+     "room_count": 5,
+     "time_zone": 3600,
+     "prefer_type": 1,
+     "is_global": 0,
+     "areas": [],
+     "room_preference": [
+      [
+       12,
+       "Room 1",
+       0,
+       0,
+       0,
+       1,
+       0,
+       0,
+       1,
+       0,
+       1,
+       0
+      ],
+      [
+       13,
+       "Room 2",
+       0,
+       1,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       2,
+       0
+      ],
+      [
+       10,
+       "Room 3",
+       0,
+       3,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       3,
+       0
+      ],
+      [
+       11,
+       "Room 4",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       4,
+       0
+      ],
+      [
+       14,
+       "Room 5",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       5,
+       0
+      ]
+     ],
+     "uv_switch": [
+      [
+       12,
+       0
+      ],
+      [
+       13,
+       0
+      ],
+      [
+       10,
+       0
+      ],
+      [
+       11,
+       0
+      ],
+      [
+       14,
+       0
+      ]
+     ]
+    },
+    "time": "2026-11-23T22:51:44.856Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:51:45.039+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "658881923",
+    "code": 0,
+    "method": "service.add_order",
+    "data": {
+     "result": 0
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:52:03.898+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "972464709",
+    "version": "1.0.1",
+    "method": "service.add_order",
+    "params": {
+     "id": 2,
+     "enable": 0,
+     "day": 21,
+     "hour": 0,
+     "minute": 0,
+     "repeat": 1,
+     "map_id": 1,
+     "room_count": 5,
+     "time_zone": 3600,
+     "prefer_type": 1,
+     "is_global": 0,
+     "areas": [],
+     "room_preference": [
+      [
+       13,
+       "Room 2",
+       0,
+       1,
+       0,
+       0,
+       0,
+       0,
+       1,
+       0,
+       1,
+       0
+      ],
+      [
+       11,
+       "Room 4",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       1,
+       0,
+       2,
+       0
+      ],
+      [
+       12,
+       "Room 1",
+       0,
+       0,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       3,
+       0
+      ],
+      [
+       10,
+       "Room 3",
+       0,
+       3,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       4,
+       0
+      ],
+      [
+       14,
+       "Room 5",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       5,
+       0
+      ]
+     ],
+     "uv_switch": [
+      [
+       13,
+       0
+      ],
+      [
+       11,
+       0
+      ],
+      [
+       12,
+       0
+      ],
+      [
+       10,
+       0
+      ],
+      [
+       14,
+       0
+      ]
+     ]
+    },
+    "time": "2026-11-23T22:52:03.876Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:52:04.091+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "972464709",
+    "code": 0,
+    "method": "service.add_order",
+    "data": {
+     "result": 0
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:52:05.487+01:00",
+   "topic": "command/jdm",
+   "message": {
+    "msgId": "2885728859",
+    "version": "1.0.1",
+    "method": "service.add_order",
+    "params": {
+     "id": 1,
+     "enable": 0,
+     "day": 106,
+     "hour": 10,
+     "minute": 0,
+     "repeat": 1,
+     "map_id": 1,
+     "room_count": 5,
+     "time_zone": 3600,
+     "prefer_type": 1,
+     "is_global": 0,
+     "areas": [],
+     "room_preference": [
+      [
+       12,
+       "Room 1",
+       0,
+       0,
+       0,
+       1,
+       0,
+       0,
+       1,
+       0,
+       1,
+       0
+      ],
+      [
+       13,
+       "Room 2",
+       0,
+       1,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       2,
+       0
+      ],
+      [
+       10,
+       "Room 3",
+       0,
+       3,
+       1,
+       1,
+       0,
+       0,
+       0,
+       0,
+       3,
+       0
+      ],
+      [
+       11,
+       "Room 4",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       4,
+       0
+      ],
+      [
+       14,
+       "Room 5",
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       5,
+       0
+      ]
+     ],
+     "uv_switch": [
+      [
+       12,
+       0
+      ],
+      [
+       13,
+       0
+      ],
+      [
+       10,
+       0
+      ],
+      [
+       11,
+       0
+      ],
+      [
+       14,
+       0
+      ]
+     ]
+    },
+    "time": "2026-11-23T22:52:05.463Z"
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:52:05.691+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "2885728859",
+    "code": 0,
+    "method": "service.add_order",
+    "data": {
+     "result": 0
+    }
+   }
+  },
+  {
+   "local_time": "2026-11-23 23:52:09.491+01:00",
+   "topic": "status/jdm",
+   "message": {
+    "msgId": "461193",
+    "method": "prop.post",
+    "params": {
+     "order_total": {
+      "total": 2,
+      "enable": 0
+     }
+    }
+   }
+  }
+ ]
+}
