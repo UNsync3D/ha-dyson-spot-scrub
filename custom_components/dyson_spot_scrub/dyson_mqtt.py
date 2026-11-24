@@ -162,6 +162,19 @@ def room_repetitions(room: list, split: bool):
     return max(values) if values else room[_MOP_PASSES]
 
 
+def room_setting_labels(room: list, split: bool) -> dict[str, str]:
+    """A room row's settings as the labels room_settings takes (#67); unknown values left out."""
+    labels = {}
+    for key, (index, option_values) in _ROOM_SETTING_OPTIONS.items():
+        value = room_repetitions(room, split) if key == "mop_repetitions" else (
+            room[index] if isinstance(room, list) and len(room) > index else None)
+        label = next((name for name, v in option_values.items()
+                      if type(value) is int and v == value), None)
+        if label is not None:
+            labels[key] = label
+    return labels
+
+
 def set_room_repetitions(room: list, value: int, split: bool) -> None:
     """Write repetitions the way the app does for this robot."""
     if not split or len(room) <= _VACUUM_PASSES:

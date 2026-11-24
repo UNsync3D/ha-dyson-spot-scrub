@@ -675,9 +675,18 @@ class DysonCoordinator:
         self.hass.async_add_executor_job(mqtt.request_order_summary)
 
     def describe_schedule(self, order: dict) -> dict:
-        """A schedule for attributes and action responses, room names as on the room entities."""
-        from .dyson_mqtt import _room_display_name
-        return describe_order(order, _room_display_name)
+        """A schedule for attributes and action responses, room names as on the room entities.
+
+        ``room_settings`` (FutuRazor, #67): each chosen room's saved settings
+        in this schedule, keyed by room ID, with the labels set_schedule takes.
+        """
+        from .dyson_mqtt import _room_display_name, room_setting_labels
+        from .schedules import selected_rows
+        info = describe_order(order, _room_display_name)
+        split = bool(getattr(self.mqtt, "splits_repetitions", False))
+        info["room_settings"] = {str(row[0]): room_setting_labels(row, split)
+                                 for row in selected_rows(order)}
+        return info
 
     def _schedule_writer(self):
         mqtt = self.mqtt

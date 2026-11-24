@@ -159,7 +159,7 @@ Schedules made in the MyDyson app are saved on the robot, and it starts them its
 
 **How Home Assistant knows them:** the robot only says how many schedules it has, not what they are. Home Assistant learns each schedule when it sees the MyDyson app (or Home Assistant itself) save it, and keeps a copy. So a schedule made **before you installed v2.2.0**, or while Home Assistant was off, isn't known yet: the **Schedules** sensor then shows `in_sync: false` and how many are `unknown`. To fix it, open each schedule in the MyDyson app and save it once (or turn it off and on again).
 
-The **Schedules** sensor's `schedules` attribute lists each known schedule: `schedule_id`, `enabled`, `days` (`mon` to `sun`), `time`, `room_ids` and `rooms` in the order they're cleaned. Each schedule keeps its own room settings, separate from the rooms' settings in Home Assistant and the app.
+The **Schedules** sensor's `schedules` attribute lists each known schedule: `schedule_id`, `enabled`, `days` (`mon` to `sun`), `time`, `room_ids` and `rooms` in the order they're cleaned, and `room_settings`: each of those rooms' settings in this schedule, keyed by room ID, with the same labels `set_schedule` takes. Each schedule keeps its own room settings, separate from the rooms' settings in Home Assistant and the app.
 
 The calendar shows each clean as an hour long, since the robot doesn't say how long a clean will take. Like the app, Home Assistant won't save two schedules that are on and start at the same time on the same day.
 

@@ -329,6 +329,25 @@ class CoordinatorTests(unittest.TestCase):
             asyncio.run(c.async_set_schedule(days=["sun"], start_time="10:00", room_ids=["12"]))
         self.assertEqual(self.sent, [])
 
+    def test_each_room_s_saved_settings_are_shown(self):
+        """FutuRazor (#67): the card's schedule editor shows each room's settings."""
+        c = self.make([])
+        c.mqtt.splits_repetitions = False
+        schedule = dict(adds()[1])                                            # rooms 13 then 11
+        schedule["room_preference"] = deepcopy(schedule["room_preference"])
+        schedule["room_preference"][1][5] = 99                               # room 11: Very Low
+        schedule["room_preference"][1][6] = 1                                # two passes
+        info = c.describe_schedule(schedule)
+        self.assertEqual(list(info["room_settings"]), ["13", "11"])
+        self.assertEqual(info["room_settings"]["13"], {
+            "cleaning_mode": "Vacuum and Mop", "cleaning_strategy": "Auto",
+            "water_level": "Low", "mop_repetitions": "One Pass"})
+        self.assertEqual(info["room_settings"]["11"], {
+            "cleaning_mode": "Vacuum", "cleaning_strategy": "Auto",
+            "water_level": "Very Low", "mop_repetitions": "Two Passes"})
+        schedule["room_preference"][0][4] = 7                                # unknown value
+        self.assertNotIn("cleaning_strategy", c.describe_schedule(schedule)["room_settings"]["13"])
+
     def test_other_models_cant_change_schedules(self):
         c = self.make([])
         c.mqtt.supports_schedule_writes = False
