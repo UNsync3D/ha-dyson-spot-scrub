@@ -269,6 +269,9 @@ FAULT_CODE_MESSAGES: dict[int, str] = {
     2131: "Battery temperature too low",
     2132: "Battery temperature too high",
     2133: "Battery temperature too low",
+    # Spot+Scrub app messages confirmed by FutuRazor, 26 Nov 2026.
+    2509: "Robot is not level. Place it on a level surface before continuing.",
+    2510: "Robot lifted. Place it on the floor before continuing.",
     # 5005: the R1 Nurovi Dry stopped off the dock after heading back to it,
     # twice in one run (Fonsos's capture on #31, 14 Nov 2026). USER_CONTINUE.
     5005: "Couldn't return to the dock",

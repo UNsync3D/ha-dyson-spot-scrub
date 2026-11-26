@@ -386,15 +386,20 @@ def _actionable_faults(state: dict):
 
 
 def _only_stale_continue_faults(state: dict) -> bool:
-    """True when every actionable fault is USER_CONTINUE and the robot sits idle on the dock.
+    """Allow another request for retained USER_CONTINUE faults in confirmed idle states.
 
     A refused start leaves its fault behind until the next start clears it:
     the R2 capture of 8 Nov 2026 kept 22011 (clean water tank missing,
     USER_CONTINUE) while INACTIVE_CHARGING, and the app's next vacuum-only
     start ran normally and cleared it. If the cause is still there, the robot
-    refuses the new clean itself.
+    refuses the new clean itself. The Nov 26 stationless capture additionally
+    confirms 2510 (lifted) remains while INACTIVE_DISCHARGING; the app starts
+    again from that state and clears it. Handle placement codes 2509/2510
+    consistently in that idle state while preserving their warning.
+    Other off-dock faults and active/returning/paused states stay blocked.
     """
-    if has_freeze_fault(state) or state.get("state") not in IDLE_ON_DOCK_STATES:
+    off_dock = state.get("state") == "INACTIVE_DISCHARGING"
+    if has_freeze_fault(state) or (state.get("state") not in IDLE_ON_DOCK_STATES and not off_dock):
         return False
     if state.get("dockState") not in (None, "IDLE"):
         return False
@@ -410,6 +415,8 @@ def _only_stale_continue_faults(state: dict) -> bool:
             continue
         if _fault_code(f) in FAULT_CODE_INFORMATIONAL:
             continue
+        if off_dock and _fault_code(f) not in {2509, 2510}:
+            return False
         severities.append(severity)
     return bool(severities) and all(s == "USER_CONTINUE" for s in severities)
 
@@ -1074,6 +1081,7 @@ class DysonMqttClient:
         key = self._map_key(map_id)
         removed: list[str] = []
         with self._preference_lock:
+            inventory_changed = self._map_inventory.get(key) != inventory
             self._map_inventory[key] = inventory
             stored = self._room_store.get(key, {})
             if inventory and stored and set(stored) & set(inventory):
@@ -1087,6 +1095,7 @@ class DysonMqttClient:
         if removed:
             _LOGGER.info("[%s] Rooms %s removed from map %s (no longer in map data)",
                          self.serial, removed, key)
+        if removed or inventory_changed:
             self._notify_state_change()
 
     def _track_preference_request(self, msg_id, map_id) -> None:
@@ -1103,10 +1112,19 @@ class DysonMqttClient:
     @property
     def room_names(self) -> list[str]:
         """Normalised display names of every known room on the current map."""
-        pref = self._cached_preference
-        if not (pref and pref.get("room")):
-            return []
-        return [_room_display_name(r[1]) for r in pref["room"]]
+        key = self._map_key()
+        pref = self._preference_view(key) or {}
+        rows = pref.get("room") or []
+        names = [_room_display_name(r[1]) for r in rows]
+        known_ids = {str(row[0]) for row in rows}
+        # Metadata can name a newly mapped room before its settings arrive.
+        # Create its entities now, without inventing a preference row/settings.
+        if self.maps_enabled:
+            with self._preference_lock:
+                inventory = dict(self._map_inventory.get(key) or {})
+            names.extend(_room_display_name(name) for rid, name in inventory.items()
+                         if rid not in known_ids and name.strip())
+        return list(dict.fromkeys(names))
 
     @property
     def room_preferences(self) -> list[list]:
@@ -1704,19 +1722,25 @@ class DysonMqttClient:
     def _handle_jdm(self, data: dict) -> None:
         method = data.get("method")
         if method == "service.get_map_list":
+            refresh_rooms = False
             with self._preference_lock:
                 generation = self._map_requests.pop(str(data.get("msgId")), None)
                 maps = map_catalogue(data.get("data", {}).get("map_list")) if isinstance(data.get("data"), dict) else None
                 if (type(data.get("code")) is int and data["code"] == 0
                         and generation is not None and generation > self._map_applied_generation
                         and maps is not None):
+                    refresh_rooms = maps != self.maps or not self.room_preferences
                     self.maps, self.maps_known = maps, True
                     self._map_applied_generation = generation
                     self._notify_state_change()
+            if refresh_rooms:
+                self._refresh_current_map_rooms()
         elif (method in {"service.del_map", "service.rename_map", "service.rename_room"}
               and data.get("code") == 0) or method in {
                   "event.BuildMapFinish.post", "event.map_change.post"}:
             self.request_maps()
+            if method in {"service.rename_room", "event.BuildMapFinish.post", "event.map_change.post"}:
+                self._refresh_current_map_rooms()
         if "code" in data:
             with self._reply_lock:
                 waiter = self._reply_waiters.get(str(data.get("msgId")))
@@ -1915,6 +1939,15 @@ class DysonMqttClient:
             self.request_maps()
             if self.on_map_changed:
                 self.on_map_changed(str(identity))
+
+    def _refresh_current_map_rooms(self) -> None:
+        """Refresh room discovery after mapping/list changes without starting a clean."""
+        identity = saved_map_id(self.state.get("persistentMapId"))
+        if not self.maps_enabled or identity is None:
+            return
+        self._fetch_room_preferences()
+        if self.on_map_changed:
+            self.on_map_changed(identity)
 
     def _notify_state_change(self) -> None:
         for cb in list(self._state_callbacks):

@@ -945,9 +945,13 @@ class DysonCoordinator:
 
         The fallback lets per-room entities be created at startup before MQTT
         connects (e.g. while the robot is drying or briefly offline).
+        With saved-map selection enabled, an empty active map never borrows
+        the global cache of room names from another floor.
         """
-        if self.mqtt and self.mqtt.room_names:
-            return self.mqtt.room_names
+        if self.mqtt:
+            rooms = self.mqtt.room_names
+            if rooms or getattr(self.mqtt, "maps_enabled", False):
+                return rooms
         return self.cached_room_names
 
     async def async_clean_rooms_sequential(

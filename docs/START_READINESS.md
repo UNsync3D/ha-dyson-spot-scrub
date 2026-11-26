@@ -19,12 +19,19 @@ Vacuum attributes:
 | `mapping_or_navigation` | Mapping-family state; do not start a competing job |
 | `returning_or_finishing` | Return/abort or post-clean completion still in progress |
 | `cleaning_job_active` | Existing clean, pause or mid-clean recharge |
+| `map_switching` | Integration is awaiting confirmed saved-map selection |
 | `waiting_for_ready_state` | Missing, unknown or insufficient readiness telemetry |
 
-The card should gate **new Start**, not Resume, on this attribute. A future card
-update can show a friendly message for each code. This branch changes only the
-integration: an older card may still show an enabled Start button, but its
-request will be rejected. Readiness is advisory until checked at execution.
+## Retained placement faults on a stationless floor
+
+The maintainer's 26 November capture shows `2510` (`USER_CONTINUE`, robot lifted) remaining in `INACTIVE_DISCHARGING` with an idle dock after the robot was placed down. MyDyson then starts another clean successfully and the robot clears the old fault. `2509` is the app's "robot not level" message; both codes now have descriptive text and placement instructions.
+
+The existing retained-`USER_CONTINUE` rule on the dock additionally permits placement codes 2509/2510 in confirmed `INACTIVE_DISCHARGING` with an idle dock. Other off-dock codes, severities, mixed faults, missing/active/paused/returning states and blocking dock cycles remain vetoes. Fault activity/attributes remain visible; only permission to submit a new request changes. The robot still validates that request. The card already opens the planner for an error state with literal `ready_to_start: true`, so this correction needs no frontend bypass or fault-code decoding.
+
+Cards should gate **new Start**, not Resume, on this attribute. The current
+Cleaning Planner already respects it and displays readiness reasons. Older
+cards may still show an enabled Start button, but the backend rejects a
+blocked request. Readiness is advisory until checked at execution.
 
 ## Evidence and rules
 

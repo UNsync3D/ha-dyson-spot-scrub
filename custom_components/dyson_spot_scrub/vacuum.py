@@ -441,7 +441,7 @@ class DysonVacuumEntity(StateVacuumEntity):
 
             # Room list
             rooms = self._coordinator.mqtt.room_names
-            if rooms:
+            if rooms or getattr(self._coordinator.mqtt, "maps_enabled", False):
                 attrs["rooms"] = rooms
 
             # Actionable fault — human-readable string + raw code

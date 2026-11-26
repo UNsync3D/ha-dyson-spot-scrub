@@ -1,0 +1,219 @@
+{
+  "source": "home-assistant_dyson_spot_scrub_2026-11-26T04-19-58.659Z.log",
+  "note": "Sanitized Nov 26 stationless test. Map ID anonymized; command origins/outcomes are maintainer observations, not inferred from MQTT. No serial, tokens, room data or positions retained.",
+  "states": {
+    "lifted_on_dock": {
+      "source_line": 723,
+      "local_time": "2026-11-26 05:13:18.434",
+      "state": {
+        "msg": "CURRENT-STATE",
+        "state": "INACTIVE_CHARGING",
+        "activeFaults": [
+          {
+            "faultCode": "2510",
+            "nextActionRequired": "USER_CONTINUE"
+          }
+        ],
+        "dockState": "IDLE",
+        "fullCleanAction": "NONE",
+        "cleaningState": "NOT_CLEANING",
+        "persistentMapId": "456"
+      }
+    },
+    "lifted_off_dock": {
+      "source_line": 747,
+      "local_time": "2026-11-26 05:14:20.525",
+      "state": {
+        "msg": "CURRENT-STATE",
+        "state": "INACTIVE_DISCHARGING",
+        "activeFaults": [
+          {
+            "faultCode": "2510",
+            "nextActionRequired": "USER_CONTINUE"
+          }
+        ],
+        "dockState": "IDLE",
+        "fullCleanAction": "NONE",
+        "cleaningState": "NOT_CLEANING",
+        "persistentMapId": "456"
+      }
+    },
+    "app_restart_after_lifted": {
+      "source_line": 923,
+      "local_time": "2026-11-26 05:17:18.201",
+      "state": {
+        "msg": "CURRENT-STATE",
+        "state": "FULL_CLEAN_RUNNING",
+        "activeFaults": [
+          {
+            "faultCode": "2110",
+            "nextActionRequired": "LOG_ONLY"
+          }
+        ],
+        "dockState": "IDLE",
+        "fullCleanAction": "VACUUMING",
+        "cleaningState": "NOT_CLEANING",
+        "persistentMapId": "456"
+      }
+    },
+    "not_level_on_dock": {
+      "source_line": 1203,
+      "local_time": "2026-11-26 05:19:04.717",
+      "state": {
+        "msg": "CURRENT-STATE",
+        "state": "INACTIVE_CHARGING",
+        "activeFaults": [
+          {
+            "faultCode": "2509",
+            "nextActionRequired": "USER_CONTINUE"
+          }
+        ],
+        "dockState": "IDLE",
+        "fullCleanAction": "NONE",
+        "cleaningState": "NOT_CLEANING",
+        "persistentMapId": "456"
+      }
+    }
+  },
+  "runs": [
+    {
+      "run": 1,
+      "start_origin_reported_by_maintainer": "MyDyson",
+      "commands": [
+        {
+          "source_line": 98,
+          "local_time": "2026-11-26 05:08:54.345",
+          "message": {
+            "msg": "START",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 260,
+          "local_time": "2026-11-26 05:09:57.996",
+          "message": {
+            "msg": "ABORT",
+            "state": "FULL_CLEAN_RUNNING",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 262,
+          "local_time": "2026-11-26 05:09:58.093",
+          "message": {
+            "method": "service.start_recharge"
+          }
+        }
+      ],
+      "end_state": "INACTIVE_DISCHARGING",
+      "end_time": "2026-11-26 05:10:08.152"
+    },
+    {
+      "run": 2,
+      "start_origin_reported_by_maintainer": "Lovelace",
+      "commands": [
+        {
+          "source_line": 336,
+          "local_time": "2026-11-26 05:10:40.564",
+          "message": {
+            "msg": "START",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 436,
+          "local_time": "2026-11-26 05:11:18.079",
+          "message": {
+            "msg": "ABORT"
+          }
+        },
+        {
+          "source_line": 437,
+          "local_time": "2026-11-26 05:11:18.114",
+          "message": {
+            "method": "service.start_recharge"
+          }
+        }
+      ],
+      "end_state": "INACTIVE_DISCHARGING",
+      "end_time": "2026-11-26 05:11:26.155"
+    },
+    {
+      "run": 3,
+      "start_origin_reported_by_maintainer": "Lovelace",
+      "commands": [
+        {
+          "source_line": 478,
+          "local_time": "2026-11-26 05:11:38.689",
+          "message": {
+            "msg": "START",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 575,
+          "local_time": "2026-11-26 05:12:17.945",
+          "message": {
+            "msg": "PAUSE"
+          }
+        },
+        {
+          "source_line": 585,
+          "local_time": "2026-11-26 05:12:26.453",
+          "message": {
+            "msg": "ABORT"
+          }
+        },
+        {
+          "source_line": 586,
+          "local_time": "2026-11-26 05:12:26.566",
+          "message": {
+            "method": "service.start_recharge"
+          }
+        }
+      ],
+      "end_state": "INACTIVE_DISCHARGING",
+      "end_time": "2026-11-26 05:13:00.598"
+    },
+    {
+      "run": 4,
+      "start_origin_reported_by_maintainer": "MyDyson",
+      "commands": [
+        {
+          "source_line": 912,
+          "local_time": "2026-11-26 05:17:15.898",
+          "message": {
+            "msg": "START",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 1075,
+          "local_time": "2026-11-26 05:18:19.926",
+          "message": {
+            "msg": "PAUSE",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 1082,
+          "local_time": "2026-11-26 05:18:29.320",
+          "message": {
+            "msg": "ABORT",
+            "state": "FULL_CLEAN_PAUSED",
+            "cleaningMode": "zoneConfigured"
+          }
+        },
+        {
+          "source_line": 1083,
+          "local_time": "2026-11-26 05:18:29.325",
+          "message": {
+            "method": "service.start_recharge"
+          }
+        }
+      ],
+      "end_state": "INACTIVE_DISCHARGING",
+      "end_time": "2026-11-26 05:18:49.312"
+    }
+  ]
+}

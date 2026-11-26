@@ -49,6 +49,25 @@ The renderer now validates dock points using the existing room locator's geometr
 
 The full offline suite passes with 440 tests, including six dock/bounds regressions. A live B-camera retest remains required. If B remains oversized, capture its persistent map data to distinguish dock coordinates from a malformed dimensions/room-coordinate field. Navigation and Home commands are unchanged.
 
+## Fresh room discovery and stationless follow-up (26 November)
+
+The maintainer confirmed that deleting B removes the Lovelace switch button when only A remains, and creating a new B restores the button. They also reported that the new room's entities appeared only after a first clean, with A's list visible in the meantime. The supplied `home-assistant_dyson_spot_scrub_2026-11-26T04-19-58.659Z.log` already starts with new B (`1795665600`, room Essbereich). It includes a B preference reply at 05:08:39.715, before the first START at 05:08:54.345, but not creation itself or an HA registry snapshot; the exact entity-discovery delay cannot be reconstructed from this export.
+
+The integration now refreshes current-map preferences and REST inventory after mapping completion, room rename/map-change events, changed catalogues and catalogue polls while current preferences are still missing. Room names from that map's metadata can create entities before settings arrive; no preference rows/settings are invented. Metadata changes notify discovery listeners. With saved-map selection enabled, neither the coordinator nor the vacuum borrows another map's cached names: an unresolved current room list is published explicitly as `rooms: []`, so the card cannot restore A's last list. These changes do not create, edit or start a map/cleaning job. Live creation-before-first-clean acceptance remains required.
+
+Four stationless runs were annotated by the maintainer (start origin is their observation):
+
+| Run | Start origin | Start | Pause before Home | Home | Reported outcome |
+| --- | --- | --- | --- | --- | --- |
+| 1 | MyDyson | 05:08:54 | No | 05:09:57 | Parked at placement point |
+| 2 | Lovelace | 05:10:40 | No | 05:11:18 | Parked at placement point |
+| 3 | Lovelace | 05:11:38 | 05:12:17 | 05:12:26 | Searched/localized without a station |
+| 4 | MyDyson | 05:17:15 | 05:18:19 | 05:18:29 | Searched/localized without a station |
+
+All four use legacy `ABORT` followed by `service.start_recharge`; MyDyson includes additional state/mode fields in ABORT while HA uses its existing minimal payload. Runs 1/2 report inactive discharging at 05:10:08 / 05:11:26. Runs 3/4 report JDM map ID `0` at 05:12:36.229 / 05:18:36.865 and later restore B. This correlates the differing behavior with a prior pause, not the start origin, but does not prove the robot's internal navigation rule. Home/Pause/Stop commands remain unchanged.
+
+The same export shows `2510` (`USER_CONTINUE`) persisting off-dock while inactive, followed by a successful app start at 05:17:15.898. `2509` appears at 05:19:04.717 while inactive charging. The app meanings supplied by the maintainer are robot lifted / robot not level. Both now have descriptions; idle off-dock placement retries follow the [readiness rule](START_READINESS.md#retained-placement-faults-on-a-stationless-floor), without hiding warnings or permitting competing active jobs. A sanitized fixture retains the four command sequences and selected fault states. All 449 offline integration tests pass; these discovery/readiness corrections still need live acceptance.
+
 ## Entity retention and remaining validation
 
 Normal switches retain existing room entities and use the existing active-room refresh path. Removed map IDs disappear from the map selector. Removing the old room entities and registry entries of a deleted map is a separate follow-up: existing room entities use names, and shared names/room IDs require verified map ownership before cleanup.
