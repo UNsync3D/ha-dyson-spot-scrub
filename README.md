@@ -171,6 +171,8 @@ Creating, changing and deleting are captured from the app on the Spot+Scrub AI o
 
 Spot+Scrub AI / RB05 gains a **Map** select for displaying and switching existing saved maps. The list follows changes made in MyDyson and refreshes after reconnect and periodically. Switches wait for robot confirmation; creation, editing and deletion remain in MyDyson. Existing room entities stay in place during normal switches. See [saved-map selection](docs/MAP_SWITCHING.md) for the HA/card interface, commands, tests and remaining live checks. Cleanup of room entities belonging to deleted maps is a separate follow-up.
 
+The Lovelace card shows its switch button only with at least two valid options; the integration select remains present with one map. Room data is refreshed after mapping. A map with unresolved room data reports an empty list instead of the previous map's rooms, and metadata can establish room names/entities before their cleaning settings arrive.
+
 ### Floor Map
 
 The Floor Map camera entity draws a live PNG in the style of the MyDyson app:
@@ -473,6 +475,15 @@ To end the search:
 2. Place it manually on the charging station.
 
 The maintainer confirmed that this ends the search. See [stationless-map troubleshooting](docs/MAP_SWITCHING.md#stationless-home-troubleshooting) for the tested sequence.
+
+### Placement warnings 2509 and 2510 remain after putting the robot down
+
+| Code | Meaning and action |
+| --- | --- |
+| 2509 | Robot is not level: place it on a level surface before continuing. |
+| 2510 | Robot lifted: place it on the floor before continuing. |
+
+The updated development branch supplies these descriptions and permits a new request for a retained `USER_CONTINUE` placement warning while the robot reports an idle state, including off the dock. The warning remains visible until the robot clears it. Active cleaning, return, pause and other fault/state checks still apply. See [placement-fault readiness](docs/START_READINESS.md#retained-placement-faults-on-a-stationless-floor).
 
 ### Robot shows as Unavailable
 Either the connection to Dyson's cloud dropped, or Dyson reports the robot itself as offline (for example, it's off Wi-Fi or switched off). The integration recovers from both on its own: it reconnects automatically, and while the robot is offline it asks for its status once a minute. If the robot shows as online in the MyDyson app but stays unavailable here, reload the integration from **Settings → Devices & Services**.

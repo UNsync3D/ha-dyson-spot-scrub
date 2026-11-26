@@ -11,7 +11,7 @@ This development branch adds selection of existing maps on Spot+Scrub AI / RB05.
 - Attributes: `maps` (objects with string `map_id`, `name`, `option`), `map_id` (current string ID or null), `can_change` (Boolean) and `switching` (Boolean).
 - Action: standard `select.select_option`, targeting this select and an option from its current options list.
 
-The Lovelace Cleaning Planner uses this registry identity on the configured robot, and displays a map menu only when the select exists. It waits for both the select and vacuum's `map_id` to agree. Older integration builds keep their existing card layout. Local room drafts must be discarded before switching from the card.
+The Lovelace Cleaning Planner uses this registry identity on the configured robot, and displays a map menu only when the select has at least two valid options. Shrinking the list to one closes the menu and hides the button; another reported map restores the button. The integration select remains present with a single option. The card waits for both the select and vacuum's `map_id` to agree. Older integration builds keep their existing card layout. Local room drafts must be discarded before switching from the card. The temporary map-switch start interlock is a header notice, separate from physical dock activity such as drying.
 
 ## Refresh and commands
 
@@ -47,7 +47,7 @@ On 26 November the maintainer reported a tiny floor in the camera image's bottom
 
 The renderer now validates dock points using the existing room locator's geometry and dock reach rule. A remote point outside every room is omitted from both bounds and drawing; a dock at zero, within a room or just outside its wall remains valid. Invalid/nonfinite points are skipped, and an invalid live dock can fall back to a valid static dock on that floor. The check is relative to the floor, so large translated map origins remain supported. In the synthetic reproduction, the corrected image is 450 x 370 pixels at 80 pixels/metre.
 
-The full offline suite passes with 440 tests, including six dock/bounds regressions. A live B-camera retest remains required. If B remains oversized, capture its persistent map data to distinguish dock coordinates from a malformed dimensions/room-coordinate field. Navigation and Home commands are unchanged.
+The camera correction passed the 440-test suite at implementation, including six dock/bounds regressions. The maintainer subsequently confirmed that the corrected B camera looks good. This establishes live visual acceptance; the original raw dock value remains uncaptured. Navigation and Home commands are unchanged. The latest full suite, including subsequent discovery/readiness work, passes 449 tests.
 
 ## Fresh room discovery and stationless follow-up (26 November)
 
@@ -83,6 +83,8 @@ The maintainer confirmed that this ends the search and restores normal operation
 
 Normal switches retain existing room entities and use the existing active-room refresh path. Removed map IDs disappear from the map selector. Removing the old room entities and registry entries of a deleted map is a separate follow-up: existing room entities use names, and shared names/room IDs require verified map ownership before cleanup.
 
-Home is unchanged: `vacuum.return_to_base` sends legacy `ABORT`, with Dyson's cloud adding `service.start_recharge`. Stop is a distinct legacy `STOP`. The supplied stationless return trace is Home, not a captured MyDyson cancellation or normal completion; returning to the placement point through those app flows needs its own comparison.
+Home is unchanged: `vacuum.return_to_base` sends legacy `ABORT`, with Dyson's cloud adding `service.start_recharge`. Stop is a distinct legacy `STOP`. These captures describe Home; other MyDyson cancellation and normal-completion flows are outside their scope. The known stationless Pause → Home case and confirmed manual recovery are documented above.
 
-Run `python -X utf8 -m unittest discover -s tests -v` with the CI dependencies installed. Tests use mocked MQTT and Home Assistant, including list ordering, deletion, duplicate names, readiness, confirmation, timeouts, lifecycle and the existing entity-identity snapshot. Live installation still needs a two-map switch in both directions from the select and card, a MyDyson rename/deletion, reconnect, and confirmation that existing room cleaning still works.
+Run `python -X utf8 -m unittest discover -s tests -v` with the CI dependencies installed. The latest full suite passed 449 tests using mocked MQTT/Home Assistant. Map switching in both directions, schedule lists/availability, camera rendering and the single-map Lovelace button rule have separate maintainer live confirmations.
+
+Remaining live checks include fresh room discovery before a first clean, corrected idle placement-fault retry from HA/card, the header notice, app edits/reconnect, last-map deletion and settings isolation where names/room IDs are reused. Actual scheduled execution remains a separate check. Removal of entities exclusive to deleted maps is still a follow-up. The stationless Pause → Home search is documented above as known Dyson behavior with confirmed pause/manual-docking recovery, not as a navigation fix to implement.
