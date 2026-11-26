@@ -210,6 +210,22 @@ def time_conflict(orders: Iterable[dict], day: int, hour: int, minute: int,
     return None
 
 
+class _MapSummary:
+    """The robot's counts/checksum for one map, separate from retained orders."""
+
+    def __init__(self, data: Any = None) -> None:
+        data = data if isinstance(data, dict) else {}
+        for key in ("robot_total", "robot_enabled"):
+            value = data.get(key)
+            setattr(self, key, value if _int(value) and value >= 0 else None)
+        self.in_sync = data.get("in_sync") if type(data.get("in_sync")) is bool else None
+        self.synced_md5 = data.get("synced_md5") if isinstance(data.get("synced_md5"), str) else None
+        self.expect_baseline = data.get("expect_baseline") is True
+
+    def to_dict(self) -> dict:
+        return dict(vars(self))
+
+
 class ScheduleBook:
     """Home Assistant's copy of one robot's schedules, learnt from its MQTT traffic.
 
@@ -221,24 +237,61 @@ class ScheduleBook:
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
         self._clock = clock
         self.orders: dict[int, dict] = {}
-        self.robot_total: int | None = None
-        self.robot_enabled: int | None = None
-        self.in_sync: bool | None = None
-        self._synced_md5: str | None = None
-        self._expect_baseline = False
-        self._pending: dict[str, tuple[str, Any, float]] = {}
+        self.map_id: str | None = None  # None preserves the legacy single-map contract.
+        self._summaries: dict[str | None, _MapSummary] = {None: _MapSummary()}
+        self._map_revision = 0
+        self._pending: dict[str, tuple[str, Any, float, str | None, int, int]] = {}
+        self._request_sequence = 0
+        self._applied_sequence = 0
+        self._seen_queries: dict[str, float] = {}
+
+    @property
+    def _summary(self) -> _MapSummary:
+        return self._summaries.setdefault(self.map_id, _MapSummary())
+
+    @property
+    def robot_total(self) -> int | None:
+        return self._summary.robot_total
+
+    @property
+    def robot_enabled(self) -> int | None:
+        return self._summary.robot_enabled
+
+    @property
+    def in_sync(self) -> bool | None:
+        return self._summary.in_sync
+
+    @property
+    def active_orders(self) -> dict[int, dict]:
+        if self.map_id is None:
+            return self.orders
+        return {key: order for key, order in self.orders.items()
+                if self.map_id != "0" and str(order.get("map_id")) == self.map_id}
+
+    def select_map(self, map_id: Any) -> bool:
+        """Change the view without deleting schedules or reusing another map's summary."""
+        identity = str(map_id) if map_id is not None else "0"
+        if identity == self.map_id:
+            return False
+        self.map_id = identity
+        self._map_revision += 1
+        return True
+
+    def _order_changed(self, order: dict) -> None:
+        identity = None if self.map_id is None else str(order.get("map_id") or "0")
+        self._summaries.setdefault(identity, _MapSummary()).expect_baseline = True
+        if identity == self.map_id:
+            self._map_revision += 1  # A pre-edit query must not become the new checksum baseline.
 
     # ── Persistence ───────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
         return {
             "orders": [self.orders[key] for key in sorted(self.orders)],
-            "robot_total": self.robot_total,
-            "robot_enabled": self.robot_enabled,
-            "in_sync": self.in_sync,
-            "synced_md5": self._synced_md5,
-            # A change was seen since the last checksum: the next one is the new baseline.
-            "expect_baseline": self._expect_baseline,
+            **self._summary.to_dict(),
+            "map_id": self.map_id,
+            "map_summaries": {key: summary.to_dict() for key, summary in self._summaries.items()
+                              if key is not None},
         }
 
     @classmethod
@@ -252,26 +305,38 @@ class ScheduleBook:
             except ValueError:
                 continue
             book.orders[order["id"]] = order
-        for key in ("robot_total", "robot_enabled"):
-            if _int(data.get(key)):
-                setattr(book, key, data[key])
-        if isinstance(data.get("in_sync"), bool):
-            book.in_sync = data["in_sync"]
-        if isinstance(data.get("synced_md5"), str):
-            book._synced_md5 = data["synced_md5"]
-        book._expect_baseline = data.get("expect_baseline") is True
+        if isinstance(data.get("map_summaries"), dict):
+            book._summaries.update({key: _MapSummary(value)
+                                    for key, value in data["map_summaries"].items()
+                                    if isinstance(key, str) and isinstance(value, dict)})
+        if isinstance(data.get("map_id"), str):
+            book.select_map(data["map_id"])
+        else:
+            # Old stores retain every order, but their unscoped checksum must
+            # never become a checksum for a newly selected map.
+            book._summaries[None] = _MapSummary(data)
         return book
 
     # ── Messages ──────────────────────────────────────────────────────────
 
     def command_seen(self, data: dict) -> None:
-        """An add_order / del_order request on command/jdm (ours or the app's)."""
+        """An order request on command/jdm (ours or the app's)."""
         now = self._clock()
-        for key, (_, _, sent) in list(self._pending.items()):
+        for key, (_, _, sent, _, _, _) in list(self._pending.items()):
             if now - sent > PENDING_SECONDS:
                 del self._pending[key]
-        if data.get("method") in (ADD_ORDER, DEL_ORDER) and data.get("msgId") is not None:
-            self._pending[str(data["msgId"])] = (data["method"], deepcopy(data.get("params")), now)
+        self._seen_queries = {key: sent for key, sent in self._seen_queries.items()
+                              if now - sent <= PENDING_SECONDS}
+        if data.get("method") in ORDER_METHODS and data.get("msgId") is not None:
+            key = str(data["msgId"])
+            if data["method"] == GET_ORDER:
+                if key in self._seen_queries:
+                    return
+                self._seen_queries[key] = now
+            if key not in self._pending:  # Own publishes are also echoed by the broker.
+                self._request_sequence += 1
+                self._pending[key] = (data["method"], deepcopy(data.get("params")), now,
+                                      self.map_id, self._map_revision, self._request_sequence)
 
     def reply_seen(self, data: dict) -> bool:
         """A reply on status/jdm."""
@@ -281,14 +346,23 @@ class ScheduleBook:
         if data.get("code") != 0 or not isinstance(reply, dict):
             return False
         if method == GET_ORDER:
+            if self.map_id is not None:
+                if (pending is None or pending[0] != GET_ORDER or pending[3] != self.map_id
+                        or pending[4] != self._map_revision or self.map_id == "0"
+                        or self._clock() - pending[2] > PENDING_SECONDS
+                        or pending[5] <= self._applied_sequence):
+                    return False
+                self._applied_sequence = pending[5]
             return self.summary_seen(reply.get("order_data_lite"))
         if pending is None or reply.get("result", 0) != 0:
             return False
-        sent_method, params, _ = pending
+        sent_method, params, _, scope, _, _ = pending
         try:
             if sent_method == ADD_ORDER:
                 return self.apply_add(params)
-            if isinstance(params, dict) and _int(params.get("id")):
+            if (isinstance(params, dict) and _int(params.get("id"))
+                    and (self.map_id is None or
+                         str(self.orders.get(params["id"], {}).get("map_id")) == scope)):
                 return self.apply_delete(params["id"])
         except ValueError:
             return False
@@ -299,53 +373,61 @@ class ScheduleBook:
         order = validate_order(deepcopy(params))
         if self.orders.get(order["id"]) == order:
             return False
+        previous = self.orders.get(order["id"])
+        if previous is not None:
+            self._order_changed(previous)
         self.orders[order["id"]] = order
-        self._expect_baseline = True
+        self._order_changed(order)
         return True
 
     def apply_delete(self, order_id: int) -> bool:
-        if self.orders.pop(order_id, None) is None:
+        order = self.orders.pop(order_id, None)
+        if order is None:
             return False
-        self._expect_baseline = True
+        self._order_changed(order)
         return True
 
     def summary_seen(self, lite: Any) -> bool:
         """get_order's order_data_lite: compare with what Home Assistant knows."""
-        if not isinstance(lite, dict) or not _int(lite.get("total")):
+        if self.map_id == "0" or not isinstance(lite, dict) or not _int(lite.get("total")):
             return False
-        before = (self.robot_total, self.robot_enabled, self.in_sync)
-        self.robot_total = lite["total"]
+        summary = self._summary
+        before = summary.to_dict()
+        summary.robot_total = lite["total"]
         if _int(lite.get("enable")):
-            self.robot_enabled = lite["enable"]
+            summary.robot_enabled = lite["enable"]
         md5 = lite.get("md5") if isinstance(lite.get("md5"), str) else None
         if not self._counts_match():
-            self.in_sync = False
-        elif self._expect_baseline or self._synced_md5 is None:
+            summary.in_sync = False
+        elif summary.expect_baseline or summary.synced_md5 is None:
             # Matches a change Home Assistant saw (or its first look):
             # remember this checksum as the in-step one.
-            self._synced_md5 = md5
-            self._expect_baseline = False
-            self.in_sync = True
+            summary.synced_md5 = md5
+            summary.expect_baseline = False
+            summary.in_sync = True
         else:
-            self.in_sync = md5 == self._synced_md5
-        return (self.robot_total, self.robot_enabled, self.in_sync) != before
+            summary.in_sync = md5 == summary.synced_md5
+        return summary.to_dict() != before
 
     def total_seen(self, total: Any) -> bool:
         """prop.post order_total {total, enable}: counts only, no checksum."""
         if not isinstance(total, dict) or not _int(total.get("total")):
             return False
         before = (self.robot_total, self.robot_enabled, self.in_sync)
-        self.robot_total = total["total"]
+        if self.map_id == "0":
+            return False
+        summary = self._summary
+        summary.robot_total = total["total"]
         if _int(total.get("enable")):
-            self.robot_enabled = total["enable"]
+            summary.robot_enabled = total["enable"]
         if not self._counts_match():
-            self.in_sync = False
+            summary.in_sync = False
         return (self.robot_total, self.robot_enabled, self.in_sync) != before
 
     def _counts_match(self) -> bool:
-        if self.robot_total != len(self.orders):
+        if self.robot_total != len(self.active_orders):
             return False
-        enabled = sum(1 for order in self.orders.values() if order["enable"] == 1)
+        enabled = sum(1 for order in self.active_orders.values() if order["enable"] == 1)
         return self.robot_enabled is None or self.robot_enabled == enabled
 
     # ── Views ─────────────────────────────────────────────────────────────
@@ -355,14 +437,14 @@ class ScheduleBook:
         """Schedules on the robot that Home Assistant hasn't seen (at least)."""
         if self.robot_total is None:
             return 0
-        return max(0, self.robot_total - len(self.orders))
+        return max(0, self.robot_total - len(self.active_orders))
 
     def sorted_orders(self) -> list[dict]:
         """By first day, then time."""
         def key(order):
             first = next((i for i, day in enumerate(DAYS) if order["day"] & DAY_BITS[day]), 7)
             return (first, order["hour"], order["minute"], order["id"])
-        return sorted(self.orders.values(), key=key)
+        return sorted(self.active_orders.values(), key=key)
 
 
 # The calendar shows each scheduled clean as an hour long: the robot doesn't

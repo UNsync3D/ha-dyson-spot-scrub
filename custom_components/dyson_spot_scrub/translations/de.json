@@ -482,6 +482,9 @@
       },
       "roller_drying_duration": {
         "name": "Trocknungsdauer der Wischwalze"
+      },
+      "active_map": {
+        "name": "Karte"
       }
     },
     "sensor": {

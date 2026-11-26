@@ -19,12 +19,19 @@ Vacuum attributes:
 | `mapping_or_navigation` | Mapping-family state; do not start a competing job |
 | `returning_or_finishing` | Return/abort or post-clean completion still in progress |
 | `cleaning_job_active` | Existing clean, pause or mid-clean recharge |
+| `map_switching` | Integration is awaiting confirmed saved-map selection |
 | `waiting_for_ready_state` | Missing, unknown or insufficient readiness telemetry |
 
-The card should gate **new Start**, not Resume, on this attribute. A future card
-update can show a friendly message for each code. This branch changes only the
-integration: an older card may still show an enabled Start button, but its
-request will be rejected. Readiness is advisory until checked at execution.
+## Retained placement faults on a stationless floor
+
+The maintainer's 26 November capture shows `2510` (`USER_CONTINUE`, robot lifted) remaining in `INACTIVE_DISCHARGING` with an idle dock after the robot was placed down. MyDyson then starts another clean successfully and the robot clears the old fault. `2509` is the app's "robot not level" message; both codes now have descriptive text and placement instructions.
+
+The existing retained-`USER_CONTINUE` rule on the dock additionally permits placement codes 2509/2510 in confirmed `INACTIVE_DISCHARGING` with an idle dock. Other off-dock codes, severities, faults mixed with other codes, missing/active/paused/returning states and blocking dock cycles remain vetoes. Fault activity/attributes remain visible; only permission to submit a new request changes. The robot still validates that request. The card already opens the planner for an error state with literal `ready_to_start: true`, so this correction needs no frontend bypass or fault-code decoding.
+
+Cards should gate **new Start**, not Resume, on this attribute. The current
+Cleaning Planner already respects it and displays readiness reasons. Older
+cards may still show an enabled Start button, but the backend rejects a
+blocked request. Readiness is advisory until checked at execution.
 
 ## Evidence and rules
 
@@ -69,20 +76,21 @@ state remains eligible with an idle dock; the robot need not always be docked.
 
 ## Validation
 
-Run `python -m unittest discover -s tests -v` with Pillow installed, plus
-`python -m compileall -q custom_components/dyson_spot_scrub tests`.
+Run `python -X utf8 -m unittest discover -s tests -v` with the CI dependencies
+installed. The latest full run on 26 November 2026 passed **449 tests**. The
+older initial 65-test investigation is historical and does not describe the
+current suite's result.
 
-The changed suite has 65 tests: 64 pass. One pre-existing map-retention test
-errors because its mocked API exception lacks `retry_after`. The unchanged
-main baseline has the same error, plus 21 failing room-preference subtests.
-The room transport stub now returns `True` on successful publication, matching
-the real transport contract, and supplies an explicit ready state.
+Regression checks cover captured completion sequences, attribute/service
+agreement, blocked MQTT entry points, state changes during preference lookup,
+drying start, paused resume, sequential dock-work waiting, reconnect, retained
+placement-fault readiness and normal room Start with a visible retained warning.
+The current card's existing error-plus-ready planner behavior also passed its
+focused offline checks.
 
-Regression checks include both captured completion sequences, attribute/service
-agreement, blocked MQTT entry points, state change during preference lookup,
-drying start, paused resume, sequential dock-work waiting and reconnect invalidation.
-
-Before merging, test in real HA: vacuum finish and return, gap after docking,
-dust collection, roller washing, drying start and paused resume. Confirm
-blocked requests send no new cleaning command. No new mapping run is required
-for this focused return-to-dock fix. Live acceptance is still pending.
+The new off-dock placement retry still needs live HA/card acceptance after
+putting the robot down. Also verify fresh-room discovery before a first clean;
+that change is documented in [map selection](MAP_SWITCHING.md). Pause/Home
+navigation commands remain unchanged. The stationless Pause -> Home search
+and its confirmed manual recovery are a documented Dyson operating edge case,
+not an outstanding navigation correction.

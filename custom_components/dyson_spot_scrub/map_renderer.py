@@ -40,6 +40,7 @@ from typing import Any
 
 from .const import MAP_PATH_ACTIONS, MAP_WALL_DEFAULTS
 from .map_options import map_options
+from .room_locator import dock_room, room_outlines
 
 try:
     from PIL import Image, ImageDraw, ImageFont
@@ -781,9 +782,30 @@ def _get_furniture(map_data: dict, live_data: dict | None) -> list[dict]:
 
 
 def _get_dock(map_data: dict, live_data: dict | None) -> dict | None:
-    if live_data and live_data.get("dockLocation"):
-        return live_data["dockLocation"]
-    return map_data.get("dockLocation")
+    """A dock on this floor, never an unrelated point that stretches the canvas.
+
+    Reuse the current-room locator's dock rule, including its allowance for a
+    station just outside a room wall. The test is relative to room geometry;
+    valid floors may use a translated origin far from (0, 0).
+    """
+    outlines = room_outlines(map_data) or room_outlines(live_data)
+    candidates = [live_data.get("dockLocation") if live_data else None,
+                  map_data.get("dockLocation")]
+    for dock in candidates:
+        if not isinstance(dock, dict):
+            continue
+        try:
+            x, y = _pt(dock)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if (not math.isfinite(x) or not math.isfinite(y)
+                or isinstance(dock.get("x"), bool) or isinstance(dock.get("y"), bool)):
+            continue
+        dock = {**dock, "x": x, "y": y}
+        if outlines and dock_room({"dockLocation": dock}, outlines) is None:
+            continue
+        return dock
+    return None
 
 
 # ── Drawing helpers ────────────────────────────────────────────────────────────

@@ -353,6 +353,17 @@ class RetentionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await pending)
         self.assertIsNone(self.camera._map_data)
 
+    async def test_unknown_reported_map_cannot_load_another_saved_floor(self):
+        self.coordinator.mqtt.maps_enabled = True
+        self.state('ABORTED', map_id=0)
+        self.camera._map_data = None
+        with patch.object(camera_module, 'get_current_map', AsyncMock(
+                side_effect=camera_module.DysonApiError('No active map'))) as fetch:
+            self.assertIsNone(await self.camera.async_camera_image())
+        fetch.assert_awaited_once_with('test', 'test', session=self.coordinator.http_session,
+                                      expected_map_id='0')
+        self.assertIsNone(self.camera._map_data)
+
     async def test_existing_room_presentation_storage_is_preserved(self):
         segments = [{'type': 0, 'start': [1, 1], 'end': [2, 2]}]
         self.path = {**self.path, 'zones': [{'id': 1, 'presentation': segments}]}

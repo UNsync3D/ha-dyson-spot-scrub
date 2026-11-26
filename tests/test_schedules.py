@@ -158,6 +158,144 @@ class BookTests(unittest.TestCase):
         self.assertEqual(sch.ScheduleBook.from_dict(None).orders, {})
 
 
+class MapBookTests(unittest.TestCase):
+    def make(self):
+        book = sch.ScheduleBook()
+        for index in range(5):
+            book.apply_add(dict(adds()[0], id=index + 1, map_id=123, enable=0))
+        book.select_map("123")
+        book.summary_seen({"total": 5, "enable": 0, "md5": "floor-a"})
+        return book
+
+    def query(self, book, key):
+        book.command_seen({"method": sch.GET_ORDER, "msgId": key, "params": {}})
+
+    def reply(self, book, key, total=0, enabled=0, md5="floor-b"):
+        return book.reply_seen({"method": sch.GET_ORDER, "msgId": key, "code": 0,
+                                "data": {"order_data_lite": {"total": total, "enable": enabled, "md5": md5}}})
+
+    def test_five_a_schedules_and_empty_b_do_not_create_a_sync_warning(self):
+        book = self.make()
+        book.select_map("456")
+        book.total_seen({"total": 0, "enable": 0})  # Nov 26, 02:41:04.832, after B selection.
+        self.assertIsNone(book.in_sync)
+        self.query(book, "b")
+        self.reply(book, "b")
+        self.assertEqual((book.robot_total, len(book.active_orders), book.in_sync), (0, 0, True))
+        self.assertEqual(book.sorted_orders(), [])
+        self.assertEqual(len(book.orders), 5)
+        book.select_map("123")
+        self.assertEqual((book.robot_total, len(book.active_orders), book.in_sync), (5, 5, True))
+
+    def test_equal_counts_keep_independent_checksums_and_real_missed_changes(self):
+        book = sch.ScheduleBook()
+        book.apply_add(dict(adds()[0], id=1, map_id=123))
+        book.apply_add(dict(adds()[0], id=2, map_id=456))
+        for identity, checksum in (("123", "a"), ("456", "b"), ("123", "a")):
+            book.select_map(identity)
+            book.summary_seen({"total": 1, "enable": 1, "md5": checksum})
+            self.assertTrue(book.in_sync)
+        book.summary_seen({"total": 1, "enable": 1, "md5": "a-edited-offline"})
+        self.assertFalse(book.in_sync)
+        book.select_map("456")
+        self.assertTrue(book.in_sync)
+        book.total_seen({"total": 2, "enable": 1})
+        self.assertFalse(book.in_sync)
+        self.assertEqual(book.unknown_count, 1)
+
+    def test_late_summary_cannot_cross_a_map_switch_or_a_round_trip(self):
+        book = self.make()
+        self.query(book, "a-old")
+        book.select_map("456")
+        self.assertFalse(self.reply(book, "a-old", total=5, md5="a"))
+        self.query(book, "b-old")
+        book.select_map("123")
+        self.assertFalse(self.reply(book, "b-old"))
+        self.query(book, "a-before-trip")
+        book.select_map("456")
+        book.select_map("123")
+        self.assertFalse(self.reply(book, "a-before-trip", total=5, md5="bad"))
+        self.assertTrue(book.in_sync)
+
+    def test_untracked_expired_and_reordered_summaries_are_ignored(self):
+        now = [0]
+        book = sch.ScheduleBook(clock=lambda: now[0])
+        book.select_map("456")
+        self.assertFalse(self.reply(book, "untracked", total=2))
+        self.query(book, "old")
+        now[0] = sch.PENDING_SECONDS + 1
+        self.assertFalse(self.reply(book, "old"))
+        self.query(book, "first")
+        self.query(book, "second")
+        self.assertTrue(self.reply(book, "second"))
+        self.assertFalse(self.reply(book, "first", total=2))
+        self.assertTrue(book.in_sync)
+
+    def test_a_late_broker_echo_cannot_rebind_an_already_completed_query(self):
+        book = self.make()
+        self.query(book, "own-a")
+        self.reply(book, "own-a", total=5, md5="floor-a")
+        book.select_map("456")
+        self.query(book, "own-a")  # Broker echo after the original reply/map switch.
+        self.assertFalse(self.reply(book, "own-a", total=5, md5="floor-a"))
+        self.assertIsNone(book.robot_total)
+
+    def test_unknown_map_cannot_inherit_a_summary_or_any_orders(self):
+        book = self.make()
+        book.select_map("0")
+        self.query(book, "unknown")
+        self.assertFalse(self.reply(book, "unknown"))
+        self.assertFalse(book.total_seen({"total": 5, "enable": 0}))
+        self.assertIsNone(book.robot_total)
+        self.assertIsNone(book.in_sync)
+        self.assertEqual(book.active_orders, {})
+
+    def test_legacy_storage_keeps_orders_without_assigning_its_global_checksum_to_a_map(self):
+        book = self.make()
+        data = {"orders": list(book.orders.values()), "robot_total": 0,
+                "robot_enabled": 0, "in_sync": False, "synced_md5": "old-global"}
+        restored = sch.ScheduleBook.from_dict(data)
+        restored.select_map("123")
+        self.assertIsNone(restored.in_sync)
+        self.assertEqual(len(restored.active_orders), 5)
+        restored.summary_seen({"total": 5, "enable": 0, "md5": "floor-a"})
+        self.assertTrue(restored.in_sync)
+
+    def test_map_summaries_and_changes_on_an_inactive_map_survive_restart(self):
+        book = self.make()
+        book.select_map("456")
+        book.summary_seen({"total": 0, "enable": 0, "md5": "b"})
+        book.apply_add(dict(book.orders[1], minute=30))  # A reply may arrive after switching to B.
+        restored = sch.ScheduleBook.from_dict(json.loads(json.dumps(book.to_dict())))
+        self.assertEqual(restored.map_id, "456")
+        self.assertTrue(restored.in_sync)
+        restored.select_map("123")
+        restored.summary_seen({"total": 5, "enable": 0, "md5": "a-after-seen-edit"})
+        self.assertTrue(restored.in_sync)
+        self.assertEqual(restored.orders[1]["minute"], 30)
+
+    def test_confirmed_app_delete_is_applied_to_its_original_map(self):
+        book = self.make()
+        book.command_seen({"method": sch.DEL_ORDER, "msgId": "delete-a", "params": {"id": 1}})
+        book.select_map("456")
+        self.assertTrue(book.reply_seen({"method": sch.DEL_ORDER, "msgId": "delete-a", "code": 0, "data": {"result": 0}}))
+        self.assertNotIn(1, book.orders)
+        self.assertIsNone(book.in_sync)
+
+    def test_a_pre_edit_query_cannot_replace_the_post_edit_checksum(self):
+        book = self.make()
+        self.query(book, "before-edit")
+        book.apply_add(dict(book.orders[1], minute=30))
+        self.assertFalse(self.reply(book, "before-edit", total=5, md5="floor-a"))
+        # Counts and visible in_sync stay the same, but the new baseline still
+        # needs saving so a subsequent unseen edit is detected after restart.
+        self.query(book, "after-edit")
+        self.assertTrue(self.reply(book, "after-edit", total=5, md5="edited-a"))
+        restored = sch.ScheduleBook.from_dict(json.loads(json.dumps(book.to_dict())))
+        restored.summary_seen({"total": 5, "enable": 0, "md5": "edited-without-ha"})
+        self.assertFalse(restored.in_sync)
+
+
 class PayloadTests(unittest.TestCase):
     def test_switching_off_and_on_matches_the_app(self):
         created, _, off, on, _, _ = adds()
@@ -252,14 +390,16 @@ class CoordinatorTests(unittest.TestCase):
         self.addCleanup(self._dt.stop)
 
     def make(self, base_rows, sent_code=0):
-        async def executor(func, *args):
-            return func(*args)
+        def executor(func, *args):
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(func(*args))
+            return future
         hass = SimpleNamespace(async_add_executor_job=executor, async_create_task=lambda c: c.close())
         c = self.module.DysonCoordinator(hass, "token", "serial", "RB05", SimpleNamespace(data={}))
         c._listeners = []
         self.sent = []
 
-        def send(method, params):
+        def send(method, params, **options):
             self.sent.append((method, deepcopy(params)))
             return sent_code
         c.mqtt = SimpleNamespace(
@@ -355,6 +495,69 @@ class CoordinatorTests(unittest.TestCase):
         with self.assertRaises(self.Error):
             asyncio.run(c.async_set_schedule_enabled(1, True))
         self.assertEqual(self.sent, [])
+
+    def test_foreign_unknown_and_switching_maps_refuse_all_schedule_writes(self):
+        for identity, switching in (("456", False), ("0", False), ("1", True)):
+            c = self.make([])
+            c.mqtt.maps_enabled = True
+            c.mqtt.map_switching = switching
+            c.mqtt.state = {"persistentMapId": identity}
+            c.schedules.apply_add(adds()[0])
+            for action in (lambda: c.async_set_schedule_enabled(1, False),
+                           lambda: c.async_set_schedule(1, start_time="11:30"),
+                           lambda: c.async_delete_schedule(1)):
+                with self.subTest(identity=identity, switching=switching), self.assertRaises(self.Error):
+                    asyncio.run(action())
+            self.assertEqual(self.sent, [])
+            self.assertEqual(c.schedules.orders[1], adds()[0])
+
+    def test_current_map_writes_work_and_other_maps_do_not_create_time_conflicts(self):
+        c = self.make(adds()[0]["room_preference"])
+        c.mqtt.maps_enabled = True
+        c.mqtt.map_switching = False
+        c.mqtt.state = {"persistentMapId": "1"}
+        c.schedules.apply_add(dict(adds()[0], id=10, map_id=456))
+        c.schedules.select_map("1")
+        # The same weekday/time on another floor must not block this floor.
+        asyncio.run(c.async_set_schedule(days=["sun"], start_time="10:00", room_ids=["12"]))
+        created = self.sent[-1][1]
+        self.assertEqual(created["map_id"], 1)
+        asyncio.run(c.async_set_schedule_enabled(created["id"], False))
+        asyncio.run(c.async_delete_schedule(created["id"]))
+        self.assertEqual(list(c.schedules.orders), [10])
+
+    def test_schedule_switches_and_sensor_follow_active_map_without_changing_enabled_state(self):
+        import test_entity_compat as compat
+        c = self.make([])
+        c.mqtt.maps_enabled = True
+        c.mqtt.map_switching = False
+        c.mqtt.state = {"persistentMapId": "1"}
+        c.schedules.apply_add(adds()[0])
+        seen = {}
+        def inspect(platform, entity):
+            if entity._attr_unique_id.endswith(("_schedule_1", "_schedules")):
+                entity._coordinator = c
+                seen[platform] = entity
+        compat.collect(str(compat.ROOT), schedules=c.schedules, inspect=inspect)
+        switch, sensor = seen["switch"], seen["sensor"]
+        for identity, expected in (("1", True), ("456", False), ("0", False), ("1", True)):
+            c.mqtt.state["persistentMapId"] = identity
+            c.schedules.select_map(identity)
+            self.assertEqual(switch.available, expected)
+            self.assertTrue(switch.is_on)
+            self.assertEqual(switch.extra_state_attributes["map_id"], "1")
+            self.assertEqual(sensor.extra_state_attributes["known"], int(expected))
+            self.assertEqual(sensor.extra_state_attributes["known_all_maps"], 1)
+            self.assertEqual(sensor.extra_state_attributes["map_id"], identity)
+            self.assertEqual(sensor.available, identity != "0")
+
+    def test_combined_map_and_schedule_telemetry_updates_map_before_counts(self):
+        seen = []
+        self.client.register_callback(lambda state: seen.append(("map", state.get("persistentMapId"))))
+        self.client.on_schedule_message = lambda kind, data: seen.append((kind, data))
+        self.client._handle_jdm({"method": "prop.post", "params": {
+            "current_map_id": 456, "order_total": {"total": 0, "enable": 0}}})
+        self.assertLess(seen.index(("map", "456")), seen.index(("total", {"total": 0, "enable": 0})))
 
 
 if __name__ == "__main__":

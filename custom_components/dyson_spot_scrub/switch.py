@@ -222,7 +222,9 @@ class DysonScheduleSwitch(SwitchEntity):
     @property
     def available(self) -> bool:
         mqtt = self._coordinator.mqtt
-        return self._order() is not None and bool(mqtt and mqtt.available)
+        order = self._order()
+        return (order is not None and bool(mqtt and mqtt.available)
+                and self._coordinator.schedule_on_current_map(order))
 
     @property
     def is_on(self) -> bool | None:
@@ -235,7 +237,7 @@ class DysonScheduleSwitch(SwitchEntity):
         if order is None:
             return {}
         info = self._coordinator.describe_schedule(order)
-        return {key: info[key] for key in ("schedule_id", "days", "time", "room_ids", "rooms")}
+        return {key: info[key] for key in ("schedule_id", "map_id", "days", "time", "room_ids", "rooms")}
 
     async def _async_set(self, enabled: bool) -> None:
         from .schedules import ScheduleError

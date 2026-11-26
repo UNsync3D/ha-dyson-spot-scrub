@@ -38,6 +38,7 @@ from .const import (DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATT
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
 from .schedules import ADD_ORDER, DEL_ORDER, GET_ORDER, ORDER_METHODS
+from .maps import map_catalogue, map_id as saved_map_id
 from .station_settings import (DND_FIELD, DND_KEYS, JDM_METHODS, STATE_FIELDS, current_setting,
                                setting_payloads, reported_properties)
 
@@ -385,15 +386,20 @@ def _actionable_faults(state: dict):
 
 
 def _only_stale_continue_faults(state: dict) -> bool:
-    """True when every actionable fault is USER_CONTINUE and the robot sits idle on the dock.
+    """Allow another request for retained USER_CONTINUE faults in confirmed idle states.
 
     A refused start leaves its fault behind until the next start clears it:
     the R2 capture of 8 Nov 2026 kept 22011 (clean water tank missing,
     USER_CONTINUE) while INACTIVE_CHARGING, and the app's next vacuum-only
     start ran normally and cleared it. If the cause is still there, the robot
-    refuses the new clean itself.
+    refuses the new clean itself. The Nov 26 stationless capture additionally
+    confirms 2510 (lifted) remains while INACTIVE_DISCHARGING; the app starts
+    again from that state and clears it. Handle placement codes 2509/2510
+    consistently in that idle state while preserving their warning.
+    Other off-dock faults and active/returning/paused states stay blocked.
     """
-    if has_freeze_fault(state) or state.get("state") not in IDLE_ON_DOCK_STATES:
+    off_dock = state.get("state") == "INACTIVE_DISCHARGING"
+    if has_freeze_fault(state) or (state.get("state") not in IDLE_ON_DOCK_STATES and not off_dock):
         return False
     if state.get("dockState") not in (None, "IDLE"):
         return False
@@ -409,6 +415,8 @@ def _only_stale_continue_faults(state: dict) -> bool:
             continue
         if _fault_code(f) in FAULT_CODE_INFORMATIONAL:
             continue
+        if off_dock and _fault_code(f) not in {2509, 2510}:
+            return False
         severities.append(severity)
     return bool(severities) and all(s == "USER_CONTINUE" for s in severities)
 
@@ -572,6 +580,14 @@ class DysonMqttClient:
         # Start calls run in HA's executor; MQTT replies arrive on paho's thread.
         self._start_lock = threading.Lock()
         self._preference_lock = threading.RLock()
+        self.maps_enabled = False
+        self.maps_known = False
+        self.maps: list[dict[str, str]] = []
+        self._map_requests: OrderedDict[str, int] = OrderedDict()
+        self._map_request_generation = 0
+        self._map_applied_generation = 0
+        self._map_switch_target: str | None = None
+        self._map_switch_ready = threading.Event()
         # Called (paho thread) when the robot reports a different current map.
         self.on_map_changed: Callable[[str], None] | None = None
         # Schedule traffic (#67): ("command" | "reply" | "total", payload),
@@ -796,7 +812,7 @@ class DysonMqttClient:
         return self._start_cleaning(mode)
 
     def _can_start_new_clean(self) -> bool:
-        reason = start_block_reason(self.state, self.available)
+        reason = "map_switching" if self.map_switching else start_block_reason(self.state, self.available)
         if reason:
             _LOGGER.warning("[%s] New cleaning start blocked: %s", self.serial, reason)
         return reason is None
@@ -1065,6 +1081,7 @@ class DysonMqttClient:
         key = self._map_key(map_id)
         removed: list[str] = []
         with self._preference_lock:
+            inventory_changed = self._map_inventory.get(key) != inventory
             self._map_inventory[key] = inventory
             stored = self._room_store.get(key, {})
             if inventory and stored and set(stored) & set(inventory):
@@ -1078,6 +1095,7 @@ class DysonMqttClient:
         if removed:
             _LOGGER.info("[%s] Rooms %s removed from map %s (no longer in map data)",
                          self.serial, removed, key)
+        if removed or inventory_changed:
             self._notify_state_change()
 
     def _track_preference_request(self, msg_id, map_id) -> None:
@@ -1094,10 +1112,19 @@ class DysonMqttClient:
     @property
     def room_names(self) -> list[str]:
         """Normalised display names of every known room on the current map."""
-        pref = self._cached_preference
-        if not (pref and pref.get("room")):
-            return []
-        return [_room_display_name(r[1]) for r in pref["room"]]
+        key = self._map_key()
+        pref = self._preference_view(key) or {}
+        rows = pref.get("room") or []
+        names = [_room_display_name(r[1]) for r in rows]
+        known_ids = {str(row[0]) for row in rows}
+        # Metadata can name a newly mapped room before its settings arrive.
+        # Create its entities now, without inventing a preference row/settings.
+        if self.maps_enabled:
+            with self._preference_lock:
+                inventory = dict(self._map_inventory.get(key) or {})
+            names.extend(_room_display_name(name) for rid, name in inventory.items()
+                         if rid not in known_ids and name.strip())
+        return list(dict.fromkeys(names))
 
     @property
     def room_preferences(self) -> list[list]:
@@ -1678,8 +1705,10 @@ class DysonMqttClient:
         if topic.endswith("/command/jdm"):
             # Our own and the Dyson app's requests: which map each
             # get_preference reply belongs to, and schedule changes (#67).
-            if data.get("method") in (ADD_ORDER, DEL_ORDER):
+            if data.get("method") in ORDER_METHODS:
                 self._schedule_message("command", data)
+            if data.get("method") == "service.get_map_list":
+                self._track_map_request(data.get("msgId"))
             if data.get("method") == "service.get_preference":
                 params = data.get("params") if isinstance(data.get("params"), dict) else {}
                 self._track_preference_request(data.get("msgId"), params.get("map_id"))
@@ -1692,27 +1721,51 @@ class DysonMqttClient:
 
     def _handle_jdm(self, data: dict) -> None:
         method = data.get("method")
+        if method == "service.get_map_list":
+            refresh_rooms = False
+            with self._preference_lock:
+                generation = self._map_requests.pop(str(data.get("msgId")), None)
+                maps = map_catalogue(data.get("data", {}).get("map_list")) if isinstance(data.get("data"), dict) else None
+                if (type(data.get("code")) is int and data["code"] == 0
+                        and generation is not None and generation > self._map_applied_generation
+                        and maps is not None):
+                    refresh_rooms = maps != self.maps or not self.room_preferences
+                    self.maps, self.maps_known = maps, True
+                    self._map_applied_generation = generation
+                    self._notify_state_change()
+            if refresh_rooms:
+                self._refresh_current_map_rooms()
+        elif (method in {"service.del_map", "service.rename_map", "service.rename_room"}
+              and data.get("code") == 0) or method in {
+                  "event.BuildMapFinish.post", "event.map_change.post"}:
+            self.request_maps()
+            if method in {"service.rename_room", "event.BuildMapFinish.post", "event.map_change.post"}:
+                self._refresh_current_map_rooms()
         if "code" in data:
             with self._reply_lock:
                 waiter = self._reply_waiters.get(str(data.get("msgId")))
             if waiter is not None:
                 waiter["code"] = data.get("code")
+                body = data.get("data")
+                waiter["result"] = body.get("result") if isinstance(body, dict) else None
                 waiter["event"].set()
 
         if method in ORDER_METHODS and "code" in data:
             self._schedule_message("reply", data)
-        elif method == "prop.post" and isinstance(data.get("params"), dict) \
-                and isinstance(data["params"].get("order_total"), dict):
-            self._schedule_message("total", data["params"]["order_total"])
-
         if method == "prop.post" and data.get("params"):
             self._merge_jdm_props(data["params"])
+            if isinstance(data["params"].get("order_total"), dict):
+                self._schedule_message("total", data["params"]["order_total"])
         elif method == "prop.get" and data.get("code") in (0, 1) and isinstance(data.get("data"), dict):
             # Dyson returns code 1 for partially supported property requests.
             updates = reported_properties(data["data"])
+            if type(data.get("code")) is int:
+                updates.update(self._reported_map_properties(data["data"]))
             if updates:
                 self.state = {**self.state, **updates}
                 self._notify_state_change()
+                if "persistentMapId" in updates:
+                    self._sync_reported_map()
         elif method == "prop.set" and data.get("code") != 0:
             _LOGGER.warning("[%s] Station property write rejected (code=%s)",
                             self.serial, data.get("code"))
@@ -1784,15 +1837,7 @@ class DysonMqttClient:
                 self._clear_drying_time()
             self._notify_state_change()
 
-            # Fetch rooms whenever the current map changes (and after
-            # reconnect), not just once per connection: a new map must not
-            # keep showing the previous map's rooms.
-            map_id = self.state.get("persistentMapId")
-            if map_id not in (None, "") and str(map_id) != self._prefs_map_id:
-                self._prefs_map_id = str(map_id)
-                self._fetch_room_preferences()
-                if self.on_map_changed:
-                    self.on_map_changed(str(map_id))
+            self._sync_reported_map()
 
         elif "faultCode" in data or "faultId" in data:
             _LOGGER.warning(
@@ -1848,6 +1893,7 @@ class DysonMqttClient:
 
     def _merge_jdm_props(self, props: dict) -> None:
         updates: dict = reported_properties(props)
+        updates.update(self._reported_map_properties(props))
         work_time = props.get("work_time")
         if isinstance(work_time, dict) and self.state.get("dockState") == "DRYING_MOP":
             total, remaining = work_time.get("total"), work_time.get("surplus")
@@ -1872,6 +1918,36 @@ class DysonMqttClient:
         if updates:
             self.state = {**self.state, **updates}
             self._notify_state_change()
+            if "persistentMapId" in updates:
+                self._sync_reported_map()
+
+    def _reported_map_properties(self, props: dict) -> dict:
+        """RB05 reports map changes here before the next legacy CURRENT-STATE."""
+        value = props.get("current_map_id")
+        if self._prefix == "RB05" and type(value) is int and 0 <= value <= 9007199254740991:
+            return {"persistentMapId": str(value)}
+        return {}
+
+    def _sync_reported_map(self) -> None:
+        """Use actual map telemetry from either protocol for the same refresh path."""
+        identity = self.state.get("persistentMapId")
+        if self._map_switch_target is not None and saved_map_id(identity) == self._map_switch_target:
+            self._map_switch_ready.set()
+        if identity not in (None, "") and str(identity) != self._prefs_map_id:
+            self._prefs_map_id = str(identity)
+            self._fetch_room_preferences()
+            self.request_maps()
+            if self.on_map_changed:
+                self.on_map_changed(str(identity))
+
+    def _refresh_current_map_rooms(self) -> None:
+        """Refresh room discovery after mapping/list changes without starting a clean."""
+        identity = saved_map_id(self.state.get("persistentMapId"))
+        if not self.maps_enabled or identity is None:
+            return
+        self._fetch_room_preferences()
+        if self.on_map_changed:
+            self.on_map_changed(identity)
 
     def _notify_state_change(self) -> None:
         for cb in list(self._state_callbacks):
@@ -1920,6 +1996,76 @@ class DysonMqttClient:
         # Always ask (unlike the probes): refreshes known rooms after reconnect.
         self._publish_jdm("service.get_preference", {"map_id": map_id_int})
 
+    # ── Saved-map selection (RB05 capture, 25/26 November 2026) ─────────────────
+
+    @property
+    def map_switching(self) -> bool:
+        return self._map_switch_target is not None
+
+    def _track_map_request(self, msg_id) -> None:
+        if msg_id is None:
+            return
+        with self._preference_lock:
+            key = str(msg_id)
+            if key not in self._map_requests:
+                self._map_request_generation += 1
+                self._map_requests[key] = self._map_request_generation
+                while len(self._map_requests) > _MAX_TRACKED_REQUESTS:
+                    self._map_requests.popitem(last=False)
+
+    def request_maps(self) -> bool:
+        """Refresh the full list, including changes made by another app."""
+        if not self.maps_enabled or self._prefix != "RB05" or not self.available:
+            return False
+        msg_id = _rand_msg_id()
+        self._track_map_request(msg_id)
+        return self._publish_raw(self._jdm_command_topic, {
+            "msgId": msg_id, "version": "1.0.1", "method": "service.get_map_list",
+            "params": {}, "time": _now_iso(),
+        })
+
+    def select_map(self, identity, timeout: float = 15.0) -> bool:
+        """Select one known map and wait for both acknowledgement and telemetry.
+
+        Runs in HA's executor. No optimistic state, retries or cleaning commands.
+        The existing start lock prevents a clean from racing the map transition.
+        """
+        identity = saved_map_id(identity)
+        if (identity is None or self._prefix != "RB05" or not self.maps_enabled
+                or not self._start_lock.acquire(blocking=False)):
+            return False
+        try:
+            with self._room_edit_lock:
+                with self._preference_lock:
+                    if (not self.maps_known or not any(item["map_id"] == identity for item in self.maps)
+                            or start_block_reason(self.state, self.available)):
+                        return False
+                    if saved_map_id(self.state.get("persistentMapId")) == identity:
+                        return True
+                    self._map_switch_ready.clear()
+                    self._map_switch_target = identity
+                self._notify_state_change()
+                msg_id = _rand_msg_id()
+                waiter = self._expect_reply(msg_id)
+                if not self._publish_raw(self._jdm_command_topic, {
+                    "msgId": msg_id, "version": "1.0.1", "method": "service.set_cur_map",
+                    "params": {"map_id": int(identity)}, "time": _now_iso(),
+                }):
+                    self._await_reply(msg_id, waiter, 0)
+                    return False
+                code = self._await_reply(msg_id, waiter, timeout)
+                if (type(code) is not int or code != 0
+                        or type(waiter.get("result")) is not int or waiter["result"] != 0):
+                    return False
+                self.request_current_state()
+                confirmed = self._map_switch_ready.wait(timeout)
+                self.request_maps()
+                return confirmed and saved_map_id(self.state.get("persistentMapId")) == identity
+        finally:
+            self._map_switch_target = None
+            self._start_lock.release()
+            self._notify_state_change()
+
     # ── Internal publish ──────────────────────────────────────────────────────
 
     def _schedule_message(self, kind: str, data: dict) -> None:
@@ -1940,12 +2086,27 @@ class DysonMqttClient:
         return self._publish_jdm(GET_ORDER, {})
 
     def send_order_command(self, method: str, params: dict,
-                           timeout: float = _SETTINGS_CONFIRM_TIMEOUT * 2):
+                           timeout: float = _SETTINGS_CONFIRM_TIMEOUT * 2,
+                           *, expected_map_id: str | None = None):
         """Send add_order / del_order and wait for the robot: its code, or None.
 
         Called from an executor. Never retried: a lost reply may still mean
         the robot saved it, and a retry with a new ID would make a duplicate.
         """
+        if not self.maps_enabled:
+            return self._send_order_command(method, params, timeout)
+        if not self._start_lock.acquire(blocking=False):
+            return None
+        try:
+            identity = saved_map_id(self.state.get("persistentMapId"))
+            target = saved_map_id(params.get("map_id")) if method == ADD_ORDER else saved_map_id(expected_map_id)
+            if identity is None or identity != target or self.map_switching:
+                return None
+            return self._send_order_command(method, params, timeout)
+        finally:
+            self._start_lock.release()
+
+    def _send_order_command(self, method: str, params: dict, timeout: float):
         if method not in (ADD_ORDER, DEL_ORDER):
             raise ValueError(f"Not a schedule command: {method}")
         if not self.available:
@@ -1993,6 +2154,8 @@ class DysonMqttClient:
 
     def _publish_raw(self, topic: str, payload: dict) -> bool:
         """Publish a JSON payload; returns True if paho accepted the message."""
+        if payload.get("method") == GET_ORDER:
+            self._schedule_message("command", payload)
         if payload.get("method") == "service.get_preference":
             params = payload.get("params") or {}
             self._track_preference_request(payload.get("msgId"), params.get("map_id"))

@@ -27,6 +27,7 @@ from .dyson_api import (
 from .dyson_mqtt import DysonMqttClient, is_any_cleaning, start_block_reason
 from .room_locator import dock_room, latest_position, locate, room_outlines
 from .room_types import translate_room
+from .maps import map_id as saved_map_id
 from .schedules import (
     ADD_ORDER, DEL_ORDER, ScheduleBook, ScheduleError, days_to_mask, describe_order, new_order_id,
     ordered_params, parse_time, room_plan, time_conflict, toggled, uv_plan, validate_order,
@@ -52,6 +53,7 @@ _OUTLINE_RETRY_SECONDS = 600.0
 # Schedules (#67): ask for the robot's summary this often, and after a change.
 _SCHEDULE_POLL_SECONDS = 1800.0
 _SCHEDULE_STORAGE_VERSION = 1
+_MAP_POLL_SECONDS = 60.0
 
 
 def _docked(state: dict) -> bool:
@@ -141,6 +143,7 @@ class DysonCoordinator:
         self.schedules = ScheduleBook()
         self._schedule_store = None
         self._schedule_poll_unsub = None
+        self._map_poll_unsub = None
         self._schedule_lock = asyncio.Lock()
         self._dock_room_id: str | None = None
         # Leaving the dock (FutuRazor's idea, #53): until the robot reports a
@@ -200,6 +203,7 @@ class DysonCoordinator:
         new_client.on_prefix_changed = self._on_mqtt_prefix_changed
         new_client.on_map_changed    = self._on_mqtt_map_changed
         new_client.on_schedule_message = self._on_schedule_message
+        new_client.maps_enabled = self._map_poll_unsub is not None
         new_client.register_callback(self._on_state_change)
         # Carry a GONE-AWAY over a reconnect: a new broker connection doesn't
         # mean the robot came back.
@@ -232,6 +236,9 @@ class DysonCoordinator:
 
     async def async_shutdown(self) -> None:
         self._shutting_down = True
+        if self._map_poll_unsub:
+            self._map_poll_unsub()
+            self._map_poll_unsub = None
         if self._schedule_poll_unsub:
             self._schedule_poll_unsub()
             self._schedule_poll_unsub = None
@@ -404,6 +411,43 @@ class DysonCoordinator:
     def _on_mqtt_connected(self) -> None:
         self.hass.loop.call_soon_threadsafe(self._async_update_rooms_and_notify)
         self.hass.loop.call_soon_threadsafe(self._async_request_schedule_summary)
+        self.hass.loop.call_soon_threadsafe(self._async_request_maps)
+
+    async def async_setup_maps(self) -> None:
+        """Keep the saved-map select current even without an open app or camera."""
+        if self._map_poll_unsub is not None:
+            return
+        from datetime import timedelta
+        from homeassistant.helpers.event import async_track_time_interval
+
+        async def poll(_now) -> None:
+            self._async_request_maps()
+
+        self._map_poll_unsub = async_track_time_interval(
+            self.hass, poll, timedelta(seconds=_MAP_POLL_SECONDS))
+        self._async_request_maps()
+
+    @callback
+    def _async_request_maps(self) -> None:
+        if self._shutting_down or self._map_poll_unsub is None or self.mqtt is None:
+            return
+        self.mqtt.maps_enabled = True
+        if self._async_update_schedule_map():
+            self._async_schedules_changed()
+            self._async_request_schedule_summary()
+        self.mqtt.request_maps()
+
+    async def async_select_map(self, identity: str) -> None:
+        """Expose only saved-map selection; creation/editing stays in MyDyson."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        mqtt = self.mqtt
+        if self._shutting_down or mqtt is None or self.sequence_running:
+            raise HomeAssistantError("Map switching is unavailable while a cleaning request is active")
+        confirmed = await self.hass.async_add_executor_job(mqtt.select_map, identity)
+        if not confirmed:
+            raise HomeAssistantError(
+                "Map switch was not confirmed. Check the selected map before trying again.")
 
     def _on_mqtt_map_changed(self, map_id: str) -> None:
         """paho thread → refresh the room inventory for the (new) current map."""
@@ -482,6 +526,9 @@ class DysonCoordinator:
     def _async_apply_state(self, snapshot: dict) -> None:
         """Store the state snapshot then notify listeners (runs on HA event loop)."""
         self._state_snapshot = snapshot
+        if self._async_update_schedule_map():
+            self._async_schedules_changed()
+            self._async_request_schedule_summary()
         self._async_update_rooms_and_notify()
 
     @callback
@@ -618,6 +665,24 @@ class DysonCoordinator:
 
     # ── Cleaning schedules (#67) ──────────────────────────────────────────────
 
+    def _async_update_schedule_map(self) -> bool:
+        """Select the event-loop snapshot's map, never a newer paho-thread value."""
+        if self.mqtt is None or not getattr(self.mqtt, "maps_enabled", False):
+            return False
+        return self.schedules.select_map(saved_map_id(self.state.get("persistentMapId")) or "0")
+
+    def schedule_on_current_map(self, order: dict) -> bool:
+        mqtt = self.mqtt
+        if mqtt is None or not getattr(mqtt, "maps_enabled", False):
+            return True  # Models without saved-map selection keep their behavior.
+        identity = saved_map_id(mqtt.state.get("persistentMapId"))
+        return (identity is not None and identity == saved_map_id(order.get("map_id"))
+                and not mqtt.map_switching)
+
+    def _require_schedule_map(self, order: dict) -> None:
+        if not self.schedule_on_current_map(order):
+            raise ScheduleError("Select this schedule's map before changing it")
+
     async def async_setup_schedules(self) -> None:
         """Load Home Assistant's copy of the robot's schedules and start the summary poll."""
         from datetime import timedelta
@@ -658,8 +723,10 @@ class DysonCoordinator:
             _LOGGER.warning(
                 "[%s] The robot has %s schedule(s); Home Assistant knows %d. Open and "
                 "save any missing schedule once in the MyDyson app so Home Assistant "
-                "can learn it", self.serial, book.robot_total, len(book.orders))
+                "can learn it", self.serial, book.robot_total, len(book.active_orders))
         self._async_schedules_changed()
+        if kind == "reply" and data.get("method") in (ADD_ORDER, DEL_ORDER):
+            self._async_request_schedule_summary()
 
     @callback
     def _async_schedules_changed(self) -> None:
@@ -671,6 +738,8 @@ class DysonCoordinator:
     def _async_request_schedule_summary(self) -> None:
         mqtt = self.mqtt
         if mqtt is None or self._shutting_down or not hasattr(mqtt, "request_order_summary"):
+            return
+        if getattr(mqtt, "maps_enabled", False) and self.schedules.map_id == "0":
             return
         self.hass.async_add_executor_job(mqtt.request_order_summary)
 
@@ -694,11 +763,19 @@ class DysonCoordinator:
             raise ScheduleError("The Dyson vacuum is disconnected")
         if not getattr(mqtt, "supports_schedule_writes", False):
             raise ScheduleError("Changing schedules isn't confirmed on this robot model yet")
+        if getattr(mqtt, "map_switching", False):
+            raise ScheduleError("Wait for the map switch before changing schedules")
         return mqtt
 
     async def _async_send_order(self, method: str, params: dict) -> None:
         mqtt = self._schedule_writer()
-        code = await self.hass.async_add_executor_job(mqtt.send_order_command, method, params)
+        send = mqtt.send_order_command
+        if getattr(mqtt, "maps_enabled", False):
+            from functools import partial
+            order = params if method == ADD_ORDER else self.schedules.orders.get(params["id"], {})
+            self._require_schedule_map(order)
+            send = partial(send, expected_map_id=saved_map_id(order.get("map_id")))
+        code = await self.hass.async_add_executor_job(send, method, params)
         if code != 0:
             raise ScheduleError(
                 "The robot didn't confirm the schedule change" if code is None
@@ -716,7 +793,8 @@ class DysonCoordinator:
             order = self.schedules.orders.get(schedule_id)
             if order is None:
                 raise ScheduleError(f"Unknown schedule: {schedule_id}")
-            if enabled and time_conflict(self.schedules.orders.values(), order["day"],
+            self._require_schedule_map(order)
+            if enabled and time_conflict(self.schedules.active_orders.values(), order["day"],
                                          order["hour"], order["minute"], schedule_id):
                 raise ScheduleError("Another schedule that is on starts at the same time on one of its days")
             params = toggled(order, enabled)
@@ -742,6 +820,7 @@ class DysonCoordinator:
                 existing = self.schedules.orders.get(schedule_id)
                 if existing is None:
                     raise ScheduleError(f"Unknown schedule: {schedule_id}")
+                self._require_schedule_map(existing)
             elif not days or start_time is None or not room_ids:
                 raise ScheduleError("A new schedule needs days, a time and rooms")
             try:
@@ -750,6 +829,7 @@ class DysonCoordinator:
                                 else (existing["hour"], existing["minute"]))
                 if existing is None:
                     map_id, rows, uv_rows = mqtt.schedule_base()
+                    self._require_schedule_map({"map_id": map_id})
                     if map_id is None or not rows:
                         raise ScheduleError("The robot's rooms aren't known yet")
                     chosen = room_ids
@@ -764,7 +844,7 @@ class DysonCoordinator:
             enable = (1 if enabled else 0) if enabled is not None else (
                 existing["enable"] if existing else 1)
             order_id = existing["id"] if existing else new_order_id(self.schedules.orders)
-            if enable and time_conflict(self.schedules.orders.values(), day, hour, minute, order_id):
+            if enable and time_conflict(self.schedules.active_orders.values(), day, hour, minute, order_id):
                 raise ScheduleError("Another schedule that is on starts at the same time on one of these days")
             offset = dt_util.now().utcoffset()
             order = dict(existing or {})
@@ -790,6 +870,7 @@ class DysonCoordinator:
         async with self._schedule_lock:
             if schedule_id not in self.schedules.orders:
                 raise ScheduleError(f"Unknown schedule: {schedule_id}")
+            self._require_schedule_map(self.schedules.orders[schedule_id])
             await self._async_send_order(DEL_ORDER, {"id": schedule_id})
 
     # ── Sequential multi-room cleaning ────────────────────────────────────────
@@ -864,9 +945,13 @@ class DysonCoordinator:
 
         The fallback lets per-room entities be created at startup before MQTT
         connects (e.g. while the robot is drying or briefly offline).
+        With saved-map selection enabled, an empty active map never borrows
+        the global cache of room names from another floor.
         """
-        if self.mqtt and self.mqtt.room_names:
-            return self.mqtt.room_names
+        if self.mqtt:
+            rooms = self.mqtt.room_names
+            if rooms or getattr(self.mqtt, "maps_enabled", False):
+                return rooms
         return self.cached_room_names
 
     async def async_clean_rooms_sequential(

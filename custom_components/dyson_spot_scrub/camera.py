@@ -546,8 +546,11 @@ class DysonMapCamera(Camera):
         try:
             _LOGGER.debug("[%s] Refreshing persistent map data", self._serial)
             session = self._coordinator.http_session
-            current_map_id, map_data = await get_current_map(self._token, self._serial,
-                                                             session=session)
+            options = {"session": session}
+            mqtt = self._coordinator.mqtt
+            if getattr(mqtt, "maps_enabled", False):
+                options["expected_map_id"] = str(mqtt.state.get("persistentMapId") or "0")
+            current_map_id, map_data = await get_current_map(self._token, self._serial, **options)
             metadata    = await get_map_metadata(self._token, self._serial, session=session)
             self._observe_cleaning_state()
             if generation != self._cleaning_generation:

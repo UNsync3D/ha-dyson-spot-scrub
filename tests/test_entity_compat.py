@@ -28,7 +28,7 @@ _spec.loader.exec_module(_schedules)
 SNAPSHOT = Path(__file__).resolve().parent / "fixtures/entity_registry_snapshot.json"
 
 
-def collect(root, room_labels=None, schedules=None):
+def collect(root, room_labels=None, schedules=None, inspect=None):
     stubs = {}
     def mod(name, **kw):
         m = types.ModuleType(name); m.__dict__.update(kw); stubs[name] = m; return m
@@ -78,6 +78,8 @@ def collect(root, room_labels=None, schedules=None):
             ents = []
             asyncio.run(m.async_setup_entry(hass, entry, ents.extend))
             for e in ents:
+                if inspect:
+                    inspect(platform, e)
                 di = {k: sorted(map(list, v)) if isinstance(v, set) else v for k, v in e._attr_device_info.items()}
                 out.append([platform, type(e).__name__, e._attr_unique_id, di])
                 NAMES[e._attr_unique_id] = display_name(platform, e)
