@@ -664,19 +664,25 @@ async def get_clean_estimation(
 
 async def get_current_map(
     token: str, serial: str, *, session: aiohttp.ClientSession | None = None,
+    expected_map_id: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Convenience: fetch the active map, returning (map_id, map_data).
 
-    Calls get_map_metadata to find the map with isCurrentMap=True, then
-    fetches the full map. Raises DysonApiError if no current map is found.
+    Use an explicitly reported map ID when supplied; otherwise require one
+    isCurrentMap=True entry. Never substitute an unrelated saved floor.
     """
     maps = await get_map_metadata(token, serial, session=session)
-    current = next((m for m in maps if m.get("isCurrentMap")), None)
-    if current is None:
-        if maps:
-            current = maps[0]
-        else:
-            raise DysonApiError("No maps found for device")
+    if expected_map_id is not None:
+        identity = str(expected_map_id)
+        current_maps = [m for m in maps if isinstance(m, dict) and identity not in ("", "0")
+                        and str(m.get("id")) == identity]
+    else:
+        current_maps = [m for m in maps if isinstance(m, dict) and m.get("isCurrentMap") is True]
+    if len(current_maps) != 1:
+        # While navigating off-map, RB05 can report ID 0 and no selected map.
+        # Showing the first saved map then displays an unrelated floor.
+        raise DysonApiError("No unambiguous active map found for device")
+    current = current_maps[0]
     map_id = str(current["id"])
     map_data = await get_map(token, serial, map_id, session=session)
     return map_id, map_data

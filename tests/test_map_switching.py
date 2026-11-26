@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 import importlib
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -17,6 +18,7 @@ values = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(values)
 MAPS = [{"id": 123, "name": "Wohnung", "cur": True},
         {"id": 456, "name": "Dachboden", "cur": False}]
+CAPTURE = json.loads((Path(__file__).parent / "fixtures/map-switching-nov26.json").read_text(encoding="utf-8"))
 
 
 class CatalogueTests(unittest.TestCase):
@@ -47,6 +49,7 @@ class MapSwitchTests(unittest.TestCase):
         self.result = 0
         self.confirm = True
         self.clean_race = None
+        self.telemetry_hook = None
         self.feed_list(MAPS)
         self.sent.clear()
 
@@ -59,6 +62,8 @@ class MapSwitchTests(unittest.TestCase):
                 self.client._handle_jdm({"method": "service.set_cur_map",
                     "msgId": payload["msgId"], "code": self.ack,
                     "data": {"result": self.result}})
+            if self.telemetry_hook:
+                self.telemetry_hook(payload)
             if self.confirm:
                 self.client._handle_status({"msg": "CURRENT-STATE",
                     "persistentMapId": str(payload["params"]["map_id"])})
@@ -94,6 +99,44 @@ class MapSwitchTests(unittest.TestCase):
         self.client._handle_status({"msg": "CURRENT-STATE", "persistentMapId": "456"})
         self.assertEqual(self.client.state["persistentMapId"], "456")
         self.assertEqual(sum(p.get("method") == "service.set_cur_map" for _, p in self.sent), 1)
+
+    def test_live_capture_confirms_from_jdm_before_delayed_legacy_state(self):
+        messages = {item["line"]: item["message"] for item in CAPTURE["switch"]}
+        self.client.state = {**self.client.state, **messages[125]}
+        self.feed_list([{"id":1784483068,"name":"Wohnung","cur":False},
+                        {"id":1795654677,"name":"Karte1","cur":True}])
+        changed=[]
+        self.client.on_map_changed=changed.append
+        self.confirm=False
+        def report(_payload):
+            # The first reply to REQUEST-CURRENT-STATE still contains the old map.
+            self.client._handle_jdm(messages[124])
+            self.client._handle_status(messages[125])
+            # This real property report arrives ~0.75 s after the request.
+            self.client._handle_jdm(messages[126])
+        self.telemetry_hook=report
+        self.assertTrue(self.client.select_map("1784483068",timeout=0.01))
+        self.assertEqual(self.client.state["persistentMapId"],"1784483068")
+        self.assertEqual(changed[-1],"1784483068")
+        count=changed.count("1784483068")
+        self.client._handle_status(messages[148])
+        self.assertEqual(changed.count("1784483068"),count)
+
+    def test_map_property_validation_and_zero_do_not_choose_a_saved_map(self):
+        for invalid in [True,False,-1,1.5,"456",None,9007199254740992]:
+            self.client._handle_jdm({"method":"prop.post","params":{"current_map_id":invalid}})
+            self.assertEqual(self.client.state["persistentMapId"],"123")
+        zero=next(item["message"] for item in CAPTURE["return"] if item["line"]==611)
+        self.client._handle_jdm(zero)
+        self.assertEqual(self.client.state["persistentMapId"],"0")
+        self.assertNotIn("0",[item["map_id"] for item in self.client.maps])
+
+    def test_partial_property_get_updates_map_but_failed_get_does_not(self):
+        self.client._handle_jdm({"method":"prop.get","code":2,"data":{"current_map_id":456}})
+        self.assertEqual(self.client.state["persistentMapId"],"123")
+        self.client._handle_jdm({"method":"prop.get","code":1,"data":{"current_map_id":456}})
+        self.assertEqual(self.client.state["persistentMapId"],"456")
+        self.assertEqual(self.client._prefs_map_id,"456")
 
     def test_reply_rejection_missing_reply_and_failure_result(self):
         self.confirm = False

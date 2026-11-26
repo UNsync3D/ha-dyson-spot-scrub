@@ -1737,9 +1737,13 @@ class DysonMqttClient:
         elif method == "prop.get" and data.get("code") in (0, 1) and isinstance(data.get("data"), dict):
             # Dyson returns code 1 for partially supported property requests.
             updates = reported_properties(data["data"])
+            if type(data.get("code")) is int:
+                updates.update(self._reported_map_properties(data["data"]))
             if updates:
                 self.state = {**self.state, **updates}
                 self._notify_state_change()
+                if "persistentMapId" in updates:
+                    self._sync_reported_map()
         elif method == "prop.set" and data.get("code") != 0:
             _LOGGER.warning("[%s] Station property write rejected (code=%s)",
                             self.serial, data.get("code"))
@@ -1807,23 +1811,11 @@ class DysonMqttClient:
                 if mop is not None:
                     self.has_mop = mop
             self.state = {**self.state, **data}
-            if ("persistentMapId" in data and self._map_switch_target is not None
-                    and saved_map_id(data["persistentMapId"]) == self._map_switch_target):
-                self._map_switch_ready.set()
             if "dockState" in data and data["dockState"] != "DRYING_MOP":
                 self._clear_drying_time()
             self._notify_state_change()
 
-            # Fetch rooms whenever the current map changes (and after
-            # reconnect), not just once per connection: a new map must not
-            # keep showing the previous map's rooms.
-            map_id = self.state.get("persistentMapId")
-            if map_id not in (None, "") and str(map_id) != self._prefs_map_id:
-                self._prefs_map_id = str(map_id)
-                self._fetch_room_preferences()
-                self.request_maps()
-                if self.on_map_changed:
-                    self.on_map_changed(str(map_id))
+            self._sync_reported_map()
 
         elif "faultCode" in data or "faultId" in data:
             _LOGGER.warning(
@@ -1879,6 +1871,7 @@ class DysonMqttClient:
 
     def _merge_jdm_props(self, props: dict) -> None:
         updates: dict = reported_properties(props)
+        updates.update(self._reported_map_properties(props))
         work_time = props.get("work_time")
         if isinstance(work_time, dict) and self.state.get("dockState") == "DRYING_MOP":
             total, remaining = work_time.get("total"), work_time.get("surplus")
@@ -1903,6 +1896,27 @@ class DysonMqttClient:
         if updates:
             self.state = {**self.state, **updates}
             self._notify_state_change()
+            if "persistentMapId" in updates:
+                self._sync_reported_map()
+
+    def _reported_map_properties(self, props: dict) -> dict:
+        """RB05 reports map changes here before the next legacy CURRENT-STATE."""
+        value = props.get("current_map_id")
+        if self._prefix == "RB05" and type(value) is int and 0 <= value <= 9007199254740991:
+            return {"persistentMapId": str(value)}
+        return {}
+
+    def _sync_reported_map(self) -> None:
+        """Use actual map telemetry from either protocol for the same refresh path."""
+        identity = self.state.get("persistentMapId")
+        if self._map_switch_target is not None and saved_map_id(identity) == self._map_switch_target:
+            self._map_switch_ready.set()
+        if identity not in (None, "") and str(identity) != self._prefs_map_id:
+            self._prefs_map_id = str(identity)
+            self._fetch_room_preferences()
+            self.request_maps()
+            if self.on_map_changed:
+                self.on_map_changed(str(identity))
 
     def _notify_state_change(self) -> None:
         for cb in list(self._state_callbacks):

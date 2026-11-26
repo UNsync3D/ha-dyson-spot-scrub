@@ -1,0 +1,141 @@
+{
+  "source": "home-assistant_dyson_spot_scrub_2026-11-26T01-46-41.347Z.log",
+  "switch": [
+    {
+      "line": 119,
+      "received": "2026-11-26 02:37:49.458+01:00",
+      "message": {
+        "msgId": "1091580764",
+        "version": "1.0.1",
+        "method": "service.set_cur_map",
+        "params": {
+          "map_id": 1784483068
+        },
+        "time": "2026-11-26T01:37:49Z"
+      }
+    },
+    {
+      "line": 120,
+      "received": "2026-11-26 02:37:49.659+01:00",
+      "message": {
+        "msgId": "1091580764",
+        "code": 0,
+        "method": "service.set_cur_map",
+        "data": {
+          "result": 0
+        }
+      }
+    },
+    {
+      "line": 124,
+      "received": "2026-11-26 02:37:49.883+01:00",
+      "message": {
+        "msgId": "810458727",
+        "code": 1,
+        "method": "prop.get",
+        "data": {
+          "current_map_id": 1795654677
+        }
+      }
+    },
+    {
+      "line": 125,
+      "received": "2026-11-26 02:37:49.980+01:00",
+      "message": {
+        "msg": "CURRENT-STATE",
+        "time": "2026-11-26T01:37:49.9540737Z",
+        "state": "INACTIVE_CHARGING",
+        "persistentMapId": "1795654677",
+        "dockState": "IDLE"
+      }
+    },
+    {
+      "line": 126,
+      "received": "2026-11-26 02:37:50.204+01:00",
+      "message": {
+        "msgId": "198155",
+        "method": "prop.post",
+        "params": {
+          "current_map_id": 1784483068
+        }
+      }
+    },
+    {
+      "line": 148,
+      "received": "2026-11-26 02:38:09.660+01:00",
+      "message": {
+        "msg": "CURRENT-STATE",
+        "time": "2026-11-26T01:38:09.6345668Z",
+        "state": "INACTIVE_CHARGING",
+        "persistentMapId": "1784483068",
+        "dockState": "IDLE"
+      }
+    }
+  ],
+  "return": [
+    {
+      "line": 597,
+      "received": "2026-11-26 02:42:44.771+01:00",
+      "message": {
+        "msg": "ABORT",
+        "mode-reason": "RAPP",
+        "time": "2026-11-26T01:42:44Z"
+      }
+    },
+    {
+      "line": 598,
+      "received": "2026-11-26 02:42:44.847+01:00",
+      "message": {
+        "msgId": "2642488600",
+        "version": "1.0.1",
+        "method": "service.start_recharge",
+        "params": {}
+      }
+    },
+    {
+      "line": 611,
+      "received": "2026-11-26 02:42:55.428+01:00",
+      "message": {
+        "msgId": "334509",
+        "method": "prop.post",
+        "params": {
+          "current_map_id": 0
+        }
+      }
+    },
+    {
+      "line": 621,
+      "received": "2026-11-26 02:42:59.774+01:00",
+      "message": {
+        "msgId": "2809438683",
+        "code": 0,
+        "method": "service.get_map_list",
+        "data": {
+          "map_list": [
+            {
+              "name": "Wohnung",
+              "id": 1784483068,
+              "cur": false
+            },
+            {
+              "name": "Karte1",
+              "id": 1795654677,
+              "cur": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "line": 642,
+      "received": "2026-11-26 02:43:06.773+01:00",
+      "message": {
+        "msg": "CURRENT-STATE",
+        "time": "2026-11-26T01:43:06.7464002Z",
+        "state": "ABORTED",
+        "persistentMapId": "0",
+        "dockState": "IDLE"
+      }
+    }
+  ]
+}
