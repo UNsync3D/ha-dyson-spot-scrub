@@ -1687,7 +1687,7 @@ class DysonMqttClient:
         if topic.endswith("/command/jdm"):
             # Our own and the Dyson app's requests: which map each
             # get_preference reply belongs to, and schedule changes (#67).
-            if data.get("method") in (ADD_ORDER, DEL_ORDER):
+            if data.get("method") in ORDER_METHODS:
                 self._schedule_message("command", data)
             if data.get("method") == "service.get_map_list":
                 self._track_map_request(data.get("msgId"))
@@ -1728,12 +1728,10 @@ class DysonMqttClient:
 
         if method in ORDER_METHODS and "code" in data:
             self._schedule_message("reply", data)
-        elif method == "prop.post" and isinstance(data.get("params"), dict) \
-                and isinstance(data["params"].get("order_total"), dict):
-            self._schedule_message("total", data["params"]["order_total"])
-
         if method == "prop.post" and data.get("params"):
             self._merge_jdm_props(data["params"])
+            if isinstance(data["params"].get("order_total"), dict):
+                self._schedule_message("total", data["params"]["order_total"])
         elif method == "prop.get" and data.get("code") in (0, 1) and isinstance(data.get("data"), dict):
             # Dyson returns code 1 for partially supported property requests.
             updates = reported_properties(data["data"])
@@ -2055,12 +2053,27 @@ class DysonMqttClient:
         return self._publish_jdm(GET_ORDER, {})
 
     def send_order_command(self, method: str, params: dict,
-                           timeout: float = _SETTINGS_CONFIRM_TIMEOUT * 2):
+                           timeout: float = _SETTINGS_CONFIRM_TIMEOUT * 2,
+                           *, expected_map_id: str | None = None):
         """Send add_order / del_order and wait for the robot: its code, or None.
 
         Called from an executor. Never retried: a lost reply may still mean
         the robot saved it, and a retry with a new ID would make a duplicate.
         """
+        if not self.maps_enabled:
+            return self._send_order_command(method, params, timeout)
+        if not self._start_lock.acquire(blocking=False):
+            return None
+        try:
+            identity = saved_map_id(self.state.get("persistentMapId"))
+            target = saved_map_id(params.get("map_id")) if method == ADD_ORDER else saved_map_id(expected_map_id)
+            if identity is None or identity != target or self.map_switching:
+                return None
+            return self._send_order_command(method, params, timeout)
+        finally:
+            self._start_lock.release()
+
+    def _send_order_command(self, method: str, params: dict, timeout: float):
         if method not in (ADD_ORDER, DEL_ORDER):
             raise ValueError(f"Not a schedule command: {method}")
         if not self.available:
@@ -2108,6 +2121,8 @@ class DysonMqttClient:
 
     def _publish_raw(self, topic: str, payload: dict) -> bool:
         """Publish a JSON payload; returns True if paho accepted the message."""
+        if payload.get("method") == GET_ORDER:
+            self._schedule_message("command", payload)
         if payload.get("method") == "service.get_preference":
             params = payload.get("params") or {}
             self._track_preference_request(payload.get("msgId"), params.get("map_id"))

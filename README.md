@@ -161,7 +161,9 @@ Schedules made in the MyDyson app are saved on the robot, and it starts them its
 
 The **Schedules** sensor's `schedules` attribute lists each known schedule: `schedule_id`, `enabled`, `days` (`mon` to `sun`), `time`, `room_ids` and `rooms` in the order they're cleaned, and `room_settings`: each of those rooms' settings in this schedule, keyed by room ID, with the same labels `set_schedule` takes. Each schedule keeps its own room settings, separate from the rooms' settings in Home Assistant and the app.
 
-The calendar shows each clean as an hour long, since the robot doesn't say how long a clean will take. Like the app, Home Assistant won't save two schedules that are on and start at the same time on the same day.
+On this map-switching development branch, the Schedules sensor and calendar follow the selected map. Counts and synchronization checks are maintained per map, while orders for other maps remain stored. The sensor exposes the active `map_id` and `known_all_maps`; individual schedule switches also expose `map_id` and become unavailable on another map without changing their stored on/off state. Select a schedule's map before creating or changing it. See [map selection and schedules](docs/MAP_SWITCHING.md#schedules-on-multiple-maps).
+
+The calendar shows each clean as an hour long, since the robot doesn't say how long a clean will take. Like the app, Home Assistant won't save two schedules that are on and start at the same time on the same day within the selected map.
 
 Creating, changing and deleting are captured from the app on the Spot+Scrub AI only. On the R1 and R2 Nurovi, schedules are shown but can't be changed from Home Assistant yet: a debug log of the app saving a schedule would let us add them ([#67](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/67)).
 

@@ -25,6 +25,22 @@ The camera also binds static-map fetches to the reported identity when map selec
 
 The command and list shapes come from RB05 app captures on 25/26 November 2026. The same native room ID can occur on different maps, so room ID alone is not map identity. Deleting selected B in MyDyson was observed to select remaining A automatically; the refreshed list then contains only A.
 
+## Schedules on multiple maps
+
+The 26 November capture shows five schedules on A and zero on B. The robot's `order_total` / `get_order` summary describes the selected map. Comparing that summary with every schedule retained for the robot incorrectly marked empty B as out of sync.
+
+With saved-map selection enabled, Home Assistant now retains all known orders but keeps counts, enabled counts, synchronization status and checksum baselines separately for each map. The Schedules sensor and calendar show the reported active map's entries. Sensor attributes `map_id`, `known`, `on`, `unknown` and `in_sync` describe that map; `known_all_maps` counts all retained orders. Each schedule and individual switch exposes its own `map_id`.
+
+An individual schedule switch is unavailable on another map, during an integration map switch, or when no saved map is reported (ID `0`). This does not turn the stored schedule off. Returning to its map restores the same entity and saved enabled state. Create/edit/toggle/delete actions check map ownership in the coordinator and immediately before MQTT dispatch. Schedule writes share the existing map/start lock. Time conflicts are checked within the selected map.
+
+Every reported map change requests a fresh schedule summary. Observed app queries and integration queries are correlated by message ID and map revision. Replies from a previous selection, before a confirmed schedule edit, after expiry, or older than an applied query are ignored. A combined map/count property report applies its map first. Unsolicited `order_total` messages carry no map ID and use the map reported at receipt; they cannot confirm a checksum. Genuine count/checksum mismatches still require learning the missing or changed schedules in MyDyson.
+
+Existing stored orders are preserved on upgrade. An old global checksum is not assigned to any map; the first fresh map-specific summary establishes its baseline. Per-map baselines and observed pending-baseline changes survive restart. Models without saved-map selection retain the legacy schedule interface.
+
+The Lovelace card filters by persistent map ID, including list rows, enabled badge and countdown, and uses only a matching sensor summary. It closes obsolete editors and never interprets a row disappearing on map change as successful deletion. Confirmed empty maps show an empty-map message instead of an instruction to synchronize schedules.
+
+Automated regressions cover empty B, schedules on both maps with equal counts, independent checksums, genuine missing/changed orders, old storage, restart, delayed/reordered replies, unknown map ID, retained switch identities/states and write interlocks. Live follow-up should switch A/B repeatedly with schedules on both maps, compare the HA sensor/switches and MyDyson, and check genuine edits/missing schedules after reconnect. Actual scheduled execution is not established by these offline tests.
+
 ## Entity retention and remaining validation
 
 Normal switches retain existing room entities and use the existing active-room refresh path. Removed map IDs disappear from the map selector. Removing the old room entities and registry entries of a deleted map is a separate follow-up: existing room entities use names, and shared names/room IDs require verified map ownership before cleanup.

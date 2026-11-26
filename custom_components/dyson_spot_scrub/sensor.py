@@ -274,14 +274,15 @@ class DysonSchedulesSensor(DysonBatterySensor):
 
     @property
     def available(self) -> bool:
-        return getattr(self._coordinator, "schedules", None) is not None
+        book = getattr(self._coordinator, "schedules", None)
+        return book is not None and book.map_id != "0"
 
     @property
     def native_value(self) -> int | None:
         book = getattr(self._coordinator, "schedules", None)
         if book is None:
             return None
-        return book.robot_total if book.robot_total is not None else len(book.orders)
+        return book.robot_total if book.robot_total is not None else len(book.active_orders)
 
     @property
     def extra_state_attributes(self) -> dict:
@@ -292,7 +293,9 @@ class DysonSchedulesSensor(DysonBatterySensor):
         return {
             "schedules": [self._coordinator.describe_schedule(order)
                           for order in book.sorted_orders()],
-            "known": len(book.orders),
+            "map_id": book.map_id,
+            "known": len(book.active_orders),
+            "known_all_maps": len(book.orders),
             "on": book.robot_enabled,
             "in_sync": book.in_sync,
             "unknown": book.unknown_count,

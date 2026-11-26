@@ -47,7 +47,7 @@ class DysonScheduleCalendar(CalendarEntity):
 
     def _events(self, start: datetime, end: datetime) -> list[CalendarEvent]:
         events = []
-        for order in self._coordinator.schedules.orders.values():
+        for order in self._coordinator.schedules.active_orders.values():
             info = self._coordinator.describe_schedule(order)
             rooms = [self._coordinator.room_label(name) for name in info["rooms"]]
             summary = ", ".join(rooms) or str(order["id"])

@@ -171,6 +171,24 @@ class MapSwitchTests(unittest.TestCase):
         self.assertEqual(self.client.maps, [])
         self.assertTrue(self.client.maps_known)
 
+    def test_schedule_writes_recheck_map_and_share_the_map_switch_lock(self):
+        observed = []
+        def write(method, params, timeout):
+            observed.append((method, params))
+            self.assertTrue(self.client._start_lock.locked())
+            self.assertFalse(self.client.select_map("456", timeout=0.001))
+            return 0
+        with patch.object(self.client, "_send_order_command", write):
+            self.assertEqual(self.client.send_order_command("service.add_order", {"map_id": 123}), 0)
+            self.assertIsNone(self.client.send_order_command("service.add_order", {"map_id": 456}))
+            self.assertIsNone(self.client.send_order_command("service.del_order", {"id": 1}, expected_map_id="456"))
+            self.assertEqual(self.client.send_order_command("service.del_order", {"id": 1}, expected_map_id="123"), 0)
+            self.client.state["persistentMapId"] = "0"
+            self.assertIsNone(self.client.send_order_command("service.add_order", {"map_id": 123}))
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(self.sent, [])
+        self.assertFalse(self.client._start_lock.locked())
+
     def test_older_list_reply_cannot_resurrect_deleted_map(self):
         self.client.request_maps()
         old = self.sent[-1][1]
