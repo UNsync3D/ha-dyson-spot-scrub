@@ -39,7 +39,7 @@ Existing stored orders are preserved on upgrade. An old global checksum is not a
 
 The Lovelace card filters by persistent map ID, including list rows, enabled badge and countdown, and uses only a matching sensor summary. It closes obsolete editors and never interprets a row disappearing on map change as successful deletion. Confirmed empty maps show an empty-map message instead of an instruction to synchronize schedules.
 
-Automated regressions cover empty B, schedules on both maps with equal counts, independent checksums, genuine missing/changed orders, old storage, restart, delayed/reordered replies, unknown map ID, retained switch identities/states and write interlocks. Live follow-up should switch A/B repeatedly with schedules on both maps, compare the HA sensor/switches and MyDyson, and check genuine edits/missing schedules after reconnect. Actual scheduled execution is not established by these offline tests.
+Automated regressions cover empty B, schedules on both maps with equal counts, independent checksums, genuine missing/changed orders, old storage, restart, delayed/reordered replies, unknown map ID, retained switch identities/states and write interlocks. On 26 November 2026, the maintainer confirmed successful live acceptance after installing the update: schedules and availability follow map changes cleanly in both the integration and Lovelace card. Further app edits/missing schedules after reconnect and actual scheduled execution remain separate checks.
 
 ## Entity retention and remaining validation
 
