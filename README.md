@@ -463,6 +463,17 @@ New listings can take a few hours to appear. In HACS, select **⋮ → Update in
 - The map needs a saved floor map: let the robot map your home in the MyDyson app first
 - Check the HA logs for `dyson_spot_scrub` errors — the map entity logs rendering failures at `WARNING` level
 
+### Search continues after Pause → Home on a map without a station
+
+On a saved map without a charging station, **cleaning → Pause → Home** can leave the robot repeatedly trying to locate itself or find a station. This is known Dyson behavior also observed in the original MyDyson app.
+
+To end the search:
+
+1. Pause the robot.
+2. Place it manually on the charging station.
+
+The maintainer confirmed that this ends the search. See [stationless-map troubleshooting](docs/MAP_SWITCHING.md#stationless-home-troubleshooting) for the tested sequence.
+
 ### Robot shows as Unavailable
 Either the connection to Dyson's cloud dropped, or Dyson reports the robot itself as offline (for example, it's off Wi-Fi or switched off). The integration recovers from both on its own: it reconnects automatically, and while the robot is offline it asks for its status once a minute. If the robot shows as online in the MyDyson app but stays unavailable here, reload the integration from **Settings → Devices & Services**.
 

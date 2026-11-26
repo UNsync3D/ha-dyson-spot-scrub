@@ -68,6 +68,17 @@ All four use legacy `ABORT` followed by `service.start_recharge`; MyDyson includ
 
 The same export shows `2510` (`USER_CONTINUE`) persisting off-dock while inactive, followed by a successful app start at 05:17:15.898. `2509` appears at 05:19:04.717 while inactive charging. The app meanings supplied by the maintainer are robot lifted / robot not level. Both now have descriptions; idle off-dock placement retries follow the [readiness rule](START_READINESS.md#retained-placement-faults-on-a-stationless-floor), without hiding warnings or permitting competing active jobs. A sanitized fixture retains the four command sequences and selected fault states. All 449 offline integration tests pass; these discovery/readiness corrections still need live acceptance.
 
+## Stationless Home troubleshooting
+
+**Known Dyson operating edge case:** cleaning on a map without a station, followed by **Pause → Home**, can leave the robot repeatedly searching for its location or a charging station. This also occurs in the original MyDyson app. The maintainer asked to document this case as existing Dyson behavior rather than pursue it as an integration/card defect.
+
+To end the continuing search:
+
+1. Pause the robot.
+2. Place it manually on the charging station.
+
+The maintainer confirmed that this ends the search and restores normal operation. Pause/Home/Stop commands remain unchanged.
+
 ## Entity retention and remaining validation
 
 Normal switches retain existing room entities and use the existing active-room refresh path. Removed map IDs disappear from the map selector. Removing the old room entities and registry entries of a deleted map is a separate follow-up: existing room entities use names, and shared names/room IDs require verified map ownership before cleanup.
