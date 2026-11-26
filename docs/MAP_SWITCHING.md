@@ -41,6 +41,14 @@ The Lovelace card filters by persistent map ID, including list rows, enabled bad
 
 Automated regressions cover empty B, schedules on both maps with equal counts, independent checksums, genuine missing/changed orders, old storage, restart, delayed/reordered replies, unknown map ID, retained switch identities/states and write interlocks. On 26 November 2026, the maintainer confirmed successful live acceptance after installing the update: schedules and availability follow map changes cleanly in both the integration and Lovelace card. Further app edits/missing schedules after reconnect and actual scheduled execution remain separate checks.
 
+## Stationless-map camera bounds
+
+On 26 November the maintainer reported a tiny floor in the camera image's bottom-left corner and a zone badge of approximately 112,433 x 112,378 cm, only on B without a station. The renderer previously included any `dockLocation` in the canvas bounds. A synthetic 4 x 3 m room with a dock at (10,000, 10,000) reproduces the same visual failure: a 4096-square canvas with the floor almost invisible. The actual raw dock value on B has not been captured, so a stationless placeholder is a hypothesis rather than a confirmed protocol sentinel.
+
+The renderer now validates dock points using the existing room locator's geometry and dock reach rule. A remote point outside every room is omitted from both bounds and drawing; a dock at zero, within a room or just outside its wall remains valid. Invalid/nonfinite points are skipped, and an invalid live dock can fall back to a valid static dock on that floor. The check is relative to the floor, so large translated map origins remain supported. In the synthetic reproduction, the corrected image is 450 x 370 pixels at 80 pixels/metre.
+
+The full offline suite passes with 440 tests, including six dock/bounds regressions. A live B-camera retest remains required. If B remains oversized, capture its persistent map data to distinguish dock coordinates from a malformed dimensions/room-coordinate field. Navigation and Home commands are unchanged.
+
 ## Entity retention and remaining validation
 
 Normal switches retain existing room entities and use the existing active-room refresh path. Removed map IDs disappear from the map selector. Removing the old room entities and registry entries of a deleted map is a separate follow-up: existing room entities use names, and shared names/room IDs require verified map ownership before cleanup.
