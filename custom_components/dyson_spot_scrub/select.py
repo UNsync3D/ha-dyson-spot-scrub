@@ -35,10 +35,11 @@ from .const import (
     MODE_TO_INT,
 )
 from .coordinator import DysonCoordinator
-from .entity_helpers import device_info, has_mop, is_nurovi_r2, room_slug
+from .entity_helpers import device_info, has_mop, is_nurovi_r2, room_slug, supports_whole_home
+from .maps import map_id
 from .station_entity import StationEntity
 from .station_settings import R2_SELECT_OPTIONS, SELECTS
-from .dyson_mqtt import _room_display_name, is_any_cleaning, room_repetitions
+from .dyson_mqtt import _room_display_name, is_any_cleaning, room_repetitions, start_block_reason
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -125,6 +126,9 @@ async def async_setup_entry(
 
     # Global cleaning-mode select — created immediately, no room data needed
     async_add_entities([DysonCleaningModeSelectEntity(coordinator, entry)])
+    # The map command is confirmed on Spot+Scrub AI / RB05 only.
+    if supports_whole_home(entry):
+        async_add_entities([DysonMapSelectEntity(coordinator, entry)])
 
     @callback
     def _check_for_new_rooms() -> None:
@@ -172,6 +176,63 @@ async def async_setup_entry(
 
 
 # ── Global cleaning-mode select ───────────────────────────────────────────────
+
+class DysonMapSelectEntity(SelectEntity):
+    """Select an existing map, with state confirmed by robot telemetry."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "active_map"
+    _attr_icon = "mdi:map-marker-path"
+    _attr_should_poll = False
+
+    def __init__(self, coordinator: DysonCoordinator, entry: ConfigEntry) -> None:
+        self._coordinator = coordinator
+        self._attr_unique_id = f"{entry.data[CONF_SERIAL]}_active_map"
+        self._attr_device_info = device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        self._coordinator.async_add_listener(self)
+        await self._coordinator.async_setup_maps()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._coordinator.async_remove_listener(self)
+
+    @property
+    def available(self) -> bool:
+        mqtt = self._coordinator.mqtt
+        return bool(mqtt and mqtt.available and getattr(mqtt, "maps_known", False) and self.options)
+
+    @property
+    def options(self) -> list[str]:
+        return [item["option"] for item in getattr(self._coordinator.mqtt, "maps", [])]
+
+    @property
+    def current_option(self) -> str | None:
+        identity = map_id(self._coordinator.state.get("persistentMapId"))
+        return next((item["option"] for item in getattr(self._coordinator.mqtt, "maps", [])
+                     if item["map_id"] == identity), None)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        mqtt = self._coordinator.mqtt
+        switching = bool(getattr(mqtt, "map_switching", False))
+        return {
+            "maps": [dict(item) for item in getattr(mqtt, "maps", [])],
+            "map_id": map_id(self._coordinator.state.get("persistentMapId")),
+            "can_change": bool(self.available and not switching
+                               and not getattr(self._coordinator, "sequence_running", False)
+                               and start_block_reason(self._coordinator.state, True) is None),
+            "switching": switching,
+        }
+
+    async def async_select_option(self, option: str) -> None:
+        if not self.extra_state_attributes["can_change"]:
+            raise HomeAssistantError("Map switching is unavailable in the current robot state")
+        item = next((item for item in self._coordinator.mqtt.maps if item["option"] == option), None)
+        if item is None:
+            raise HomeAssistantError("This saved map is no longer available")
+        await self._coordinator.async_select_map(item["map_id"])
+
 
 class DysonCleaningModeSelectEntity(SelectEntity):
     """Drop-down for selecting the cleaning mode applied when starting all rooms."""

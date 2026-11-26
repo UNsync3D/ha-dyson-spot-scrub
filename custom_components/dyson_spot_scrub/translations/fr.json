@@ -293,6 +293,9 @@
       },
       "roller_drying_duration": {
         "name": "Durée de séchage du rouleau"
+      },
+      "active_map": {
+        "name": "Carte"
       }
     },
     "sensor": {

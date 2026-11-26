@@ -81,6 +81,8 @@ _LOGGER = logging.getLogger(__name__)
 def _require_start_ready(coordinator: DysonCoordinator) -> None:
     """Reject new jobs before changing preferences or scheduling room work."""
     mqtt = coordinator.mqtt
+    if getattr(mqtt, "map_switching", False):
+        raise HomeAssistantError("Cannot start a new clean: map switching")
     reason = start_block_reason(mqtt.state if mqtt else {}, bool(mqtt and mqtt.available))
     if reason:
         raise HomeAssistantError(f"Cannot start a new clean: {reason.replace('_', ' ')}")
@@ -424,7 +426,8 @@ class DysonVacuumEntity(StateVacuumEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Expose room names and fault diagnostics for automations."""
-        reason = start_block_reason(self._mqtt_state, self.available)
+        reason = ("map_switching" if getattr(self._coordinator.mqtt, "map_switching", False)
+                  else start_block_reason(self._mqtt_state, self.available))
         attrs: dict[str, Any] = {
             "ready_to_start": reason is None,
             "map_id": self._mqtt_state.get("persistentMapId"),

@@ -165,6 +165,10 @@ The calendar shows each clean as an hour long, since the robot doesn't say how l
 
 Creating, changing and deleting are captured from the app on the Spot+Scrub AI only. On the R1 and R2 Nurovi, schedules are shown but can't be changed from Home Assistant yet: a debug log of the app saving a schedule would let us add them ([#67](https://github.com/UNsync3D/ha-dyson-spot-scrub/issues/67)).
 
+### Saved-map selection (development branch)
+
+Spot+Scrub AI / RB05 gains a **Map** select for displaying and switching existing saved maps. The list follows changes made in MyDyson and refreshes after reconnect and periodically. Switches wait for robot confirmation; creation, editing and deletion remain in MyDyson. Existing room entities stay in place during normal switches. See [saved-map selection](docs/MAP_SWITCHING.md) for the HA/card interface, commands, tests and remaining live checks. Cleanup of room entities belonging to deleted maps is a separate follow-up.
+
 ### Floor Map
 
 The Floor Map camera entity draws a live PNG in the style of the MyDyson app:

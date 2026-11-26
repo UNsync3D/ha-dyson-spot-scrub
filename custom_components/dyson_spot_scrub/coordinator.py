@@ -52,6 +52,7 @@ _OUTLINE_RETRY_SECONDS = 600.0
 # Schedules (#67): ask for the robot's summary this often, and after a change.
 _SCHEDULE_POLL_SECONDS = 1800.0
 _SCHEDULE_STORAGE_VERSION = 1
+_MAP_POLL_SECONDS = 60.0
 
 
 def _docked(state: dict) -> bool:
@@ -141,6 +142,7 @@ class DysonCoordinator:
         self.schedules = ScheduleBook()
         self._schedule_store = None
         self._schedule_poll_unsub = None
+        self._map_poll_unsub = None
         self._schedule_lock = asyncio.Lock()
         self._dock_room_id: str | None = None
         # Leaving the dock (FutuRazor's idea, #53): until the robot reports a
@@ -200,6 +202,7 @@ class DysonCoordinator:
         new_client.on_prefix_changed = self._on_mqtt_prefix_changed
         new_client.on_map_changed    = self._on_mqtt_map_changed
         new_client.on_schedule_message = self._on_schedule_message
+        new_client.maps_enabled = self._map_poll_unsub is not None
         new_client.register_callback(self._on_state_change)
         # Carry a GONE-AWAY over a reconnect: a new broker connection doesn't
         # mean the robot came back.
@@ -232,6 +235,9 @@ class DysonCoordinator:
 
     async def async_shutdown(self) -> None:
         self._shutting_down = True
+        if self._map_poll_unsub:
+            self._map_poll_unsub()
+            self._map_poll_unsub = None
         if self._schedule_poll_unsub:
             self._schedule_poll_unsub()
             self._schedule_poll_unsub = None
@@ -404,6 +410,40 @@ class DysonCoordinator:
     def _on_mqtt_connected(self) -> None:
         self.hass.loop.call_soon_threadsafe(self._async_update_rooms_and_notify)
         self.hass.loop.call_soon_threadsafe(self._async_request_schedule_summary)
+        self.hass.loop.call_soon_threadsafe(self._async_request_maps)
+
+    async def async_setup_maps(self) -> None:
+        """Keep the saved-map select current even without an open app or camera."""
+        if self._map_poll_unsub is not None:
+            return
+        from datetime import timedelta
+        from homeassistant.helpers.event import async_track_time_interval
+
+        async def poll(_now) -> None:
+            self._async_request_maps()
+
+        self._map_poll_unsub = async_track_time_interval(
+            self.hass, poll, timedelta(seconds=_MAP_POLL_SECONDS))
+        self._async_request_maps()
+
+    @callback
+    def _async_request_maps(self) -> None:
+        if self._shutting_down or self._map_poll_unsub is None or self.mqtt is None:
+            return
+        self.mqtt.maps_enabled = True
+        self.mqtt.request_maps()
+
+    async def async_select_map(self, identity: str) -> None:
+        """Expose only saved-map selection; creation/editing stays in MyDyson."""
+        from homeassistant.exceptions import HomeAssistantError
+
+        mqtt = self.mqtt
+        if self._shutting_down or mqtt is None or self.sequence_running:
+            raise HomeAssistantError("Map switching is unavailable while a cleaning request is active")
+        confirmed = await self.hass.async_add_executor_job(mqtt.select_map, identity)
+        if not confirmed:
+            raise HomeAssistantError(
+                "Map switch was not confirmed. Check the selected map before trying again.")
 
     def _on_mqtt_map_changed(self, map_id: str) -> None:
         """paho thread → refresh the room inventory for the (new) current map."""

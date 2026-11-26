@@ -38,6 +38,7 @@ from .const import (DOCK_BUSY_STATES, FAULT_CODE_INFORMATIONAL, MQTT_PREFIX_PATT
 from .zone_cleaning import (validate_zone_strategy, rectangle_points, validate_map_id,
                             validate_zone_mode, validate_zone_water, validate_zone_passes)
 from .schedules import ADD_ORDER, DEL_ORDER, GET_ORDER, ORDER_METHODS
+from .maps import map_catalogue, map_id as saved_map_id
 from .station_settings import (DND_FIELD, DND_KEYS, JDM_METHODS, STATE_FIELDS, current_setting,
                                setting_payloads, reported_properties)
 
@@ -572,6 +573,14 @@ class DysonMqttClient:
         # Start calls run in HA's executor; MQTT replies arrive on paho's thread.
         self._start_lock = threading.Lock()
         self._preference_lock = threading.RLock()
+        self.maps_enabled = False
+        self.maps_known = False
+        self.maps: list[dict[str, str]] = []
+        self._map_requests: OrderedDict[str, int] = OrderedDict()
+        self._map_request_generation = 0
+        self._map_applied_generation = 0
+        self._map_switch_target: str | None = None
+        self._map_switch_ready = threading.Event()
         # Called (paho thread) when the robot reports a different current map.
         self.on_map_changed: Callable[[str], None] | None = None
         # Schedule traffic (#67): ("command" | "reply" | "total", payload),
@@ -796,7 +805,7 @@ class DysonMqttClient:
         return self._start_cleaning(mode)
 
     def _can_start_new_clean(self) -> bool:
-        reason = start_block_reason(self.state, self.available)
+        reason = "map_switching" if self.map_switching else start_block_reason(self.state, self.available)
         if reason:
             _LOGGER.warning("[%s] New cleaning start blocked: %s", self.serial, reason)
         return reason is None
@@ -1680,6 +1689,8 @@ class DysonMqttClient:
             # get_preference reply belongs to, and schedule changes (#67).
             if data.get("method") in (ADD_ORDER, DEL_ORDER):
                 self._schedule_message("command", data)
+            if data.get("method") == "service.get_map_list":
+                self._track_map_request(data.get("msgId"))
             if data.get("method") == "service.get_preference":
                 params = data.get("params") if isinstance(data.get("params"), dict) else {}
                 self._track_preference_request(data.get("msgId"), params.get("map_id"))
@@ -1692,11 +1703,27 @@ class DysonMqttClient:
 
     def _handle_jdm(self, data: dict) -> None:
         method = data.get("method")
+        if method == "service.get_map_list":
+            with self._preference_lock:
+                generation = self._map_requests.pop(str(data.get("msgId")), None)
+                maps = map_catalogue(data.get("data", {}).get("map_list")) if isinstance(data.get("data"), dict) else None
+                if (type(data.get("code")) is int and data["code"] == 0
+                        and generation is not None and generation > self._map_applied_generation
+                        and maps is not None):
+                    self.maps, self.maps_known = maps, True
+                    self._map_applied_generation = generation
+                    self._notify_state_change()
+        elif (method in {"service.del_map", "service.rename_map", "service.rename_room"}
+              and data.get("code") == 0) or method in {
+                  "event.BuildMapFinish.post", "event.map_change.post"}:
+            self.request_maps()
         if "code" in data:
             with self._reply_lock:
                 waiter = self._reply_waiters.get(str(data.get("msgId")))
             if waiter is not None:
                 waiter["code"] = data.get("code")
+                body = data.get("data")
+                waiter["result"] = body.get("result") if isinstance(body, dict) else None
                 waiter["event"].set()
 
         if method in ORDER_METHODS and "code" in data:
@@ -1780,6 +1807,9 @@ class DysonMqttClient:
                 if mop is not None:
                     self.has_mop = mop
             self.state = {**self.state, **data}
+            if ("persistentMapId" in data and self._map_switch_target is not None
+                    and saved_map_id(data["persistentMapId"]) == self._map_switch_target):
+                self._map_switch_ready.set()
             if "dockState" in data and data["dockState"] != "DRYING_MOP":
                 self._clear_drying_time()
             self._notify_state_change()
@@ -1791,6 +1821,7 @@ class DysonMqttClient:
             if map_id not in (None, "") and str(map_id) != self._prefs_map_id:
                 self._prefs_map_id = str(map_id)
                 self._fetch_room_preferences()
+                self.request_maps()
                 if self.on_map_changed:
                     self.on_map_changed(str(map_id))
 
@@ -1919,6 +1950,76 @@ class DysonMqttClient:
         _LOGGER.debug("[%s] Fetching room preferences for map %s", self.serial, map_id_int)
         # Always ask (unlike the probes): refreshes known rooms after reconnect.
         self._publish_jdm("service.get_preference", {"map_id": map_id_int})
+
+    # ── Saved-map selection (RB05 capture, 25/26 November 2026) ─────────────────
+
+    @property
+    def map_switching(self) -> bool:
+        return self._map_switch_target is not None
+
+    def _track_map_request(self, msg_id) -> None:
+        if msg_id is None:
+            return
+        with self._preference_lock:
+            key = str(msg_id)
+            if key not in self._map_requests:
+                self._map_request_generation += 1
+                self._map_requests[key] = self._map_request_generation
+                while len(self._map_requests) > _MAX_TRACKED_REQUESTS:
+                    self._map_requests.popitem(last=False)
+
+    def request_maps(self) -> bool:
+        """Refresh the full list, including changes made by another app."""
+        if not self.maps_enabled or self._prefix != "RB05" or not self.available:
+            return False
+        msg_id = _rand_msg_id()
+        self._track_map_request(msg_id)
+        return self._publish_raw(self._jdm_command_topic, {
+            "msgId": msg_id, "version": "1.0.1", "method": "service.get_map_list",
+            "params": {}, "time": _now_iso(),
+        })
+
+    def select_map(self, identity, timeout: float = 15.0) -> bool:
+        """Select one known map and wait for both acknowledgement and telemetry.
+
+        Runs in HA's executor. No optimistic state, retries or cleaning commands.
+        The existing start lock prevents a clean from racing the map transition.
+        """
+        identity = saved_map_id(identity)
+        if (identity is None or self._prefix != "RB05" or not self.maps_enabled
+                or not self._start_lock.acquire(blocking=False)):
+            return False
+        try:
+            with self._room_edit_lock:
+                with self._preference_lock:
+                    if (not self.maps_known or not any(item["map_id"] == identity for item in self.maps)
+                            or start_block_reason(self.state, self.available)):
+                        return False
+                    if saved_map_id(self.state.get("persistentMapId")) == identity:
+                        return True
+                    self._map_switch_ready.clear()
+                    self._map_switch_target = identity
+                self._notify_state_change()
+                msg_id = _rand_msg_id()
+                waiter = self._expect_reply(msg_id)
+                if not self._publish_raw(self._jdm_command_topic, {
+                    "msgId": msg_id, "version": "1.0.1", "method": "service.set_cur_map",
+                    "params": {"map_id": int(identity)}, "time": _now_iso(),
+                }):
+                    self._await_reply(msg_id, waiter, 0)
+                    return False
+                code = self._await_reply(msg_id, waiter, timeout)
+                if (type(code) is not int or code != 0
+                        or type(waiter.get("result")) is not int or waiter["result"] != 0):
+                    return False
+                self.request_current_state()
+                confirmed = self._map_switch_ready.wait(timeout)
+                self.request_maps()
+                return confirmed and saved_map_id(self.state.get("persistentMapId")) == identity
+        finally:
+            self._map_switch_target = None
+            self._start_lock.release()
+            self._notify_state_change()
 
     # ── Internal publish ──────────────────────────────────────────────────────
 
